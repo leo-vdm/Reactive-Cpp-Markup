@@ -1,11 +1,14 @@
 #include "compiler.h"
+using namespace Compiler;
+
 #include "file_system.h"
 #include <cstring>
+#include <assert.h>
 
 int push_val_to_combined_arena(Arena* combined_values, char* value, int value_length);
 
 //Note(Leo): file_name MUST be null terminated!!
-void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int file_id)
+void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name, int file_id, int flags)
 {
     #define get_index(arena_ptr, pointer) (uintptr_t)pointer ? (((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer) : 0
 
@@ -18,7 +21,9 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int f
     }
     
     Arena combined_values_arena = CreateArena(10000*sizeof(char), sizeof(char));
- 
+    
+    // Note(Leo): index zero of the combined values should be a zero for any NULL values to point too
+    Alloc(&combined_values_arena, sizeof(char)); 
     
     PageFileHeader header = PageFileHeader();
     memset(&header, 0, sizeof(PageFileHeader));
@@ -26,6 +31,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int f
     fwrite(&header, sizeof(PageFileHeader), 1, out_file);
     current_index += sizeof(PageFileHeader);
     
+    header.flags = flags;
     header.file_id = file_id;
     header.first_tag_index = current_index;
     
@@ -37,6 +43,8 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int f
         added_tag.tag_id = curr_tag->tag_id;
         added_tag.first_attribute_index = get_index(saved_tree->attributes, curr_tag->first_attribute);
         added_tag.num_attributes = curr_tag->num_attributes;
+        
+        added_tag.type = curr_tag->type;
         
         added_tag.parent_index = get_index(saved_tree->tags, curr_tag->parent);
         added_tag.next_sibling_index = get_index(saved_tree->tags, curr_tag->next_sibling);
@@ -56,7 +64,16 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int f
     while(curr_attribute->type != AttributeType::NONE)
     {
         added_attribute.type = curr_attribute->type;
-        added_attribute.attribute_value_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->attribute_value, curr_attribute->value_length);
+        switch(curr_attribute->type)
+        {
+            case(AttributeType::COMP_ID):
+                added_attribute.attribute_value_index = 0;
+                break;
+            default:
+                added_attribute.attribute_value_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->attribute_value, curr_attribute->value_length);
+                break;
+        }
+        
         added_attribute.value_length = curr_attribute->value_length;
         added_attribute.binding_position = curr_attribute->binding_position;
         added_attribute.binding_id = curr_attribute->binding_id;
@@ -125,25 +142,48 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int f
     
 }
 
-#define debug_load 0
-void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_values, char* file_name)
+#define debug_load 1
+LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
-    #define get_pointer(arena_ptr, index, type) (type*)(arena_ptr->mapped_address + sizeof(type)*index)
-    int current_index; // Current index in bytes into the file, PageFileHeader is always at zero
-    FILE* in_file = fopen(file_name, "rb+");
+    #define get_pointer(base_ptr, index, type) (type*)(base_ptr + sizeof(type)*index)
     
-    if(!in_file)
+    LoadedFileHandle handle;
+    
+    assert(file);
+    if(!file)
     {
-        return;
+        handle.file_id = 0;
+        handle.flags = 0;
+        handle.root_tag = NULL;
+    
+        return handle;
     }
+
+    // Push empty structs onto each arena to seperate previously loaded file records
+    Alloc(tags, sizeof(Tag), zero());
+    uintptr_t base_tag = tags->next_address;
+    Alloc(attributes, sizeof(Attribute), zero());
+    uintptr_t base_attribute = attributes->next_address;
+    Alloc(styles, sizeof(Style), zero());
+    uintptr_t base_style = styles->next_address;
+    Alloc(selectors, sizeof(Selector), zero());
+    uintptr_t base_selector = selectors->next_address;
+    Alloc(values, sizeof(char), zero());
+    uintptr_t base_value = values->next_address;
     
     PageFileHeader header = PageFileHeader();
     memset(&header, 0, sizeof(PageFileHeader));
     
-    fread(&header, sizeof(PageFileHeader), 1, in_file);
+    fread(&header, sizeof(PageFileHeader), 1, file);
+    
+    handle.file_id = header.file_id;
+    handle.flags = header.flags;
+    handle.root_tag = (Tag*)tags->next_address;
+    handle.file_info = header;
     
 #if debug_load
     printf("\n --== File Header ==--\n");
+    printf("\t Flags: %d\n", header.flags);
     printf("\t File ID: %d\n", header.file_id);
     printf("\t First Tag: %d, # of Tags: %d\n", header.first_tag_index, header.tag_count);
     printf("\t First Atr: %d, # of Atribs: %d\n", header.first_attribute_index, header.attribute_count);
@@ -159,24 +199,27 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
     
     for(int i = 0; i < header.tag_count; i++)
     {
-        fread(&read_tag, sizeof(SavedTag), 1, in_file);
-        added_tag = (Tag*)Alloc(target_tree->tags, sizeof(Tag));
+        fread(&read_tag, sizeof(SavedTag), 1, file);
+        added_tag = (Tag*)Alloc(tags, sizeof(Tag));
         
         added_tag->type = read_tag.type;
         added_tag->tag_id = read_tag.tag_id;
-        added_tag->first_attribute = get_pointer(target_tree->attributes, read_tag.first_attribute_index, Attribute);
+        added_tag->first_attribute = get_pointer(base_attribute, read_tag.first_attribute_index, Attribute);
         added_tag->num_attributes = read_tag.num_attributes;
         
-        added_tag->parent = get_pointer(target_tree->tags, read_tag.parent_index, Tag);
-        added_tag->next_sibling = get_pointer(target_tree->tags, read_tag.next_sibling_index, Tag);
-        added_tag->first_child = get_pointer(target_tree->tags, read_tag.first_child_index, Tag);
+        added_tag->parent = get_pointer(base_tag, read_tag.parent_index, Tag);
+        added_tag->next_sibling = get_pointer(base_tag, read_tag.next_sibling_index, Tag);
+        added_tag->first_child = get_pointer(base_tag, read_tag.first_child_index, Tag);
 #if debug_load
         printf(" --Tag--\n");
-        printf("\tTag Id: %d\n", added_tag->tag_id);
+        printf("\tTag Id: %d Tag type: %d\n", added_tag->tag_id, (int)added_tag->type);
         printf("\tParent: %d, Sibling: %d, Child: %d\n", read_tag.parent_index + 1, read_tag.next_sibling_index + 1, read_tag.first_child_index + 1);
         printf("\t# of Attributes: %d\n", added_tag->num_attributes);
 #endif
     }
+    // Push empty divider tag to mark end of file
+    (Tag*)Alloc(tags, sizeof(Tag), zero());
+    
     
     SavedAttribute read_attribute;
     Attribute* added_attribute;
@@ -187,11 +230,19 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
     
     for(int i = 0; i < header.attribute_count; i++)
     {
-        fread(&read_attribute, sizeof(SavedAttribute), 1, in_file);
-        added_attribute = (Attribute*)Alloc(target_tree->attributes, sizeof(Attribute));
+        fread(&read_attribute, sizeof(SavedAttribute), 1, file);
+        added_attribute = (Attribute*)Alloc(attributes, sizeof(Attribute));
         
         added_attribute->type = read_attribute.type;
-        added_attribute->attribute_value = get_pointer(combined_values, read_attribute.attribute_value_index, char);
+        switch(read_attribute.type)
+        {
+            case(AttributeType::COMP_ID):
+                added_attribute->attribute_value = NULL;                
+                break;
+            default:
+                added_attribute->attribute_value = get_pointer(base_value, read_attribute.attribute_value_index, char);
+                break;
+        }
         added_attribute->value_length = read_attribute.value_length;
         added_attribute->binding_position = read_attribute.binding_position;
         added_attribute->binding_id = read_attribute.binding_id;
@@ -211,8 +262,8 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
     
     for(int i = 0; i < header.style_count; i++)
     {
-        fread(&read_style, sizeof(SavedStyle), 1, in_file);
-        added_style = (Style*)Alloc(target_styles->styles, sizeof(Style));
+        fread(&read_style, sizeof(SavedStyle), 1, file);
+        added_style = (Style*)Alloc(styles, sizeof(Style));
         
         added_style->global_id = read_style.global_id;
         added_style->width = read_style.width;
@@ -234,11 +285,11 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
 
     for(int i = 0; i < header.selector_count; i++)
     {
-        fread(&read_selector, sizeof(SavedSelector), 1, in_file);
-        added_selector = (Selector*)Alloc(target_styles->selectors, sizeof(Selector));
+        fread(&read_selector, sizeof(SavedSelector), 1, file);
+        added_selector = (Selector*)Alloc(selectors, sizeof(Selector));
         
         added_selector->global_id = read_selector.global_id;
-        added_selector->name = get_pointer(combined_values, read_selector.name_index, char);
+        added_selector->name = get_pointer(base_value, read_selector.name_index, char);
         added_selector->name_length = read_selector.name_length;
         
         for(int j = 0; j < read_selector.num_styles; j++)
@@ -254,8 +305,8 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
 #endif
     }
     
-    char* values_blob = (char*)Alloc(combined_values, header.values_length*sizeof(char));
-    fread(values_blob, sizeof(char), header.values_length, in_file);
+    char* values_blob = (char*)Alloc(values, header.values_length*sizeof(char));
+    fread(values_blob, sizeof(char), header.values_length, file);
 
 // unrealiable due to null terminators being mixed into selector names
 //#if debug_load
@@ -265,7 +316,7 @@ void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_valu
 //    *end_of_blob = '\0';
 //    printf("%s", (char*)combined_values->mapped_address);
 //#endif
-    
+    return handle;
 }
 
 // Returns the index of the value start
@@ -280,7 +331,7 @@ int push_val_to_combined_arena(Arena* combined_values, char* value, int value_le
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 // Windows definitions for memory management
 #include <windows.h>
-void search_dir_r(Arena* results, Arena* result_values, char* dir_ref, char* file_extension)
+void search_dir_r(Arena* results, Arena* result_values, const dir_ref, const char* file_extension)
 {
     int parent_len = strlen(dir_ref);
     WIN32_FIND_DATAA item;
@@ -342,14 +393,18 @@ void search_dir_r(Arena* results, Arena* result_values, char* dir_ref, char* fil
     }
 }
 
-void SearchDir(Arena* results, Arena* result_values, char* dir_name, char* file_extension)
+void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension)
 {
     search_dir_r(results, result_values, dir_name, file_extension);
+    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult));
+    
+    // Note(Leo): this step only needs to happen because arenas dont clear allocated memory, otherwise this could be removed
+    memset(end, 0, sizeof(FileSearchResult));
 }
 
 #elif defined(__linux__) && !defined(_WIN32)
 #include <dirent.h>
-void search_dir_r(Arena* results, Arena* result_values, char* dir_ref, char* file_extension)
+void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, const char* file_extension)
 {
     DIR* start = opendir(dir_ref);
     dirent* item = readdir(start);
@@ -403,9 +458,13 @@ void search_dir_r(Arena* results, Arena* result_values, char* dir_ref, char* fil
     }
 }
 
-void SearchDir(Arena* results, Arena* result_values, char* dir_name, char* file_extension)
+void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension)
 {
     search_dir_r(results, result_values, dir_name, file_extension);
+    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult));
+    
+    // Note(Leo): this step only needs to happen because arenas dont clear allocated memory, otherwise this could be removed
+    memset(end, 0, sizeof(FileSearchResult));
 }
 
 

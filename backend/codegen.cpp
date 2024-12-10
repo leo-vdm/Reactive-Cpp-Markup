@@ -1,50 +1,91 @@
 #include "compiler.h"
+using namespace Compiler;
 #include <map>
 #include <cstring>
 
 DirectiveType get_directive_from_name(char* name);
 DirectiveType get_directive_from_name(char* name, int name_length);
-int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name, int name_length);
+int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name, int name_length, CompilerState* state);
 void write_token_value(FILE* target, Token* source);
 int get_bound_var_id(Arena* bound_vars, char* name, int name_length);
 bool should_add_notify(BindingExpression* context, int depth_context, int bound_var_id, int flags = 0);
 char* get_component_name(char* component_file_name, int name_length);
-BindingExpression* register_subto_binding(Arena* bound_expressions, Arena* bound_vars, Arena*Bound_var_names, Token* first_variable);
+BindingExpression* register_subto_binding(Arena* bound_expressions, Arena* bound_vars, Arena* bound_var_names, Token* first_variable, CompilerState* state);
 static bool expect_eat(TokenType expected_type);
-
-int next_bound_var_id;
+void reset_bound_vars();
 
 #define eat() curr_token++
 
-#define STATIC_INCLUDES "#include \"overloads.cpp\"\n"
+////////////////////////////
+//// Shared Definitions ////
+////////////////////////////
+#define BINDING_STUB_FN_NAME_TEMPLATE "stub_%d_%d"
 
-#define COMP_INCLUDE_TEMPLATE "#include \"%s.cpp\"\n"
+#define STATIC_INCLUDES "#include \"overloads.cpp\"\n#include \"DOM.h\"\n"
 
-#define VAR_UPDATED_FN_TEMPLATE "bound_var_changed(%d);\n"
+#define HEADER_INCLUDE_TEMPLATE "#include \"%s.h\"\n"
+#define HEADER_STATIC_INCLUDES "#pragma once\n#include \"DOM.h\"\n"
 
-#define REGISTER_SUBSCRIBER_FN_TEMPLATE "\nvoid register_subscriber_functions() {\n"
+// Takes an arg that is the current file id
+#define REGISTER_SUBSCRIBER_FN_TEMPLATE "\nvoid register_subscriber_functions_%d(DOM* dom) {\n"
+#define REGISTER_SUBSCRIBER_FN_HEADER_TEMPLATE "\nvoid register_subscriber_functions_%d(DOM* dom);\n"
 
 // Function the dom calls to register all the individual markup binding stub functions to variables
-#define REGISTER_BINDINGS_SUBSCRIBER_FN_TEMPLATE "\nvoid register_binding_subscriptions() {\n"
-
-// Stub to contain markup binding expr. First arg is the stub fn name and the second arg is the user expression
-// which gets contained by make_string so we get a string back.
-#define BINDING_STUB_TEMPLATE_FN "\nstd::string %s()\n{\nreturn make_string(%s);\n}\n"
-
-// Asks the dom to add a new binding expression object to its arena and returns a pointer to it
-// Takes the name of the variable to put the pointer in and the name of the fn to register 
-//and the id of the markup binding that it belongs to, zero for non-bindings
-#define ADD_BINDING_EXPRESSION_TEMPLATE "%s = register_new_func_expr(&%s, %d);\n"
-
+#define REGISTER_BINDINGS_SUBSCRIBER_FN_TEMPLATE "\nvoid register_binding_subscriptions_%d(DOM* dom) {\n"
+#define REGISTER_BINDINGS_SUBSCRIBER_FN_HEADER_TEMPLATE "\nvoid register_binding_subscriptions_%d(DOM* dom);\n"
 
 // Takes the name of a binding expression variable and the id of the variable to register to 
 #define REGISTER_SUBTO_TEMPLATE "subscribe_to(%s, %d);\n"
 
+// Asks the dom to add a new binding expression object to its arena and returns a pointer to it
+// Takes the name of the variable to put the pointer in and the name of the fn to register 
+// and the id of the markup binding that it belongs to, zero for non-bindings
+#define ADD_BINDING_EXPRESSION_TEMPLATE "%s = register_bound_expr(&%s, %d);\n"
+
+//////////////////////////
+//// Page Definitions ////
+//////////////////////////
+#define VAR_UPDATED_FN_TEMPLATE "bound_var_changed(%d);\n"
+ 
+#define PAGE_MAIN_STUB_FN_TEMPLATE "void page_main_%d(DOM* dom, int file_id){\nPageMain(dom);\n}\n"
+#define PAGE_MAIN_STUB_FN_HEADER_TEMPLATE "void page_main_%d(DOM* dom, int file_id);\n"
+
+// Stub to contain markup binding expr. First arg is the stub fn name and the second arg is the user expression
+// which gets contained by make_string so we get a string back.
+#define BINDING_TEXT_STUB_TEMPLATE "\nArenaString*%s()\n{\nreturn make_string(%s);\n}\n"
+#define BINDING_VOID_STUB_TEMPLATE "\nvoid %s()\n{\%s;\n}\n"
+
+///////////////////////////////
+//// Component Definitions ////
+///////////////////////////////
+#define COMP_VAR_UPDATED_FN_TEMPLATE "bound_var_changed(%d, (void*)this);\n"
+
+// Args: File id, component name x 2
+#define COMP_MAIN_STUB_FN_TEMPLATE "void comp_main_%d(DOM* dom, int file_id, void** d_void_target){\nvoid* allocated = AllocComponent(dom, sizeof(%s), file_id);\n((%s*)allocated)->CompMain(dom);\n*(d_void_target) = allocated;\n}\n"
+#define COMP_MAIN_STUB_FN_HEADER_TEMPLATE "void comp_main_%d(DOM* dom, int file_id, void** d_void_target);\n"
+
+
+// First arg is stub fn name, second arg is local class name, third arg is var name
+#define COMP_BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void)\n{\nreturn make_string(((%s*)d_void)->%s);\n}\n"
+#define COMP_BINDING_VOID_STUB_TEMPLATE "\nvoid %s(void* d_void)\n{\n((%s*)d_void)->%s;\n}\n"
+
+/////////////////////////////////////
+//// DOM Attatchment Definitions ////
+/////////////////////////////////////
+#define REGISTER_SUBSCRIBER_DOM_TEMPLATE "\nvoid register_subscriber_functions(DOM* dom) {\n"
+#define REGISTER_BINDINGS_SUBSCRIBER_DOM_TEMPLATE "\nvoid register_binding_subscriptions(DOM* dom) {\n"
+
+#define DOM_ATTATCHMENT_INCLUDES "#include \"dom_attatchment.h\"\n"
+
+#define CALL_SUBSCRIBER_FN_TEMPLATE "register_subscriber_functions_%d(dom);\n"
+
+#define CALL_BINDINGS_SUBSCRIBER_FN_TEMPLATE "register_binding_subscriptions_%d(dom);\n"
+
+
 static Token* curr_token;
 
-void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_values, int flags)
+void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_values, CompilerState* state, int flags)
 {
-    next_bound_var_id = 1; // ZII
     curr_token = (Token*)tokens->mapped_address;
     
     Token* insert_after_newline = NULL;
@@ -52,9 +93,13 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
     BindingExpression* bound_context = NULL; // The bound fn, if any, that we are inside of
     
     int depth_context = 0; // The amount of brackets we are inside of
-    
+        
     // Write all statically included files
     fprintf(target->code, STATIC_INCLUDES);
+    // Include the component's header file
+    fprintf(target->code, HEADER_INCLUDE_TEMPLATE, target->file_name);
+    
+    fprintf(target->header, HEADER_STATIC_INCLUDES);
     
     while(curr_token->type != TokenType::END)
     {
@@ -68,11 +113,26 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                 if(result != 0 && should_add_notify(bound_context, depth_context, result, flags)) // This is a declared bound variable, add in a update callback for it
                 {
                     insert_after_newline = (Token*)Alloc(tokens, sizeof(Token));
-                    int desired_size = snprintf(NULL, 0, VAR_UPDATED_FN_TEMPLATE, result);
-                    desired_size++; // Need to account for the NULL terminator
-                    char* bound_updated_fn = (char*)Alloc(token_values, desired_size*sizeof(char));
+                    int desired_size = 0; 
+                     
+                    char* bound_updated_fn;
                     
-                    sprintf(bound_updated_fn, VAR_UPDATED_FN_TEMPLATE, result);
+                    if(flags & is_component())
+                    {
+                        desired_size = snprintf(NULL, 0, COMP_VAR_UPDATED_FN_TEMPLATE, result);
+                        desired_size++;// Need to account for the NULL terminator
+                        
+                        bound_updated_fn = (char*)Alloc(token_values, desired_size*sizeof(char));
+                        sprintf(bound_updated_fn, COMP_VAR_UPDATED_FN_TEMPLATE, result);
+                    }
+                    else
+                    {
+                        desired_size = snprintf(NULL, 0, VAR_UPDATED_FN_TEMPLATE, result);
+                        desired_size++;// Need to account for the NULL terminator
+                        
+                        bound_updated_fn = (char*)Alloc(token_values, desired_size*sizeof(char));
+                        sprintf(bound_updated_fn, VAR_UPDATED_FN_TEMPLATE, result);
+                    }
                                             
                     insert_after_newline->type = TokenType::TEXT;
                     insert_after_newline->token_value = (void*)bound_updated_fn;
@@ -174,7 +234,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                         }
                         write_token_value(target->code, curr_token);
                         
-                        int added_id = bind_variable_by_name(target->bound_vars, target->bound_var_names, (char*)curr_token->token_value, curr_token->value_length);
+                        int added_id = bind_variable_by_name(target->bound_vars, target->bound_var_names, (char*)curr_token->token_value, curr_token->value_length, state);
                         
                         //insert_after_newline = (Token*)Alloc(tokens, sizeof(Token));
                         //int desired_size = snprintf(NULL, 0, VAR_UPDATED_FN_TEMPLATE, added_id);
@@ -192,7 +252,9 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                     case(DirectiveType::SUBTO):
                     {
                         
-                        BindingExpression* added = register_subto_binding(target->bound_expressions, target->bound_vars, target->bound_var_names, curr_token);
+                        BindingExpression* added = register_subto_binding(target->bound_expressions, target->bound_vars, target->bound_var_names, curr_token, state);
+                        added->id = state->next_bound_expr_id;
+                        state->next_bound_expr_id++;
                         
                         bound_context = added;
                         
@@ -234,7 +296,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                         }
                         
                         char* component_name = get_component_name((char*)curr_token->token_value, curr_token->value_length);
-                        fprintf(target->code, COMP_INCLUDE_TEMPLATE, component_name);
+                        fprintf(target->code, HEADER_INCLUDE_TEMPLATE, component_name);
                         DeAllocScratch(component_name);
                         
                         curr_token = directive_token;
@@ -252,16 +314,63 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
         }
         eat();
     }
+    // Add zerod expr as stopping point
+    Alloc(target->bound_expressions, sizeof(BindingExpression), zero());
+    
+    BindingExpression* curr_expr = (BindingExpression*)(target->bound_expressions->mapped_address);
+    
+    // Add stubs for all bindings
+    if(flags & is_component())
+    {
+        while(curr_expr->id != 0)
+        {
+            char* terminated_fn_name = (char*)AllocScratch((curr_expr->name_length + 3)*sizeof(char)); //+ 2 to fit () + 1 to fit \0
+            memcpy(terminated_fn_name, curr_expr->eval_fn_name, curr_expr->name_length*sizeof(char));
+            // Add back the fn parenthesis as they are cutt off during parsing
+            terminated_fn_name[curr_expr->name_length] = '(';
+            terminated_fn_name[curr_expr->name_length + 1] = ')';
+            terminated_fn_name[curr_expr->name_length + 2] = '\0';
+            
+            int desired_size = snprintf(NULL, 0, BINDING_STUB_FN_NAME_TEMPLATE, target->file_id, curr_expr->id);
+            desired_size++; // +1 to fit \0
+            char* fn_stub_name = (char*)Alloc(token_values, desired_size*sizeof(char));
+            sprintf(fn_stub_name, BINDING_STUB_FN_NAME_TEMPLATE, target->file_id, curr_expr->id);
+            
+            // Note(Leo): Bound FN's are always void type.
+            fprintf(target->code, COMP_BINDING_VOID_STUB_TEMPLATE, fn_stub_name, target->file_name, terminated_fn_name);
+            
+            // Now FN will use the stub name to get called
+            curr_expr->eval_fn_name = fn_stub_name;
+            curr_expr->name_length = desired_size - 1; // Exlude \0
+            curr_expr++;
+
+        }
+    }
+    // Add the method the dom calls when instancing this component/page
+    if(flags & is_component())
+    {
+        fprintf(target->code, COMP_MAIN_STUB_FN_TEMPLATE, target->file_id, target->file_name, target->file_name);
+        // Define the method in the component's header.
+        fprintf(target->header, COMP_MAIN_STUB_FN_HEADER_TEMPLATE, target->file_id);
+    }
+    else
+    {
+        fprintf(target->code, PAGE_MAIN_STUB_FN_TEMPLATE, target->file_id);
+        // Define the method in the page's header.
+        fprintf(target->header, PAGE_MAIN_STUB_FN_HEADER_TEMPLATE, target->file_id);
+    }
     
     
     // Add the subscribtion method that the dom calls for registering functions to bound vars
-    BindingExpression* curr_expr = (BindingExpression*)(target->bound_expressions->mapped_address);
-    fprintf(target->code, REGISTER_SUBSCRIBER_FN_TEMPLATE);
+    fprintf(target->code, REGISTER_SUBSCRIBER_FN_TEMPLATE, target->file_id);
+    // Define the method in the component/page's header file
+    fprintf(target->header, REGISTER_SUBSCRIBER_FN_HEADER_TEMPLATE, target->file_id);
+    
     
     char* EXPR_VAR_NAME = "added_expression";
-    fprintf(target->code, "BindingExpression* %s;\n", EXPR_VAR_NAME);
+    fprintf(target->code, "BoundExpression* %s;\n", EXPR_VAR_NAME);
+    curr_expr = (BindingExpression*)(target->bound_expressions->mapped_address);
     
-        
     while(curr_expr->name_length != 0)
     {
         // Tell the dom to add a new expression and give us the pointer and give it the name of the user function to register to
@@ -270,7 +379,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
         memcpy(terminated_fn_name, curr_expr->eval_fn_name, curr_expr->name_length*sizeof(char));
         terminated_fn_name[curr_expr->name_length] = '\0';
         
-        fprintf(target->code, ADD_BINDING_EXPRESSION_TEMPLATE, EXPR_VAR_NAME, terminated_fn_name, 0);
+        fprintf(target->code, ADD_BINDING_EXPRESSION_TEMPLATE, EXPR_VAR_NAME, terminated_fn_name, curr_expr->id);
         for(int i = 0; i < curr_expr->subscribed_var_count; i++)
         {   
             // Use the pointer to ask the dom to subscribe our expression to all the variables by id
@@ -285,9 +394,8 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
     
 }
 
-void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena* tokens, Arena* token_values)
+void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena* tokens, Arena* token_values, int flags)
 {
-    #define BINDING_STUB_FN_NAME_TEMPLATE "stub_%d_%d"
     // TODO(Leo): Continue here
     RegisteredBinding* curr_binding = (RegisteredBinding*)markup_bindings->mapped_address;
     BindingExpression* first_expr = (BindingExpression*)target->bound_expressions->next_address;
@@ -322,11 +430,15 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
                 }                    
             }
             
-            
             curr_token++;
         }
         curr_binding++;    
     }   
+    
+    // Add zerod binding as stopping point
+    Alloc(markup_bindings, sizeof(RegisteredBinding), zero());
+    // Add zeroed expression as stopping point.
+    Alloc(target->bound_expressions, sizeof(BindingExpression), zero());
     
     // Reloop and add all the bindings to the file
     curr_binding = (RegisteredBinding*)markup_bindings->mapped_address;
@@ -340,7 +452,32 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
         memcpy(terminated_binding_name, curr_binding->binding_name, curr_binding->name_length);
         terminated_binding_name[curr_binding->name_length] = '\0';
         
-        fprintf(target->code, BINDING_STUB_TEMPLATE_FN, curr_expr->eval_fn_name, terminated_binding_name);
+        if(flags & is_component())
+        {
+            switch(curr_binding->type)
+            {
+            case(RegisteredBindingType::TEXT_RET):
+                fprintf(target->code, COMP_BINDING_TEXT_STUB_TEMPLATE, curr_expr->eval_fn_name, target->file_name, terminated_binding_name);
+                break;
+            case(RegisteredBindingType::VOID_RET):
+                fprintf(target->code, COMP_BINDING_VOID_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name);
+                break;
+            }
+        }
+        else
+        {
+            switch(curr_binding->type)
+            {   
+            case(RegisteredBindingType::TEXT_RET):
+                fprintf(target->code, BINDING_TEXT_STUB_TEMPLATE, curr_expr->eval_fn_name, terminated_binding_name);
+                break;
+            case(RegisteredBindingType::VOID_RET):
+                fprintf(target->code, BINDING_VOID_STUB_TEMPLATE, curr_expr->eval_fn_name, terminated_binding_name);
+                break;
+            default:
+                break;
+            }
+        }
         
         curr_binding++;
         curr_expr++;
@@ -348,10 +485,12 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
     }
     
     // Add the fn called by the dom to register all the binding stubs
-    fprintf(target->code, REGISTER_BINDINGS_SUBSCRIBER_FN_TEMPLATE);
+    fprintf(target->code, REGISTER_BINDINGS_SUBSCRIBER_FN_TEMPLATE, target->file_id);
+    // Define the fn in the component/page's header
+    fprintf(target->header, REGISTER_BINDINGS_SUBSCRIBER_FN_HEADER_TEMPLATE, target->file_id);
     
     char* EXPR_VAR_NAME = "added_expression";
-    fprintf(target->code, "BindingExpression* %s;\n", EXPR_VAR_NAME);
+    fprintf(target->code, "BoundExpression* %s;\n", EXPR_VAR_NAME);
     
     curr_expr = first_expr;
     while(curr_expr->id != 0)
@@ -366,6 +505,30 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
     }
     
     fprintf(target->code, "}\n");
+    
+    // Note(Leo): Clear bound variables after we are done with this file so that other files dont end up using the ids from this one
+    reset_bound_vars();
+}
+
+void GenerateDOMAttatchment(FILE* dom_attatchment, CompilerState* state, int flags)
+{
+    fprintf(dom_attatchment, DOM_ATTATCHMENT_INCLUDES);
+    
+    fprintf(dom_attatchment, REGISTER_SUBSCRIBER_DOM_TEMPLATE);
+    for(int i = 1; i < state->next_file_id; i++)
+    {
+        fprintf(dom_attatchment, CALL_SUBSCRIBER_FN_TEMPLATE, i);
+    }
+    
+    fprintf(dom_attatchment,"}\n");
+    
+    fprintf(dom_attatchment, REGISTER_BINDINGS_SUBSCRIBER_DOM_TEMPLATE);
+    for(int i = 1; i < state->next_file_id; i++)
+    {
+        fprintf(dom_attatchment, CALL_BINDINGS_SUBSCRIBER_FN_TEMPLATE, i);
+    }
+    
+    fprintf(dom_attatchment,"}\n");
 }
 
 std::map<std::string, DirectiveType> directive_map = 
@@ -426,7 +589,7 @@ bool expect_eat(TokenType expected_type)
 std::map<std::string, int> bound_variables = {};
 
 // Registers a bound variable if it doesnt exist already and returns the ID
-int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name, int name_length)
+int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name, int name_length, CompilerState* state)
 {
     char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // + 1 to fit null terminator
     memcpy(terminated_name, name, name_length*sizeof(char));
@@ -447,7 +610,8 @@ int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name,
     char* saved_name = (char*)Alloc(bound_var_names, name_length*sizeof(char));
     memcpy(saved_name, name, name_length);
     
-    new_bound->id = next_bound_var_id++;
+    new_bound->id = state->next_bound_var_id;
+    state->next_bound_var_id++;
     new_bound->var_name = saved_name;
     new_bound->name_length = name_length;
     
@@ -486,8 +650,13 @@ int get_bound_var_id(Arena* bound_vars, char* name, int name_length)
     return 0;
 }
 
+void reset_bound_vars()
+{
+    bound_variables.clear();
+}
+
 // Binds a fn to a bound variable
-BindingExpression* register_subto_binding(Arena* bound_expressions, Arena* bound_vars, Arena* bound_var_names, Token* first_variable)
+BindingExpression* register_subto_binding(Arena* bound_expressions, Arena* bound_vars, Arena* bound_var_names, Token* first_variable, CompilerState* state)
 {
     BindingExpression* added_fn = (BindingExpression*)Alloc(bound_expressions, sizeof(BindingExpression));
     
@@ -501,7 +670,7 @@ BindingExpression* register_subto_binding(Arena* bound_expressions, Arena* bound
         // Indicates a variable identifier
         if(curr_token->type == TokenType::TEXT)
         {
-            int bound_id = bind_variable_by_name(bound_vars, bound_var_names, (char*)curr_token->token_value, curr_token->value_length);
+            int bound_id = bind_variable_by_name(bound_vars, bound_var_names, (char*)curr_token->token_value, curr_token->value_length, state);
             added_fn->subscribed_variable_ids[added_fn->subscribed_var_count] = bound_id;
             
             // Limit the subscribers from overflowing
@@ -528,9 +697,7 @@ bool should_add_notify(BindingExpression* context, int depth_context, int bound_
     {
         used_depth--; // Components are object declerations so they have a depth of 1 built in
     }
-    
-    printf("Le depth: %d\n", used_depth);
-     
+         
     // We are outside any function so we should not insert calls to update!
     if(used_depth < 1)
     {

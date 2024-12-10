@@ -39,9 +39,9 @@ void Flatten(ArenaString* string, char* target_buffer);
 // Same as flatten but puts n bytes of the string into the given buffer
 void Flatten(ArenaString* string, char* target_buffer, int length);
 
-void Append(ArenaString* target, char* c_string);
+void Append(ArenaString* target, const char* c_string);
 
-void Append(ArenaString* target, char* source_buffer, int length);
+void Append(ArenaString* target, const char* source_buffer, int length);
 
 
 // The no_copy() flag causes the target to simply point to the first value in source as a continuation after its last value so that both strings are sharing the values.

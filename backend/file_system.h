@@ -1,9 +1,11 @@
-#include "compiler.h"
 
 #pragma once
 // Filsystem types
+#include "compiler.h"
+
 struct PageFileHeader
 {
+    int flags;
     int file_id;
     int first_tag_index;
     int tag_count;
@@ -31,14 +33,14 @@ struct SavedStyle
 {
     int global_id;
     
-    Measurement width, height;
-    Measurement max_width, max_height;
+    Compiler::Measurement width, height;
+    Compiler::Measurement max_width, max_height;
 };
 
 
 struct SavedTag
 {
-    TagType type;
+    Compiler::TagType type;
     int tag_id; // Given by parser
     
     int first_attribute_index;
@@ -52,7 +54,7 @@ struct SavedTag
 
 struct SavedAttribute 
 {
-    AttributeType type;
+    Compiler::AttributeType type;
     int attribute_value_index;
     int value_length;
     int binding_position; // Position where the binding gets inserted into the value (for attributes like text)
@@ -66,10 +68,20 @@ struct FileSearchResult
     char* file_name; // Substring of the full path containing only the file name
 };
 
+struct LoadedFileHandle
+{
+    int file_id;
+    int flags;
+    PageFileHeader file_info;
+    Compiler::Tag* root_tag;
+};
+
 // Filesystem Functions
 
-void SavePage(AST* saved_tree, LocalStyles* saved_styles, char* file_name, int file_id);
+void SavePage(Compiler::AST* saved_tree, Compiler::LocalStyles* saved_styles, const char* file_name, int file_id, int flags = 0);
 
-void LoadPage(AST* target_tree, LocalStyles* target_styles, Arena* combined_values, char* file_name);
+LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values);
 
-void SearchDir(Arena* results, Arena* result_values, char* dir_name, char* file_extension);
+// Searches a directory recursively for files ending in a specified extension. Appends a zeroed FileSearchResult after the last entry to indicate the end
+void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension);
+

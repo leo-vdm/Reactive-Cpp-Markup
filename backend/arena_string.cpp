@@ -50,9 +50,9 @@ void FreeString(ArenaString* freed_string)
 #define is_full(StringBlock_ptr) StringBlock_ptr->fill_level >= STRING_BLOCK_BODY_SIZE
 #define block_size(StrinBlock_ptr) STRING_BLOCK_BODY_SIZE
 
-void Append(ArenaString* target, char* c_string)
+void Append(ArenaString* target, const char* c_string)
 {
-    char* curr_char = c_string;
+    char* curr_char = (char*)c_string;
     
     StringBlock* working_block = target->tail;
     
@@ -75,7 +75,7 @@ void Append(ArenaString* target, char* c_string)
     }
 }
 
-void Append(ArenaString* target, char* source_buffer, int length)
+void Append(ArenaString* target, const char* source_buffer, int length)
 {
     StringBlock* working_block = target->tail;
     for(int i = 0; i < length; i++)

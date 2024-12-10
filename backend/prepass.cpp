@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "compiler.h"
+using namespace Compiler;
 
 // Expect that source_file_name is null terminated
 void copy_between_tag_hit(FILE* destination, FILE* source, char* open_tag, char* close_tag);
@@ -45,8 +46,8 @@ SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* s
 
     result.style_file_name = (char*)Alloc(file_name_arena, final_length*sizeof(char));
     memcpy(result.style_file_name, output_name_buffer, final_length);
+    printf("Removing: %s\n", output_name_buffer);
     
-    printf("Removing file: %s\n", output_name_buffer);
     remove(output_name_buffer); // Remove old file
     
     FILE* style_file = fopen(output_name_buffer, "w"); // Recreate file
@@ -55,7 +56,8 @@ SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* s
     final_length = sprintf(output_name_buffer, "%s/%s.markup", output_dir, real_name) + 1;
     result.markup_file_name = (char*)Alloc(file_name_arena, final_length*sizeof(char));
     memcpy(result.markup_file_name, output_name_buffer, final_length);
-    printf("Removing file: %s\n", output_name_buffer);
+    printf("Removing: %s\n", output_name_buffer);
+    
     remove(output_name_buffer);
     
     FILE* markup_file = fopen(output_name_buffer, "w");
@@ -64,10 +66,20 @@ SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* s
     final_length = sprintf(output_name_buffer, "%s/%s.cpp", output_dir, real_name) + 1;
     result.code_file_name = (char*)Alloc(file_name_arena, final_length*sizeof(char));
     memcpy(result.code_file_name, output_name_buffer, final_length);
-    printf("Removing file: %s\n", output_name_buffer);
+    printf("Removing: %s\n", output_name_buffer);
+    
     remove(output_name_buffer);
     
     FILE* code_file = fopen(output_name_buffer, "w");
+    
+    // Header file name
+    final_length = sprintf(output_name_buffer, "%s/%s.h", output_dir, real_name) + 1;
+    result.header_file_name = (char*)Alloc(file_name_arena, final_length*sizeof(char));
+    memcpy(result.header_file_name, output_name_buffer, final_length);
+    printf("Removing: %s\n", output_name_buffer);
+    
+    remove(output_name_buffer);
+    
     // Break out cpp code
     copy_between_tag_hit(code_file, source_file, "<code>", "</code>");
     

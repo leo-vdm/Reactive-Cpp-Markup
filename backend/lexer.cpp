@@ -1,4 +1,6 @@
 #include "compiler.h"
+using namespace Compiler;
+
 #include "arena.h"
 
 #include <iostream>
@@ -147,6 +149,48 @@ Token* TokenizeAttribute(Arena* tokens_arena, Arena* token_values_arena, Token* 
     new_token->token_value = NULL;
     
     return first_token;
+}
+
+int tokenize_attribute_value(Arena* tokens_arena, Arena* token_values_arena, char* starting_char, char* boundary)
+{
+    #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
+
+    int iterations = 0;
+    
+    char* current_char = starting_char;
+    
+    Token* new_token;
+    while(current_char < boundary)
+    {
+        switch(*current_char)
+        {
+            case('"'):
+                return iterations;
+                break;
+            case('{'):
+                new_token = push_token();
+                new_token->type = TokenType::OPEN_BRACKET;
+                break;
+            case('}'):
+                new_token = push_token();
+                new_token->type = TokenType::CLOSE_BRACKET; 
+                break;               
+            default:
+                new_token = push_token();
+                new_token->type = TokenType::TEXT;
+                int skipped_chars_count = aggregate_text(current_char, boundary, token_values_arena, new_token, "{}\"", 3);
+                
+                // -1 to account for this iteration.
+                iterations += (skipped_chars_count - 1);
+                current_char += (skipped_chars_count - 1);
+                
+                break;
+        }
+        current_char++;
+        iterations++;
+    }
+    
+    return iterations;
 }
 
 void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
@@ -402,47 +446,7 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
     return first_token;
 }
 
-int tokenize_attribute_value(Arena* tokens_arena, Arena* token_values_arena, char* starting_char, char* boundary)
-{
-    #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
 
-    int iterations = 0;
-    
-    char* current_char = starting_char;
-    
-    Token* new_token;
-    while(current_char < boundary)
-    {
-        switch(*current_char)
-        {
-            case('"'):
-                return iterations;
-                break;
-            case('{'):
-                new_token = push_token();
-                new_token->type = TokenType::OPEN_BRACKET;
-                break;
-            case('}'):
-                new_token = push_token();
-                new_token->type = TokenType::CLOSE_BRACKET; 
-                break;               
-            default:
-                new_token = push_token();
-                new_token->type = TokenType::TEXT;
-                int skipped_chars_count = aggregate_text(current_char, boundary, token_values_arena, new_token, "{}\"", 3);
-                
-                // -1 to account for this iteration.
-                iterations += (skipped_chars_count - 1);
-                current_char += (skipped_chars_count - 1);
-                
-                break;
-        }
-        current_char++;
-        iterations++;
-    }
-    
-    return iterations;
-}
 
 // Suited for tokenizing attributes/bindings
 int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length)

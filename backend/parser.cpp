@@ -2,11 +2,11 @@
 #include <map>
 
 #include "compiler.h"
+using namespace Compiler;
 
 static Token* curr_token; 
 
-int curr_tag_id = 1; // ZII
-int registered_bindings_count = 0;
+int curr_tag_id;
 
 #define eat() curr_token++
 static bool expect_eat(TokenType expected_type);
@@ -15,6 +15,10 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
 StyleFieldType parse_field_name(char* name, int name_length);
 Measurement parse_size_field(char* field_value, int field_value_length);
 void parse_style_expr(Style* target);
+void clear_registered_bindings();
+
+const char* tag_type_names[] = { "ROOT", "TEXT", "DIV", "CUSTOM", "GRID", "IMG", "VIDEO" };
+
 
 void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* state)
 {
@@ -26,6 +30,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
     
     // First tag is always root
     // NOTE(Leo): Tag IDS are local to the file, other systems use global ids. Element ids are decided at runtime.
+    curr_tag_id = 1;
     curr_tag->type = TagType::ROOT;
     curr_tag->tag_id = curr_tag_id++;
     
@@ -77,7 +82,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 
                 if(curr_tag->type == TagType::CUSTOM)
                 {
-                    int custom_component_id = RegisterComponent((char*)curr_token->token_value, curr_token->value_length, state);
+                    custom_component_id = RegisterComponent((char*)curr_token->token_value, curr_token->value_length, state);
                 }
                 
                 curr_tag->tag_id = curr_tag_id++;
@@ -118,13 +123,12 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 }
             case (TokenType::TAG_END):
                 {
-                // End tag must be the same as the current tag, unless current is a text tag which doenst have and end
-                if(curr_tag->type != TagType::TEXT && curr_tag->type != GetTagFromName((char*)curr_token->token_value, curr_token->value_length))
-                {
-                    printf("Unexpected tag end!");
-                }
+                TagType expected_type; 
                 
                 if(has_ended){ // Indicates ending the parent element
+                    //Note(Leo): Since we are ending the parent element, the type of the closing tag should match the parent
+                    expected_type = curr_tag->parent->type;
+                    
                     curr_tag->next_sibling = NULL;
                     curr_tag = curr_tag->parent;
                     has_ended = true;
@@ -132,6 +136,19 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 else // Indicates ending the current element
                 {
                     has_ended = true;
+                    
+                    // We are closing current element so the closing tag type should match its type
+                    expected_type = curr_tag->type;
+                }
+                
+                if(curr_tag->type != TagType::TEXT && expected_type != GetTagFromName((char*)curr_token->token_value, curr_token->value_length))
+                {
+                    char* temp = (char*)AllocScratch(curr_token->value_length + 1);
+                    memcpy(temp, curr_token->token_value, curr_token->value_length);
+                    temp[curr_token->value_length] = '\0';
+                    printf("Unexpected tag end!\n");
+                    printf("Expected \"%s\" but got \"%s\"\n", tag_type_names[(int)curr_tag->type], temp);
+                    DeAllocScratch(temp);
                 }
                 
                 break;
@@ -210,11 +227,11 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 text_content->value_length = 0;
                 text_content->binding_position = 0;
                 
-                text_content->binding_id = RegisterBindingByName(target->registered_bindings, target->values, (char*)curr_token->token_value, curr_token->value_length, curr_tag->tag_id, state);
+                text_content->binding_id = RegisterBindingByName(target->registered_bindings, target->values, (char*)curr_token->token_value, curr_token->value_length, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                                 
                 curr_tag->first_attribute = text_content;
                 
-                if(!expect_eat(TokenType::TEXT))
+                if(!expect_eat(TokenType::CLOSE_BRACKET))
                 {
                     printf("Expeced } for binding!\n");
                 }
@@ -226,13 +243,20 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
         eat();
     }
     
-    target->registered_bindings_count = registered_bindings_count;
+    // Note(Leo): Clear the registered bindings here so files dont end up using eachothers ids
+    clear_registered_bindings();
+    
+    // Note(Leo): File system save fn expects a zeroed tag to mark the end of the page/comp
+    Alloc(target->tags, sizeof(Tag), zero());
+    // Note(leo): same for attributes
+    Alloc(target->attributes, sizeof(Attribute), zero());
 }
 
 std::map<std::string, TagType> tag_map = 
 {
     {"text", TagType::TEXT },
     {"div", TagType::DIV },
+    //{"end", TagType::CUSTOM},
 };
 
 std::map<std::string, AttributeType> attribute_map = 
@@ -245,25 +269,28 @@ std::map<std::string, AttributeType> attribute_map =
 
 std::map<std::string, int> registered_binding_map = {};
 
-TagType GetTagFromName(char* value, int value_length)
+TagType GetTagFromName(const char* value, int value_length)
 {
     if(value_length > MAX_TAG_NAME_LENGTH){
         return TagType::CUSTOM; 
     }
     
-    char name[MAX_TAG_NAME_LENGTH + 1]; // extra charachter to fit the NULL terminator
+    char* name = (char*)AllocScratch((MAX_TAG_NAME_LENGTH + 1)*sizeof(char));
     memcpy(name, value, value_length*sizeof(char));
     
     name[value_length] = '\0';
     std::string name_string;
     name_string = name; // Convert name into a string
     
-//    printf("Searching for tag: %s\nLength:%d\nSTD representation: ", name, value_length);
-//    std::cout << name_string << std::endl;
+    //printf("Searching for tag: %s\nLength:%d\n", name, value_length);
+    //std::cout << name_string << std::endl;
     
     auto search = tag_map.find(name_string);
     
+    DeAllocScratch(name);
+    
     if(search != tag_map.end()){
+        printf("Found: %s\n", tag_type_names[(int)search->second]);
         return search->second;
     }
     return TagType::CUSTOM;
@@ -275,7 +302,8 @@ AttributeType GetAttributeFromName(char* value, int value_length)
         return AttributeType::CUSTOM; 
     }
     
-    char name[MAX_ATTRIBUTE_NAME_LENGTH + 1]; // extra charachter to fit the NULL terminator
+    //char name[MAX_ATTRIBUTE_NAME_LENGTH + 1]; // extra charachter to fit the NULL terminator
+    char* name = (char*)AllocScratch((MAX_ATTRIBUTE_NAME_LENGTH + 1)*sizeof(char));
     memcpy(name, value, value_length*sizeof(char));
     
     name[value_length] = '\0';
@@ -287,13 +315,15 @@ AttributeType GetAttributeFromName(char* value, int value_length)
     
     auto search = attribute_map.find(name_string);
     
+    DeAllocScratch(name);
+    
     if(search != attribute_map.end()){
         return search->second;
     }
     return AttributeType::CUSTOM;
 }
 
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* value, int value_length, int tag_id, CompilerState* state)
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* value, int value_length, int tag_id, RegisteredBindingType type, CompilerState* state)
 {
     char* name = (char*)AllocScratch((value_length + 1)*sizeof(char)); // extra charachter to fit the NULL terminator
     memcpy(name, value, value_length*sizeof(char)); 
@@ -301,7 +331,7 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* valu
     name[value_length] = '\0';
     std::string name_string;
     name_string = name; // Convert name into a string
-    
+        
     auto search = registered_binding_map.find(name_string);
     
     // If the binding is already registered, return its ID
@@ -323,11 +353,12 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* valu
     }
     // Register the binding since it doesnt exist
     RegisteredBinding* new_binding = (RegisteredBinding*)Alloc(bindings_arena, sizeof(RegisteredBinding));
-    new_binding->binding_id = state->next_bound_var_id;
-    state->next_bound_var_id++;
+    new_binding->binding_id = state->next_bound_expr_id;
+    state->next_bound_expr_id++;
     
     char* saved_name = (char*)Alloc(values_arena, value_length*sizeof(char));
     memcpy(saved_name, value, value_length*sizeof(char));
+    
     
     new_binding->binding_name = saved_name;
     new_binding->name_length = value_length;
@@ -335,13 +366,29 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* valu
     new_binding->num_registered = 1;
     new_binding->registered_tag_ids[0] = tag_id;
     
+    new_binding->type = type;
     
     registered_binding_map[name_string] = new_binding->binding_id;
     DeAllocScratch(name);
     return new_binding->binding_id;
 }
 
+void clear_registered_bindings()
+{
+    registered_binding_map.clear();
+}
+
 std::map<std::string, int> registered_selector_map = {};
+
+void clear_registered_selectors()
+{
+    registered_selector_map.clear();
+}
+
+void ClearRegisteredSelectors()
+{
+    clear_registered_selectors();
+}
 
 void ParseStyles(LocalStyles* target, Arena* style_tokens, Arena* style_token_values, int file_prefix, CompilerState* state)
 {
@@ -391,6 +438,7 @@ int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, i
 {
     char* name = (char*)AllocScratch((value_length + 1) * sizeof(char)); // extra charachter to fit the NULL terminator
     memcpy(name, value, value_length*sizeof(char)); 
+
     
     name[value_length] = '\0';
     std::string name_string;
@@ -494,15 +542,17 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             return NULL;
         }
         
-        int attribute_value_length = 0;
-        new_attribute->attribute_value = (char*)values_arena->next_address; // Peek at where the value will start
+        //new_attribute->attribute_value = (char*)values_arena->next_address; // Peek at where the value will start
+        int front_length = 0;
+        char* front_value = NULL;
+        int back_length = 0;
+        char* back_value = NULL;
         
         // If text is first, handle that. Either text or a binding can be first.
         if(curr_token->type == TokenType::TEXT)
         {
-            attribute_value_length += curr_token->value_length;
-            char* value_destination = (char*)Alloc(values_arena, sizeof(char)*curr_token->value_length);
-            memcpy(value_destination, curr_token->token_value, sizeof(char)*curr_token->value_length);
+            front_length = curr_token->value_length;
+            front_value = (char*)curr_token->token_value;
             eat();
         }
         // If binding was first or after text handle it
@@ -512,9 +562,18 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
                 printf("No variable name provided for binding!");
                 return NULL;
             }
-            new_attribute->binding_position = attribute_value_length;
+            new_attribute->binding_position = front_length;
             
-            new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, state);
+            // Attribute type can effect how the binding is added.
+            switch(new_attribute->type)
+            {
+            case(AttributeType::ON_CLICK):
+                new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
+                break;
+            default: // All the attribtues that just use a text based binding
+                new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                break;
+            }
             
             if(!expect_eat(TokenType::CLOSE_BRACKET)){
                 printf("Expected a closing bracket after binding");
@@ -525,14 +584,22 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         //if there is text after the binding handle it
         if(curr_token->type == TokenType::TEXT)
         {
-            attribute_value_length += curr_token->value_length;
-            char* value_destination = (char*)Alloc(values_arena, sizeof(char)*curr_token->value_length);
-            memcpy(value_destination, curr_token->token_value, sizeof(char)*curr_token->value_length);
+            back_length = curr_token->value_length;
+            back_value = (char*)curr_token->token_value;
             eat();
         }
             
-        new_attribute->value_length = attribute_value_length;
-        
+        new_attribute->value_length = front_length + back_length;
+        new_attribute->attribute_value = (char*)Alloc(values_arena, new_attribute->value_length*sizeof(char));
+        // Copy over the attribute value
+        if(front_value)
+        {
+            memcpy(new_attribute->attribute_value, front_value, front_length*sizeof(char));
+        }
+        if(back_value)
+        {
+            memcpy((new_attribute->attribute_value + front_length), back_value, back_length*sizeof(char));
+        }
         
         if(curr_token->type != TokenType::QUOTE)
         {
@@ -645,7 +712,6 @@ StyleFieldType parse_field_name(char* name, int name_length)
     memcpy(terminated_name, name, name_length*sizeof(char));
     
     terminated_name[name_length] = '\0';
-    printf("Identifier: %s\n", terminated_name);
     std::string name_string;
     name_string = terminated_name; // Convert name into a string
         

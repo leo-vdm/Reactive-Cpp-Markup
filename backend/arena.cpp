@@ -1,4 +1,5 @@
 #include "arena.h"
+#include <string.h>
 
 #include <stdio.h>
 #include <iostream>
@@ -7,15 +8,15 @@
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 // Windows definitions for memory management
 #include <windows.h>
-Arena CreateArena(int reserved_size, int alloc_size){
-    Arena newArena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size);
+Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags = 0){
+    Arena newArena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
     // Allocate the first page
     VirtualAlloc((void*)(newArena.next_address & ~(page_size)), page_size, MEM_COMMIT, PAGE_READWRITE);
 
     return newArena;
 }
 
-void* Alloc(Arena* arena, int size){
+void* Alloc(Arena* arena, int size, uint64_t flags){
     
     // Check if we are allocating over a page boundry, if we are commit the new pages.
     uintptr_t aligned_next_address = arena->next_address & ~(page_size);
@@ -28,6 +29,17 @@ void* Alloc(Arena* arena, int size){
     void* allocatedAddress = (void*)arena->next_address;
     arena->next_address += size;
     
+    if(flags & no_zero())
+    {
+       return allocatedAddress;
+    }
+    
+    if(flags & zero() || !arena->flags)
+    {
+        memset((void*)allocatedAddress, 0, size);
+        return allocatedAddress;
+    }
+    
     return allocatedAddress;
 }
 
@@ -39,6 +51,7 @@ void* Alloc(Arena* arena){
     if(arena->first_free.next_freeblock_offset != 0){
         allocatedAddress = (void*)(arena->mapped_address + arena->first_free.next_freeblock_offset);
         arena->first_free.next_freeblock_offset = ((FreeBlock*)allocatedAddress)->next_freeblock_offset;
+        
         return allocatedAddress;
     }
     
@@ -64,8 +77,8 @@ void DeAlloc(Arena* arena, void* address){
 
 // Release and re-obtain an address space to ensure resources go back to kernel
 void ResetArena(Arena* arena){
-    FreeArena(arena);
-    *arena = CreateArena(arena->size, arena->alloc_size);
+    arena->next_address = arena->mapped_address;
+    arena->first_free.next_freeblock_offset = 0;
 }
 
 void FreeArena(Arena* arena){
@@ -75,28 +88,42 @@ void FreeArena(Arena* arena){
 #elif defined(__linux__) && !defined(_WIN32)
 // Unix definitions for memory management
 #include <sys/mman.h>
-Arena CreateArena(int reserved_size, int alloc_size){
-    Arena newArena = Arena(mmap(NULL, reserved_size,  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, 0, 0), reserved_size, alloc_size);
+Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
+{
+    Arena newArena = Arena(mmap(NULL, reserved_size,  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, 0, 0), reserved_size, alloc_size, flags);
     return newArena;
 }
 
-void* Alloc(Arena* arena, int size){
+void* Alloc(Arena* arena, int size, uint64_t flags){
     void* allocatedAddress = (void*)arena->next_address;
     arena->next_address += size;
+    
+    if(flags & no_zero())
+    {
+        return allocatedAddress;
+    }
+    if(flags & zero() || !arena->flags)
+    {
+        memset((void*)allocatedAddress, 0, size);
+        return allocatedAddress;
+    }
+    
     return allocatedAddress;
 }
 
 void* Alloc(Arena* arena){
     void* allocatedAddress = (void*)arena->next_address;
+    int size = arena->alloc_size;
     
     // If there is a free block, allocate that instead.
     if(arena->first_free.next_freeblock_offset != 0){
         allocatedAddress = (void*)(arena->mapped_address + arena->first_free.next_freeblock_offset);
         arena->first_free.next_freeblock_offset = ((FreeBlock*)allocatedAddress)->next_freeblock_offset;
+    
         return allocatedAddress;
     }
     
-    arena->next_address += arena->alloc_size;
+    arena->next_address += size;
     
     return allocatedAddress;
 }
@@ -110,8 +137,10 @@ void DeAlloc(Arena* arena, void* address){
 
 // Release and re-obtain an address space to ensure resources go back to kernel
 void ResetArena(Arena* arena){
-    FreeArena(arena);
-    *arena = CreateArena(arena->size, arena->alloc_size);
+    //FreeArena(arena);
+    //*arena = CreateArena(arena->size, arena->alloc_size);
+    arena->next_address = arena->mapped_address;
+    arena->first_free.next_freeblock_offset = 0;
 }
 
 void FreeArena(Arena* arena){
@@ -124,7 +153,7 @@ void FreeArena(Arena* arena){
 
 
 // Get space from the scratch arena
-void* AllocScratch(int alloc_size)
+void* AllocScratch(int alloc_size, uint64_t flags)
 {
     if(scratch_arena.mapped_address == 0)
     {
@@ -132,7 +161,7 @@ void* AllocScratch(int alloc_size)
         return NULL;
     }
     
-    uintptr_t allocated_address = (uintptr_t)Alloc(&scratch_arena, alloc_size); 
+    uintptr_t allocated_address = (uintptr_t)Alloc(&scratch_arena, alloc_size, flags); 
     
     // Use alloc size as a counter instead to know how many allocs have taken place
     scratch_arena.alloc_size++;
@@ -157,7 +186,7 @@ void DeAllocScratch(void* address)
 
 Arena scratch_arena = Arena();
 
-void InitScratch(int reserved_size)
+void InitScratch(int reserved_size, uint64_t flags)
 {
-    scratch_arena = CreateArena(reserved_size, 0);
+    scratch_arena = CreateArena(reserved_size, 0, flags);
 }
