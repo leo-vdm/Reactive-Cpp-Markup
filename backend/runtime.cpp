@@ -11,12 +11,14 @@ std::map<std::string, LoadedFileHandle*> file_name_map = {};
 
 void InitRuntime(Arena* master_arena, Runtime* target)
 {
+    target->master_arena = master_arena;
     target->loaded_files = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_tags = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_styles = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_selectors = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->static_combined_values = (Arena*)Alloc(master_arena, sizeof(Arena));
+    target->doms = (Arena*)Alloc(master_arena, sizeof(Arena));
 
     *(target->loaded_files) = CreateArena(100*sizeof(LoadedFileHandle), sizeof(LoadedFileHandle));
     *(target->loaded_tags) = CreateArena(10000*sizeof(Compiler::Tag), sizeof(Compiler::Tag));
@@ -24,39 +26,23 @@ void InitRuntime(Arena* master_arena, Runtime* target)
     *(target->loaded_styles) = CreateArena(10000*sizeof(Compiler::Style), sizeof(Compiler::Style));
     *(target->loaded_selectors) = CreateArena(10000*sizeof(Compiler::Selector), sizeof(Compiler::Selector));
     *(target->static_combined_values) = CreateArena(100000*sizeof(char), sizeof(char));
+    *(target->doms) = CreateArena(100*sizeof(DOM), sizeof(DOM));
 }
 
 Runtime runtime;
 
-int main()
-{
-    // Initialize scratch
-    InitScratch(sizeof(char)*100000);
+// InitializeRuntime(FileSearchResult* first_binary)
 
-    Arena master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));    
-    
+
+
+int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
+{   
     // Initialize Runtime
     
-    InitRuntime(&master_arena, &runtime);
-    
-    // Initialize DOM
-    DOM active_dom;    
-    InitDOM(&master_arena, &active_dom);
-    
-    register_subscriber_functions(&active_dom);
-    register_binding_subscriptions(&active_dom);
-    
-    // Find all page/comp bins
-    Arena* search_results = (Arena*)Alloc(&master_arena, sizeof(Arena));
-    Arena* search_result_values = (Arena*)Alloc(&master_arena, sizeof(Arena));
-    
-    *search_results = CreateArena(sizeof(FileSearchResult)*1000, sizeof(FileSearchResult));
-    *search_result_values  = CreateArena(sizeof(char)*100000, sizeof(char));
-    
-    SearchDir(search_results, search_result_values, ".", ".bin");
-    
-    FileSearchResult* curr = (FileSearchResult*)search_results->mapped_address;
-    
+    InitRuntime(master_arena, &runtime);
+
+    FileSearchResult* curr = first_binary;
+        
     // Load all page/comp bins
     while(curr->file_path)
     {
@@ -86,30 +72,28 @@ int main()
         curr++;
     }
     
-    // Start the main page, throw an error if we couldnt find it
-    LoadedFileHandle* main_page = GetFileFromName("MainPage");
-    if(!main_page)
-    {
-        printf("Error: Couldnt find the main page, was the binary deleted?\n");
-        goto exit;
-    }
-    
-    call_page_main(&active_dom, main_page->file_id);
-    InstancePage(&active_dom, main_page->file_id);
-    
-    //{
-    //LoadedFileHandle* test = GetFileFromName("test_component");
-    //void* my_added_comp;
-    //
-    //call_comp_main(&active_dom, test->file_id, &my_added_comp);
-    //}
-    
-    exit:
-    printf("Exiting!\n");
-    
     return 0;
 }
 
+bool RuntimeInstanceMainPage()
+{
+    LoadedFileHandle* main_page = GetFileFromName("MainPage");
+    if(!main_page)
+    {
+        return false;
+    }
+
+    DOM* main_dom = (DOM*)Alloc(runtime.doms, sizeof(DOM), zero());    
+    InitDOM(runtime.master_arena, main_dom);
+    
+    register_subscriber_functions(main_dom);
+    register_binding_subscriptions(main_dom);
+    
+    SwitchPage(main_dom, main_page->file_id);
+    
+    PlatformRegisterDom((void*)main_dom);
+    return true;
+}
 
 LoadedFileHandle* GetFileFromId(int id)
 {
@@ -151,6 +135,8 @@ void SwitchPage(DOM* dom, int id, int flags)
     ResetArena(dom->attributes);
     ResetArena(dom->generations);
     
-    
+    // Call page main and instance the page.
+    call_page_main(dom, id);
+    InstancePage(dom, id);
     
 }

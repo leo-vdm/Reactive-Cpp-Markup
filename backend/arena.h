@@ -2,7 +2,7 @@
 #include <cstdint>
 #pragma once
 struct FreeBlock {
-    uint16_t next_freeblock_offset;
+    FreeBlock* next_free;
 };
 
 struct Arena {
@@ -19,7 +19,7 @@ struct Arena {
         this->next_address = (uintptr_t)position;
         this->size = size;
         this->alloc_size = alloc_size;
-        this->first_free = FreeBlock();
+        this->first_free = {};
         this->flags = flags;
     }
     
@@ -49,7 +49,7 @@ void* AllocScratch(int alloc_size, uint64_t flags = 0);
 // Return space to the scratch arena
 void DeAllocScratch(void* address);
 
-void* Alloc(Arena* arena); // Allocate based on the alloc_size
+//void* Alloc(Arena* arena); // Allocate based on the alloc_size
 
 void* Alloc(Arena* arena, int size, uint64_t flags = 0); // Allocate an arbitrary size
 

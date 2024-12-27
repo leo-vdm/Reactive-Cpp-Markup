@@ -5,16 +5,23 @@
 #include "arena_string.h"
 #include "file_system.h"
 
-// flag for page_switch to save dom state
-#define save_dom() 1 << 0
 
 #pragma once
 
-// Aligns the fiven pointer to where the type wants it to start in memory
+
+// flag for page_switch to save dom state
+#define save_dom() 1 << 0
+
+// Aligns the given pointer to where the type wants it to start in memory
+// Note(Leo): GCC doesnt need decltype inside of alignof but msvc does and will error otherwise
 #define align_mem(ptr, type) (type*)((uintptr_t)ptr + alignof(type) - ((uintptr_t)ptr % alignof(type)))
 
 // Aligns the given pointer to a pointer aligned address (8 byte aligned)
-#define align_ptr(ptr) ((void*)((uintptr_t)ptr + alignof(ptr) - ((uintptr_t)ptr % alignof(ptr))))
+#define align_ptr(ptr) ((void*)((uintptr_t)ptr + alignof(decltype(ptr)) - ((uintptr_t)ptr % alignof(decltype(ptr)))))
+
+// Element Flags //
+
+
 
 struct LinkedPointer
 {
@@ -53,6 +60,8 @@ struct DOM
 
 struct Runtime
 {
+    Arena* master_arena;
+
     Arena* loaded_files;
 
     Arena* loaded_tags;
@@ -60,6 +69,7 @@ struct Runtime
     Arena* loaded_styles;
     Arena* loaded_selectors;
     Arena* static_combined_values;
+    Arena* doms;
 };
 
 struct Style 
@@ -81,7 +91,7 @@ struct Selector
 enum class AttributeType
 {
 NONE,
-CUSTOM, // For user defined args, name goes in value. Arg goes in Attribute binding
+CUSTOM, // For user defined args
 TEXT,
 STYLE,
 CLASS,
@@ -94,16 +104,39 @@ COMP_ID, // For custom components
 ON_CLICK,
 };
 
-struct Attribute
+struct attr_comp_id_body 
 {
-    Attribute* next_attribute;
-    AttributeType type;
+    int id;
+};
+
+struct attr_text_like_body
+{
     char* static_value; // \0 terminated string with printf formatting to put the binding value in.
     int value_length;
     int binding_id;
     
     // Cache //
     char* cached_value;
+};
+
+struct attr_custom_body : attr_text_like_body
+{
+    char* name_value;
+    int name_length;
+};
+
+
+struct Attribute
+{
+    Attribute* next_attribute;
+    AttributeType type;
+    
+    union 
+    {
+        attr_comp_id_body CompId;
+        attr_text_like_body Text;
+        attr_custom_body Custom;
+    };
 };
 
 enum class ElementType 
@@ -211,7 +244,7 @@ void Draw(DOM* dom);
 
 // Tells the program master to switch the page of the specified DOM to the specified one
 // Flags may tell the master wether to delete the curernt DOM or keep it and save the state
-void SwitchPage(DOM* dom, int id, int flags);
+void SwitchPage(DOM* dom, int id, int flags = 0);
 
 // Expects a DOM with cleared element Arena, instances all the 
 void InstancePage(DOM* target_dom, int id);

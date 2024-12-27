@@ -88,6 +88,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 curr_tag->tag_id = curr_tag_id++;
                 
                 eat();
+                curr_tag->first_attribute = NULL;
                 if(curr_token->type == TokenType::TAG_ATTRIBUTE)
                 {
                     // Tokenize the attribute and then eat the token
@@ -102,14 +103,18 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 {
                     // NOTE(Leo): This code assumes that the attribute we allocate here is contiguos to the last allocated block!
                     curr_tag->num_attributes++;
-                    Attribute* added_attribute = (Attribute*)Alloc(target->attributes);
+                    Attribute* added_attribute = (Attribute*)Alloc(target->attributes, sizeof(Attribute));
                     
                     added_attribute->type = AttributeType::COMP_ID;
                     
-                    // NOTE(Leo): component id gets stored in the value_length since its already an int
-                    added_attribute->attribute_value = NULL;
-                    added_attribute->value_length = custom_component_id;
+                    added_attribute->CompId.id = custom_component_id;
                     
+                    
+                    // Note(Leo): If the component had no other attributes we need to set this otherwise it doesnt know about its comp_id
+                    if(!curr_tag->first_attribute)
+                    {
+                        curr_tag->first_attribute = added_attribute;
+                    }
                 }
                 
                 if(!(curr_token->type == TokenType::CLOSE_TAG)) // Tag should close after attribute)
@@ -179,12 +184,12 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 curr_tag->tag_id = curr_tag_id++;
                 curr_tag->num_attributes = 1;
                 
-                Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute));
+                Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute), zero());
                 text_content->type = AttributeType::TEXT;
-                text_content->attribute_value = (char*)Alloc(target->values, curr_token->value_length*sizeof(char));
-                text_content->value_length = curr_token->value_length;
+                text_content->Text.value = (char*)Alloc(target->values, curr_token->value_length*sizeof(char));
+                text_content->Text.value_length = curr_token->value_length;
                  
-                memcpy((void*)text_content->attribute_value, curr_token->token_value, curr_token->value_length*sizeof(char));
+                memcpy((void*)text_content->Text.value, curr_token->token_value, curr_token->value_length*sizeof(char));
                 
                 curr_tag->first_attribute = text_content;
                 break;
@@ -220,14 +225,14 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 curr_tag->tag_id = curr_tag_id++;
                 curr_tag->num_attributes = 1;
                 
-                // need an attribute to attatch the biding to
+                // need an attribute to attatch the binding to
                 Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute));
                 text_content->type = AttributeType::TEXT;
-                text_content->attribute_value = NULL;
-                text_content->value_length = 0;
-                text_content->binding_position = 0;
+                text_content->Text.value = NULL;
+                text_content->Text.value_length = 0;
+                text_content->Text.binding_position = 0;
                 
-                text_content->binding_id = RegisterBindingByName(target->registered_bindings, target->values, (char*)curr_token->token_value, curr_token->value_length, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                text_content->Text.binding_id = RegisterBindingByName(target->registered_bindings, target->values, (char*)curr_token->token_value, curr_token->value_length, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                                 
                 curr_tag->first_attribute = text_content;
                 
@@ -290,7 +295,6 @@ TagType GetTagFromName(const char* value, int value_length)
     DeAllocScratch(name);
     
     if(search != tag_map.end()){
-        printf("Found: %s\n", tag_type_names[(int)search->second]);
         return search->second;
     }
     return TagType::CUSTOM;
@@ -562,16 +566,17 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
                 printf("No variable name provided for binding!");
                 return NULL;
             }
-            new_attribute->binding_position = front_length;
             
             // Attribute type can effect how the binding is added.
             switch(new_attribute->type)
             {
             case(AttributeType::ON_CLICK):
-                new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
+                new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
                 break;
-            default: // All the attribtues that just use a text based binding
-                new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+            default: // All the attribtues that just use a text like body
+                //new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                new_attribute->Text.binding_position = front_length;
+                new_attribute->Text.binding_id =  RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 break;
             }
             
@@ -588,17 +593,29 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             back_value = (char*)curr_token->token_value;
             eat();
         }
-            
-        new_attribute->value_length = front_length + back_length;
-        new_attribute->attribute_value = (char*)Alloc(values_arena, new_attribute->value_length*sizeof(char));
-        // Copy over the attribute value
-        if(front_value)
+        
+        // Attribute type affects how the value gets added
+        switch(new_attribute->type)
         {
-            memcpy(new_attribute->attribute_value, front_value, front_length*sizeof(char));
-        }
-        if(back_value)
-        {
-            memcpy((new_attribute->attribute_value + front_length), back_value, back_length*sizeof(char));
+            // OnClick has no value
+            case(AttributeType::ON_CLICK):
+                break;
+            // Text like attributes
+            default:
+            {
+                new_attribute->Text.value_length = front_length + back_length;
+                new_attribute->Text.value = (char*)Alloc(values_arena, new_attribute->Text.value_length*sizeof(char));
+                // Copy over the attribute value
+                if(front_value)
+                {
+                    memcpy(new_attribute->Text.value, front_value, front_length*sizeof(char));
+                }
+                if(back_value)
+                {
+                    memcpy((new_attribute->Text.value + front_length), back_value, back_length*sizeof(char));
+                }
+                break;
+            }
         }
         
         if(curr_token->type != TokenType::QUOTE)

@@ -1,0 +1,344 @@
+#include "platform.h"
+#include <stdio.h>
+#include <iostream>
+#include <cassert>
+
+#if defined(__linux__) && !defined(_WIN32)
+#include <X11/Xlib.h>
+#include <unistd.h>
+#include <libgen.h>
+
+Display* x_display = {};
+Visual* x_visual = {};
+XDefaultValues x_defaults = {};
+Atom x_wm_delete_message = {};
+
+const char* linux_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_XLIB_SURFACE_NAME};
+
+PlatformWindow* linux_create_window(Arena* windows_arena)
+{
+    #define WINDOW_WIDTH 800
+    #define WINDOW_HEIGHT 400
+    
+    Window x_created_window = {};
+    x_created_window = XCreateWindow(x_display, x_defaults.default_root_window, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, 0, InputOutput, x_visual, 0, 0);
+    
+    XSelectInput(x_display, x_created_window, ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask  | StructureNotifyMask);
+    
+    // Note(Leo): Required here otherwise WM will just kill the app when the close window button is pressed without notifying us
+    XSetWMProtocols(x_display, x_created_window, &x_wm_delete_message, 1);
+    
+    XMapWindow(x_display, x_created_window);
+    XFlush(x_display);
+    
+    PlatformWindow* created_window = (PlatformWindow*)Alloc(windows_arena, sizeof(PlatformWindow), zero());
+    created_window->window_handle = x_created_window;
+    created_window->window_gc = XCreateGC(x_display, x_created_window, 0, 0);
+    created_window->width = WINDOW_WIDTH;
+    created_window->height = WINDOW_HEIGHT;
+    
+    
+    linux_vk_create_window_surface(created_window, x_display);
+    
+    return created_window;
+}
+
+// Returns flags for the runtime to know the status of the window
+void linux_process_window_events(PlatformWindow* target_window)
+{
+    XEvent x_event;
+    int return_value = 0;
+    while(XPending(x_display))
+    {
+        XNextEvent(x_display, & x_event);
+        switch(x_event.type)
+        {
+            case(DestroyNotify):
+            {
+                if(x_event.xdestroywindow.window == target_window->window_handle)
+                {
+                return_value = return_value | QUIT_WINDOW;
+                }
+                break;
+            }
+            case(ConfigureNotify):
+            {
+                target_window->width = x_event.xconfigure.width;
+                target_window->height = x_event.xconfigure.height;
+                return_value = return_value | RESIZED_WINDOW;
+                //XSync(x_display, 0);
+                //XFlush(x_display);
+                break;
+            }
+            
+            case(Expose):
+            {
+                int x = x_event.xexpose.x;
+                int y = x_event.xexpose.y;
+                int width = x_event.xexpose.width;
+                int height = x_event.xexpose.height;
+                XFillRectangle(x_display, target_window->window_handle, target_window->window_gc, x, y, width, height);
+                break;
+            }
+            case(KeyPress):
+            {
+                int key_code = x_event.xkey.keycode;
+                KeySym x_key = XLookupKeysym(&(x_event.xkey), 0);
+                char* key_char = XKeysymToString(x_key);
+                printf("Keycode down: %d, Char: %c\n", key_code, *key_char);
+                break;
+            }
+            case(KeyRelease):
+            {
+                int key_code = x_event.xkey.keycode;
+                printf("Keycode up: %d", key_code);
+                break;
+            }
+            case(ClientMessage):
+            {
+                // Window manager has requested a close
+                if(x_event.xclient.data.l[0] == x_wm_delete_message)
+                {
+                    return_value = return_value | QUIT_WINDOW;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    fflush(stdout);
+    
+    target_window->flags = target_window->flags | return_value;
+}
+
+// Returns -1 if searched char is not found, otherwise returns the index of the last instance of searched_char
+int find_last_of(const char* c_string, char searched_char)
+{
+    int last_index = -1;
+    char* curr = (char*)c_string;
+    int index = 0;
+    while(*curr != '\0')
+    {
+        if(*curr == searched_char)
+        {
+            last_index = index;
+        }
+        index++;
+        curr++;
+    }
+    
+    return last_index;
+}
+
+char* linux_get_execution_dir()
+{
+    #define MAX_PATH_LEN 2000
+    char* executable_path = (char*)AllocScratch(sizeof(char)*MAX_PATH_LEN);
+    if(readlink("/proc/self/exe", executable_path, MAX_PATH_LEN) == MAX_PATH_LEN)
+    {
+        assert(0);
+        return NULL;
+    }    
+    int executable_dir_len = find_last_of(executable_path, '/');
+    executable_path[executable_dir_len] = '\0';
+    return executable_path;
+}
+
+FILE* linux_open_relative_file_path(const char* relative_path, const char* open_params)
+{
+    char* working_dir = linux_get_execution_dir();
+    int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, relative_path);
+    desired_len++; // +1 to make space for \0
+    char* file_path = (char*)AllocScratch(desired_len);
+    sprintf(file_path, "%s/%s", working_dir, relative_path);
+    
+    FILE* opened = fopen(file_path, open_params);
+    DeAllocScratch(file_path);
+    DeAllocScratch(working_dir);
+    
+    return opened;
+}
+
+FileSearchResult* linux_find_markup_binaries(Arena* search_results_arena, Arena* search_result_values_arena)
+{
+    char* working_dir = linux_get_execution_dir();
+    SearchDir(search_results_arena, search_result_values_arena, working_dir, ".bin");
+    FileSearchResult* first = (FileSearchResult*)search_results_arena->mapped_address;
+    
+    DeAllocScratch(working_dir);
+    return first;
+}
+
+FileSearchResult* linux_find_image_resources(Arena* search_results_arena, Arena* search_result_values_arena)
+{
+    FileSearchResult* first = (FileSearchResult*)search_results_arena->next_address;
+    char* working_dir = linux_get_execution_dir();
+
+    #define RESOURCE_DIR_NAME "resources"
+    int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, RESOURCE_DIR_NAME);
+    desired_len++; // + 1 to fit \0
+    char* resource_dir_path = (char*)AllocScratch(desired_len*sizeof(char));
+    sprintf(resource_dir_path, "%s/%s", working_dir, RESOURCE_DIR_NAME);
+    DeAllocScratch(working_dir);
+    
+    SearchDir(search_results_arena, search_result_values_arena, resource_dir_path, "");
+    
+    DeAllocScratch(resource_dir_path);
+    return first;
+}
+
+struct linux_platform_state
+{
+    Arena master_arena;  
+    Arena* windows;
+    Arena* pointer_arrays;
+    Arena* search_results;
+    Arena* search_result_values;
+
+    Arena* runtime_master_arena;
+    
+    PlatformWindow* first_window;
+};
+
+void linux_destroy_window(Arena* windows_arena, PlatformWindow* window)
+{
+    XDestroyWindow(x_display, window->window_handle);
+    
+    vk_destroy_window_surface(window);
+    
+    DeAlloc(windows_arena, window);
+}
+
+linux_platform_state platform;
+
+int main()
+{
+    platform = {};
+    InitScratch(sizeof(char)*100000);
+    platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
+    
+    x_display = XOpenDisplay(NULL);
+    
+    if(!x_display)
+    {
+        printf("ERROR: Failed to open x-display while initializing platform\n");
+        return 1;
+    }
+    
+    int default_screen = XDefaultScreen(x_display);
+    
+    x_visual = XDefaultVisual(x_display, default_screen);
+    
+    x_defaults = {};
+    x_defaults.default_screen = default_screen;
+    x_defaults.default_depth = XDefaultDepth(x_display, default_screen);
+    x_defaults.default_root_window = XDefaultRootWindow(x_display);
+    x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
+    
+    FILE* main_vert_shader = linux_open_relative_file_path("compiled_shaders/vert.spv", "rb");
+
+    FILE* main_frag_shader = linux_open_relative_file_path("compiled_shaders/frag.spv", "rb");
+        
+    if(!main_vert_shader || !main_frag_shader)
+    {
+        printf("Error: Shaders could not be loaded!\n");
+        return 1;
+    }
+    
+    int required_extension_count = sizeof(linux_required_vk_extensions) / sizeof(char**);
+    InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, main_vert_shader, main_frag_shader,  100000000);
+    
+    fclose(main_vert_shader);
+    fclose(main_frag_shader);
+    
+    platform.search_results = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
+    *(platform.search_results) = CreateArena(sizeof(FileSearchResult)*1000, sizeof(FileSearchResult));
+    
+    platform.search_result_values = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
+    *(platform.search_result_values) = CreateArena(sizeof(char)*100000, sizeof(char));
+    
+    FileSearchResult* first_binary = linux_find_markup_binaries(platform.search_results, platform.search_result_values);
+    
+    platform.runtime_master_arena = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
+    *(platform.runtime_master_arena) = CreateArena(sizeof(Arena)*1000, sizeof(Arena));
+    
+    InitializeRuntime(platform.runtime_master_arena, first_binary);
+    
+    platform.windows = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
+    *(platform.windows) = CreateArena(sizeof(PlatformWindow)*100, sizeof(PlatformWindow));
+    
+    if(!RuntimeInstanceMainPage())
+    {
+        printf("ERROR: Failed to initialize main page! Is the binary missing?\n");
+        return 1;
+    }
+    
+    FileSearchResult* first_image = linux_find_image_resources(platform.search_results, platform.search_result_values);
+    FileSearchResult* curr_image = first_image;
+    while(curr_image->file_path)
+    {
+        FILE* opened = fopen(curr_image->file_path, "rb");
+        RenderplatformLoadImage(opened, curr_image->file_name);
+        
+        fclose(opened);
+        curr_image = first_image++;
+    }
+    
+    PlatformWindow* curr_window = platform.first_window;
+    while(true)
+    {
+        if(!curr_window)
+        {
+            curr_window = platform.first_window;
+        }    
+        linux_process_window_events(platform.first_window);
+        
+        if(curr_window->flags)
+        {
+            if(curr_window->flags & RESIZED_WINDOW)
+            {
+                if(RenderplatformSafeToDelete(curr_window))
+                {
+                    vk_window_resized(curr_window);
+                    curr_window->flags = 0;
+                    continue;
+                }
+            }
+            if(curr_window->flags & DEAD_WINDOW)
+            {
+                if(RenderplatformSafeToDelete(curr_window))
+                {
+                    linux_destroy_window(platform.windows, platform.first_window);                
+                    break;
+                }            
+            }
+            if(curr_window->flags & QUIT_WINDOW)
+            {
+                curr_window->flags = DEAD_WINDOW;
+            }
+            continue;
+        }
+    
+        
+        RenderplatformDrawWindow(platform.first_window);
+        
+        curr_window = curr_window->next_window;
+    }
+    
+    printf("Exiting\n");
+    
+    return 0;
+}
+
+void PlatformRegisterDom(void* dom)
+{
+    PlatformWindow* created_window = linux_create_window(platform.windows);
+    created_window->window_dom = dom;
+    
+    created_window->next_window = platform.first_window;
+    platform.first_window = created_window;
+}
+
+
+#endif

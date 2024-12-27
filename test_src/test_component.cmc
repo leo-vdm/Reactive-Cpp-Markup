@@ -1,0 +1,52 @@
+<code>
+
+class test_component : Component
+{
+    public:
+    int mycolor;
+    
+    #bind
+    int count;
+    
+    #bind
+    int my_var;
+    
+    void CompMain(DOM* dom){
+	count = 2;
+	printf("Hello from component main in test component!\n");
+        printf("Count is at: %d\n", count);
+        count = 100;
+    }
+    
+    #subto count
+    void on_count_changed(){
+        printf("Changed");
+        count = 10;
+    }
+};
+</code>
+<root>
+<div>
+	<div something="herro" style="color: {mycolor};">
+		Hello	
+	</div>
+
+	<div>
+		<div class="orange" class="another" class="mein">
+			Hello {my_var}
+		</div>
+	</div>
+</div>
+
+</root>
+
+<style>
+div {
+width: 100px;
+height: 100px;
+}
+
+myclass {
+maxWidth: 100%;
+}
+</style>

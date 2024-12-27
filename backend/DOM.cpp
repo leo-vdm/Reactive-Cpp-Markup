@@ -24,7 +24,7 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->cached_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->dynamic_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->strings) = CreateArena(sizeof(StringBlock)*100000, sizeof(StringBlock));
-    *(target->pointer_arrays) = CreateArena(sizeof(int*)*10000, sizeof(int*));
+    *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*5000, sizeof(Element));
     *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));
     *(target->bound_expressions) = CreateArena(sizeof(BoundExpression)*1000, sizeof(BoundExpression));
@@ -123,16 +123,33 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
 {
     Attribute* added = (Attribute*)Alloc(dom->attributes, sizeof(Attribute), zero());
     added->type = (AttributeType)((int)converted_attribute->type);
-    added->binding_id = converted_attribute->binding_id;
-    added->static_value = converted_attribute->attribute_value;
-    added->value_length = converted_attribute->value_length;
     
-    if(!added->binding_id)
+    switch(added->type)
+    {
+        case(AttributeType::COMP_ID):
+            added->CompId.id = converted_attribute->CompId.id;
+            return added;
+            break;
+        case(AttributeType::CUSTOM):
+            added->Custom.name_value = converted_attribute->Custom.name;
+            added->Custom.name_length = converted_attribute->Custom.name_length;
+            goto text_like;
+            break;
+        default:
+            text_like:
+            added->Text.binding_id = converted_attribute->Text.binding_id;
+            added->Text.static_value = converted_attribute->Text.value;
+            added->Text.value_length = converted_attribute->Text.value_length;
+            break;
+    }
+    
+    // Note(Leo): Only text like should get to this point, others should early return!
+    if(!added->Text.binding_id)
     {
         return added;
     }
     
-    LinkedPointer* subscription_target = get_attribute_by_expression(gen, added->binding_id);
+    LinkedPointer* subscription_target = get_attribute_by_expression(gen, added->Text.binding_id);
     if(subscription_target) // Found a pre-existing subscriber to this expression
     {
         LinkedPointer* added_subscription = (LinkedPointer*)Alloc(dom->pointer_arrays, sizeof(LinkedPointer));
@@ -150,8 +167,8 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
         gen->subscribers_head = added_subscription;
         
         // Register the new expression subscription
-        //gen->expression_sub_map[added->binding_id] = added_subscription;
-        gen->expression_sub_map->insert({added->binding_id, added_subscription});
+        // Note(Leo): [] style access was creating a bug, ->insert() works fine
+        gen->expression_sub_map->insert({added->Text.binding_id, added_subscription});
     }
     
     return added;
@@ -169,7 +186,7 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Generation* gen,
     added->type = (ElementType)((int)converted_tag->type);
     
     Attribute* prev_added_attribute = NULL;
-    Attribute* curr_added_attribute;
+    Attribute* curr_added_attribute; 
     
     for(int i = 0; i < added->num_attributes; i++)
     {
@@ -179,10 +196,6 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Generation* gen,
             prev_added_attribute->next_attribute = curr_added_attribute;
         }
         else // This is the first attribute
-        {
-            added->first_attribute = curr_added_attribute;
-        }
-        if(!added->first_attribute)
         {
             added->first_attribute = curr_added_attribute;
         }
@@ -251,11 +264,11 @@ void InstancePage(DOM* target_dom, int id)
             // Comp element must be corrupted/uninitialized if it doesnt have a specifier for file id
             assert(comp_specifier);
             // Must specify a comp id
-            assert(comp_specifier->value_length);
-            
+            assert(comp_specifier->CompId.id);
+                        
             if(comp_specifier)
             {
-                InstanceComponent(target_dom, added, comp_specifier->value_length);
+                InstanceComponent(target_dom, added, comp_specifier->CompId.id);
             }
             
         }
@@ -283,8 +296,9 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     
     
     // Allocate the element lookup array and align it so we can store pointers
-    // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1
-    void** element_addresses = (void**)align_ptr(AllocScratch((comp_bin->file_info.tag_count + 1) * sizeof(Element*)));
+    // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
+    void* element_addresses_unaligned = AllocScratch((comp_bin->file_info.tag_count + 2) * sizeof(Element*));
+    void** element_addresses = (void**)align_ptr(element_addresses_unaligned);
     
     // Note(Leo): We use element id to index into this array, since id's are local to the file we know that they are in the range 1 - num_tags + 1
     
@@ -311,7 +325,11 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     
     added->parent = parent;
     added->next_sibling = NULL;
-    added->first_child = (Element*)element_addresses[curr->first_child->tag_id]; 
+    
+    if(curr->first_child)
+    {
+    added->first_child = (Element*)(element_addresses[curr->first_child->tag_id]); 
+    }
     curr++;
     
     while(curr->tag_id)
@@ -330,8 +348,16 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
         
         tag_to_element(target_dom, curr, new_gen, added);
         added->parent = (Element*)element_addresses[curr->parent->tag_id];
-        added->next_sibling = (Element*)element_addresses[curr->next_sibling->tag_id];
-        added->first_child = (Element*)element_addresses[curr->first_child->tag_id];
+        
+        if(curr->next_sibling)
+        {
+            added->next_sibling = (Element*)element_addresses[curr->next_sibling->tag_id];
+        }
+        if(curr->first_child)
+        {
+            added->first_child = (Element*)element_addresses[curr->first_child->tag_id];
+        }
+        
         added->master = added_comp;
         
         // If the element being added is a component, instance it
@@ -342,11 +368,11 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
             // Comp element must be corrupted/uninitialized if it doesnt have a specifier for file id
             assert(comp_specifier);
             // Must specify a comp id
-            assert(comp_specifier->value_length);
+            assert(comp_specifier->CompId.id);
             
             if(comp_specifier)
             {
-                InstanceComponent(target_dom, added, comp_specifier->value_length);
+                InstanceComponent(target_dom, added, comp_specifier->CompId.id);
             }
             
         }

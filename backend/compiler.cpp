@@ -422,128 +422,6 @@ int main(int argc, char* argv[])
 }
 
 
-
-#if 0
-int _main_temp(int argc, char* argv[]){
-    // Initialize scratch arena
-    InitScratch(sizeof(char)*10000);
-
-    Arena file_name_arena = CreateArena(sizeof(char)*1000, sizeof(char));
-
-    FILE* source = fopen(argv[1], "r"); // Arg to compiler should be a source file
-    
-    SplitFileNames sources = SeperateSource(source, argv[1], &file_name_arena);
-    
-    fclose(source); // Close the non split source file
-    
-    FILE* markup_source = fopen(sources.markup_file_name, "r"); // Open the new split markup file
-    
-    FILE* style_source = fopen(sources.style_file_name, "r"); // Open new split style file
-    
-    FILE* code_source = fopen(sources.code_file_name, "r");
-    
-    if(markup_source == NULL)
-    {
-        return 0;
-    }
-        
-    Arena tokens = CreateArena(sizeof(Token)*10000, sizeof(Token));
-    Arena token_values = CreateArena(sizeof(char)*100000, sizeof(char)); 
-    
-    TokenizeStyle(style_source, &tokens, &token_values);
-    
-    fclose(style_source);
-    
-    LocalStyles test_styles = LocalStyles();
-    
-    test_styles.next_style_id = 1;
-    test_styles.next_selector_id = 1;
-    
-    
-    test_styles.selectors = (Arena*)malloc(sizeof(Arena));
-    *test_styles.selectors = CreateArena(sizeof(Selector)*10000, sizeof(Selector));
-    
-    test_styles.selector_values = (Arena*)malloc(sizeof(Arena));
-    *test_styles.selector_values = CreateArena(sizeof(char)*10000, sizeof(char));
-    
-    test_styles.styles = (Arena*)malloc(sizeof(Arena));
-    *test_styles.styles = CreateArena(sizeof(Style)*10000, sizeof(Style));
-    
-    ParseStyles(&test_styles, &tokens, &token_values, 1234);
-    
-    print_styles(&test_styles);
-    
-    ResetArena(&tokens);
-    ResetArena(&token_values);
-    
-    //print_tokens(&tokens, &token_values);
-    Tokenize(markup_source, &tokens, &token_values);
-    
-    fclose(markup_source);
-    
-    AST test_tree = AST();
-    
-    test_tree.tags = (Arena*)malloc(sizeof(Arena));
-    *test_tree.tags = CreateArena(sizeof(Tag)*10000, sizeof(Tag));
-    
-    test_tree.attributes = (Arena*)malloc(sizeof(Arena));
-    *test_tree.attributes = CreateArena(sizeof(Attribute)*10000, sizeof(Attribute));
-    
-    test_tree.registered_bindings = (Arena*)malloc(sizeof(Arena));
-    *test_tree.registered_bindings = CreateArena(sizeof(RegisteredBinding)*1000, sizeof(RegisteredBinding));
-    
-    test_tree.values = (Arena*)malloc(sizeof(Arena));
-    *test_tree.values = CreateArena(sizeof(char)*100000, sizeof(char));
-
-    test_tree.registered_bindings_count = 0;
-
-    ProduceAST(&test_tree, &tokens, &token_values);
-    
-    ResetArena(&tokens);
-    ResetArena(&token_values);
-    
-    TokenizeCode(code_source, &tokens, &token_values);
-    
-    remove("test_out.cpp");
-    FILE* output_test = fopen("test_out.cpp", "w");
-    
-    Arena bound_vars_arena = CreateArena(sizeof(BoundVariable)*1000, sizeof(BoundVariable));    
-    Arena bound_expressions_arena = CreateArena(sizeof(BindingExpression)*1000, sizeof(BindingExpression));    
-    
-    Arena bound_var_names_arena = CreateArena(sizeof(char)*100000, sizeof(char));
-    
-    RegisterDirectives(output_test, &tokens, &token_values, &bound_vars_arena, &bound_var_names_arena, &bound_expressions_arena);
-    RegisterMarkupBindings(output_test, test_tree.registered_bindings, &bound_vars_arena, &bound_expressions_arena, &tokens, &token_values, 1234);
-    
-    fclose(output_test);
-
-    
-    ResetArena(&tokens);
-    ResetArena(&token_values);
-    
-    print_ast(&test_tree);
-    
-    // Save compiled AST/Styles
-    
-    SavePage(&test_tree, &test_styles, "test_parsed_output.bin");
-    
-    ResetArena(test_tree.tags);
-    ResetArena(test_tree.attributes);
-    ResetArena(test_tree.registered_bindings);
-    ResetArena(test_tree.values);
-    ResetArena(test_styles.selectors);
-    ResetArena(test_styles.selector_values);
-    ResetArena(test_styles.styles);
-    
-    // Test load    
-    LoadPage(&test_tree, &test_styles, test_tree.values, "test_parsed_output.bin");
-    
-    SearchDir(&tokens, &token_values, ".", ".cpp");
-        
-    return 0;
-}
-#endif
-
 std::map<std::string, int> registered_component_map = {};
 std::map<std::string, int> registered_page_map = {};
 
@@ -624,27 +502,13 @@ void print_tokens(Arena* tokens, Arena* token_values)
 
 }
 
-// Note(Leo): This relies on bindings existing in their arena in indexed order.
-// Defunked since now bindings are sharing an ID system with expressions so the indexing is broken
-//void print_binding(int binding_id, Arena* bindings_arena)
-//{
-//    RegisteredBinding* binding = ((RegisteredBinding*)bindings_arena->mapped_address) + binding_id - 1;
-//    
-//    char* terminated_name = (char*)AllocScratch((binding->name_length + 1)*sizeof(char));
-//    memcpy(terminated_name, binding->binding_name, binding->name_length*sizeof(char));
-//    terminated_name[binding->name_length] = '\0';
-//    
-//    printf("Binding Name: \"%s\", ID: %d\n", terminated_name, binding->binding_id);
-//    DeAllocScratch(terminated_name);
-//
-//}
-
+#if 0
 void print_attribute(Attribute* attribute, Arena* bindings_arena)
 {
     const char* attribute_names[] = {"NONE", "CUSTOM", "TEXT", "STYLE", "CLASS"};
     char* value_container = (char*)AllocScratch((attribute->value_length) + 1);
     memcpy(value_container, attribute->attribute_value, attribute->value_length);
-    value_container[attribute->value_length] = '\0';
+    value_container[attribute->Text.value_length] = '\0';
     
     printf("Type: %s, Value: \"%s\"\n", attribute_names[(int)attribute->type], value_container);
     
@@ -729,3 +593,5 @@ void print_styles(LocalStyles* glob_styles)
         curr_style++;
     }
 }
+
+#endif

@@ -47,6 +47,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                     break;
                 }
                 
+                
                 // Push a new token for the attributes
                 new_token = push_token();
                 new_token->type = TokenType::TAG_ATTRIBUTE;

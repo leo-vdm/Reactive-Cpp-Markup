@@ -43,7 +43,6 @@ struct SplitFileNames
 };
 
 
-
 // Lexer Types
 enum class TokenType
 {
@@ -131,12 +130,40 @@ struct RegisteredBinding{
 
 #define MAX_ATTRIBUTE_NAME_LENGTH 57// The length of the longest built in attribute name
 
-struct Attribute {
-    AttributeType type;
-    char* attribute_value;
+struct attr_comp_id_body 
+{
+    int id;
+};
+
+struct attr_on_click_body
+{
+    int binding_id;
+};
+
+struct attr_text_like_body
+{
+    char* value;
     int value_length;
     int binding_position; // Position where the binding gets inserted into the value (for attributes like text)
     int binding_id; 
+};
+
+struct attr_custom_body : attr_text_like_body
+{
+    char* name;
+    int name_length;
+};
+
+struct Attribute {
+    AttributeType type;
+    
+    union 
+    {
+        attr_on_click_body OnClick;
+        attr_comp_id_body CompId;
+        attr_text_like_body Text;
+        attr_custom_body Custom;
+    };
 };
 
 struct Tag {

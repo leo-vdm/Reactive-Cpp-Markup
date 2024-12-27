@@ -8,26 +8,38 @@
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 // Windows definitions for memory management
 #include <windows.h>
-Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags = 0){
+Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
+{
     Arena newArena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
+    
     // Allocate the first page
     VirtualAlloc((void*)(newArena.next_address & ~(page_size)), page_size, MEM_COMMIT, PAGE_READWRITE);
 
     return newArena;
 }
 
-void* Alloc(Arena* arena, int size, uint64_t flags){
-    
-    // Check if we are allocating over a page boundry, if we are commit the new pages.
-    uintptr_t aligned_next_address = arena->next_address & ~(page_size);
-    uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
-    
-    if(aligned_next_address < aligned_new_next_address){
-        LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
-    }
+void* Alloc(Arena* arena, int size, uint64_t flags)
+{
     
     void* allocatedAddress = (void*)arena->next_address;
-    arena->next_address += size;
+    
+    // If allocation is 1 item, try to use a freeblock if there is one
+    if(size == arena->alloc_size && arena->first_free.next_free)
+    {
+        allocatedAddress = (void*)(arena->first_free.next_free);
+        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
+    }
+    else
+    {
+        // Check if we are allocating over a page boundry, if we are commit the new pages.
+        uintptr_t aligned_next_address = arena->next_address & ~(page_size);
+        uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
+        
+        if(aligned_next_address < aligned_new_next_address){
+            LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
+        }
+        arena->next_address += size;
+    }
     
     if(flags & no_zero())
     {
@@ -43,45 +55,60 @@ void* Alloc(Arena* arena, int size, uint64_t flags){
     return allocatedAddress;
 }
 
-void* Alloc(Arena* arena){
+/*
+void* Alloc(Arena* arena, uint64_t flags)
+{
+    void* allocatedAddress = (void*)arena->next_address;
     int size = arena->alloc_size;
-    void* allocatedAddress;
     
     // If there is a free block, allocate that instead.
-    if(arena->first_free.next_freeblock_offset != 0){
-        allocatedAddress = (void*)(arena->mapped_address + arena->first_free.next_freeblock_offset);
-        arena->first_free.next_freeblock_offset = ((FreeBlock*)allocatedAddress)->next_freeblock_offset;
+    if(arena->first_free.next_freeblock_offset != 0)
+    {
+        allocatedAddress = (void*)(arena->first_free.next_free);
+        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
+    }
+    else
+    {
+        // Check if we are allocating over a page boundry, if we are commit the new pages.
+        uintptr_t aligned_next_address = arena->next_address & ~(page_size);
+        uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
         
+        if(aligned_next_address < aligned_new_next_address){
+            LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
+        }
+        arena->next_address += size;
+    }
+    
+    if(flags & no_zero())
+    {
+       return allocatedAddress;
+    }
+    
+    if(flags & zero() || !arena->flags)
+    {
+        memset((void*)allocatedAddress, 0, size);
         return allocatedAddress;
     }
     
-    // Check if we are allocating over a page boundry, if we are commit the new pages.
-    uintptr_t aligned_next_address = arena->next_address & ~(page_size);
-    uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
-    
-    if(aligned_next_address < aligned_new_next_address){
-        LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
-    }
-    
-    allocatedAddress = (void*)arena->next_address;
-    arena->next_address += size;
-    
     return allocatedAddress;
 }
+*/
 
-void DeAlloc(Arena* arena, void* address){
-    uint16_t new_free_offset = (uint16_t)(((uintptr_t)address) - arena->mapped_address);
-    ((FreeBlock*)address)->next_freeblock_offset = arena->first_free.next_freeblock_offset;
-    arena->first_free.next_freeblock_offset = new_free_offset;
+void DeAlloc(Arena* arena, void* address)
+{
+    ((FreeBlock*)address)->next_free = arena->first_free.next_free;
+    arena->first_free.next_free = ((FreeBlock*)address);
 }
 
 // Release and re-obtain an address space to ensure resources go back to kernel
-void ResetArena(Arena* arena){
+void ResetArena(Arena* arena)
+{
     arena->next_address = arena->mapped_address;
-    arena->first_free.next_freeblock_offset = 0;
+    arena->first_free = {};
 }
 
-void FreeArena(Arena* arena){
+void FreeArena(Arena* arena)
+{
     VirtualFree((void*)arena->mapped_address, arena->size, MEM_RELEASE);
 }
 
@@ -94,9 +121,20 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
     return newArena;
 }
 
-void* Alloc(Arena* arena, int size, uint64_t flags){
+void* Alloc(Arena* arena, int size, uint64_t flags)
+{
     void* allocatedAddress = (void*)arena->next_address;
-    arena->next_address += size;
+    
+    // If allocation is 1 item, try to use a freeblock if there is one
+    if(size == arena->alloc_size && arena->first_free.next_free)
+    {
+        allocatedAddress = (void*)(arena->first_free.next_free);
+        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
+    }
+    else
+    {
+        arena->next_address += size;
+    }
     
     if(flags & no_zero())
     {
@@ -111,39 +149,51 @@ void* Alloc(Arena* arena, int size, uint64_t flags){
     return allocatedAddress;
 }
 
-void* Alloc(Arena* arena){
+/*
+void* Alloc(Arena* arena, uint64_t flags)
+{
     void* allocatedAddress = (void*)arena->next_address;
     int size = arena->alloc_size;
     
     // If there is a free block, allocate that instead.
-    if(arena->first_free.next_freeblock_offset != 0){
-        allocatedAddress = (void*)(arena->mapped_address + arena->first_free.next_freeblock_offset);
-        arena->first_free.next_freeblock_offset = ((FreeBlock*)allocatedAddress)->next_freeblock_offset;
+    if(arena->first_free.next_free){
+        allocatedAddress = (void*)(arena->first_free.next_free);
+        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
+    }
+    else
+    {
+        arena->next_address += size;
+    }
     
+    if(flags & no_zero())
+    {
+        return allocatedAddress;
+    }
+    if(flags & zero() || !arena->flags)
+    {
+        memset((void*)allocatedAddress, 0, size);
         return allocatedAddress;
     }
     
-    arena->next_address += size;
-    
     return allocatedAddress;
 }
+*/
 
-void DeAlloc(Arena* arena, void* address){
-    uint16_t new_free_offset = (uint16_t)(((uintptr_t)address) - arena->mapped_address);
-    ((FreeBlock*)address)->next_freeblock_offset = arena->first_free.next_freeblock_offset;
-    arena->first_free.next_freeblock_offset = new_free_offset;
-    
+void DeAlloc(Arena* arena, void* address)
+{
+    ((FreeBlock*)address)->next_free = arena->first_free.next_free;
+    arena->first_free.next_free = ((FreeBlock*)address);    
 }
 
 // Release and re-obtain an address space to ensure resources go back to kernel
-void ResetArena(Arena* arena){
-    //FreeArena(arena);
-    //*arena = CreateArena(arena->size, arena->alloc_size);
+void ResetArena(Arena* arena)
+{
     arena->next_address = arena->mapped_address;
-    arena->first_free.next_freeblock_offset = 0;
+    arena->first_free = {};
 }
 
-void FreeArena(Arena* arena){
+void FreeArena(Arena* arena)
+{
     munmap((void*)arena->mapped_address, arena->size);
 }
 

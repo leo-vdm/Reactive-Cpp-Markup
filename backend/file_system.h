@@ -51,15 +51,45 @@ struct SavedTag
     int first_child_index;
 };
 
+struct saved_attr_comp_id_body 
+{
+    int id;
+};
+
+struct saved_attr_text_like_body
+{
+    int value_index;
+    int value_length;
+    int binding_position; // Position where the binding gets inserted into the value (for attributes like text)
+    int binding_id; 
+};
+
+struct saved_attr_custom_body : saved_attr_text_like_body
+{
+    int name_index;
+    int name_length;
+};
 
 struct SavedAttribute 
 {
     Compiler::AttributeType type;
-    int attribute_value_index;
-    int value_length;
-    int binding_position; // Position where the binding gets inserted into the value (for attributes like text)
-    int binding_id;
+    
+    union
+    {
+        saved_attr_comp_id_body CompId;
+        saved_attr_text_like_body Text;
+        saved_attr_custom_body Custom;
+    };
 };
+
+//struct SavedAttribute 
+//{
+//    Compiler::AttributeType type;
+//    int attribute_value_index;
+//    int value_length;
+//    int binding_position; // Position where the binding gets inserted into the value (for attributes like text)
+//    int binding_id;
+//};
 
 
 struct FileSearchResult

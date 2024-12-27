@@ -10,7 +10,8 @@ int push_val_to_combined_arena(Arena* combined_values, char* value, int value_le
 //Note(Leo): file_name MUST be null terminated!!
 void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name, int file_id, int flags)
 {
-    #define get_index(arena_ptr, pointer) (uintptr_t)pointer ? (((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer) : 0
+    //Note(Leo): we +1 every index so that index 0 can represent NULL ptrs, minus 1 off the index when loading to account
+    #define get_index(arena_ptr, pointer) (uintptr_t)pointer ? ((((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer)) + 1 : 0
 
     int current_index = 0; // Current index in bytes into the file, PageFileHeader is always at zero
     FILE* out_file = fopen(file_name, "wb+");
@@ -22,7 +23,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
     Arena combined_values_arena = CreateArena(10000*sizeof(char), sizeof(char));
     
-    // Note(Leo): index zero of the combined values should be a zero for any NULL values to point too
+    // Note(Leo): index zero of the values arena should be a zero for any NULL values to point too
     Alloc(&combined_values_arena, sizeof(char)); 
     
     PageFileHeader header = PageFileHeader();
@@ -37,7 +38,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
     Tag* curr_tag = (Tag*)saved_tree->tags->mapped_address;
     SavedTag added_tag;
-    
+        
     while(curr_tag->tag_id != 0)
     {
         added_tag.tag_id = curr_tag->tag_id;
@@ -66,17 +67,27 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         added_attribute.type = curr_attribute->type;
         switch(curr_attribute->type)
         {
+            case(AttributeType::ON_CLICK):
+                // Todo(Leo): Implement saving for the onclick.
+                assert(0);
             case(AttributeType::COMP_ID):
-                added_attribute.attribute_value_index = 0;
+                added_attribute.CompId.id = curr_attribute->CompId.id;
                 break;
-            default:
-                added_attribute.attribute_value_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->attribute_value, curr_attribute->value_length);
+            case(AttributeType::CUSTOM):
+                added_attribute.Custom.name_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->Custom.name, curr_attribute->Custom.name_length);
+                added_attribute.Custom.name_length = curr_attribute->Custom.name_length;
+                // Fill the shared parameters
+                goto text_like;
+                break;
+            default: // Text like attributes
+                text_like:
+                added_attribute.Text.value_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->Text.value, curr_attribute->Text.value_length);
+                added_attribute.Text.value_length = curr_attribute->Text.value_length;
+                added_attribute.Text.binding_position = curr_attribute->Text.binding_position;
+                added_attribute.Text.binding_id = curr_attribute->Text.binding_id;
+                
                 break;
         }
-        
-        added_attribute.value_length = curr_attribute->value_length;
-        added_attribute.binding_position = curr_attribute->binding_position;
-        added_attribute.binding_id = curr_attribute->binding_id;
         
         fwrite(&added_attribute, sizeof(SavedAttribute), 1, out_file);
         
@@ -131,9 +142,10 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
     header.first_value_index = current_index;
     
-    fwrite((char*)combined_values_arena.mapped_address, sizeof(char), get_index((&combined_values_arena), (char*)combined_values_arena.next_address), out_file);
+    //fwrite((char*)combined_values_arena.mapped_address, sizeof(char), get_index((&combined_values_arena), (char*)combined_values_arena.next_address), out_file);
+    header.values_length = (combined_values_arena.next_address - combined_values_arena.mapped_address) / sizeof(char);
+    fwrite((char*)combined_values_arena.mapped_address, sizeof(char), header.values_length, out_file);
     
-    header.values_length = get_index((&combined_values_arena), ((char*)combined_values_arena.next_address));
     
     // Re-write header with final values
     fseek(out_file, 0, SEEK_SET);
@@ -142,10 +154,10 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
 }
 
-#define debug_load 1
+#define debug_load 0
 LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
-    #define get_pointer(base_ptr, index, type) (type*)(base_ptr + sizeof(type)*index)
+    #define get_pointer(base_ptr, index, type) (index ? (type*)(base_ptr + sizeof(type)*(index - 1)) : NULL)
     
     LoadedFileHandle handle;
     
@@ -237,19 +249,27 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
         switch(read_attribute.type)
         {
             case(AttributeType::COMP_ID):
-                added_attribute->attribute_value = NULL;                
+                added_attribute->CompId.id = read_attribute.CompId.id;            
+                break;
+            case(AttributeType::CUSTOM):
+                added_attribute->Custom.name = get_pointer(base_value, read_attribute.Custom.name_index, char);
+                added_attribute->Custom.name_length = read_attribute.Custom.name_length;
+                goto text_like;
                 break;
             default:
-                added_attribute->attribute_value = get_pointer(base_value, read_attribute.attribute_value_index, char);
+                text_like:
+                added_attribute->Text.value = get_pointer(base_value, read_attribute.Text.value_index, char);
+                added_attribute->Text.value_length = read_attribute.Text.value_length;
+                added_attribute->Text.binding_position = read_attribute.Text.binding_position;
+                added_attribute->Text.binding_id = read_attribute.Text.binding_id;
                 break;
         }
-        added_attribute->value_length = read_attribute.value_length;
-        added_attribute->binding_position = read_attribute.binding_position;
-        added_attribute->binding_id = read_attribute.binding_id;
+        
 #if debug_load
         printf(" --Attribute--\n");
         printf("\tType: %d\n", (int)added_attribute->type);
-        printf("\tBinding id: %d\n", added_attribute->binding_id);
+        printf("\tVal length: %d\n", (int)added_attribute->Text.value_length);
+        printf("\tBinding id: %d\n", added_attribute->Text.binding_id);
 #endif
     }
     
@@ -331,7 +351,7 @@ int push_val_to_combined_arena(Arena* combined_values, char* value, int value_le
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 // Windows definitions for memory management
 #include <windows.h>
-void search_dir_r(Arena* results, Arena* result_values, const dir_ref, const char* file_extension)
+void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, const char* file_extension)
 {
     int parent_len = strlen(dir_ref);
     WIN32_FIND_DATAA item;
@@ -396,10 +416,7 @@ void search_dir_r(Arena* results, Arena* result_values, const dir_ref, const cha
 void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension)
 {
     search_dir_r(results, result_values, dir_name, file_extension);
-    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult));
-    
-    // Note(Leo): this step only needs to happen because arenas dont clear allocated memory, otherwise this could be removed
-    memset(end, 0, sizeof(FileSearchResult));
+    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult), zero());
 }
 
 #elif defined(__linux__) && !defined(_WIN32)
