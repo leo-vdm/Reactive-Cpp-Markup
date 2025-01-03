@@ -5,7 +5,8 @@
 
 // Note(Leo): Input here is just for the c++ type matcher so that the function can always have the same name but gives a 
 // description based on the type given to input
-VkVertexInputBindingDescription vk_get_binding_description(vertex input) 
+
+VkVertexInputBindingDescription vk_get_binding_description(vertex input)
 {
     VkVertexInputBindingDescription binding_description = {};
 
@@ -16,20 +17,71 @@ VkVertexInputBindingDescription vk_get_binding_description(vertex input)
     return binding_description;
 }
 
-const VkVertexInputAttributeDescription vertex_input_attribute_descriptions[] = 
+VkVertexInputBindingDescription vk_get_binding_description(opaque_instance input)
 {
+    VkVertexInputBindingDescription binding_description = {};
+
+    binding_description.binding = 1;
+    binding_description.stride = sizeof(opaque_instance);
+    binding_description.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    return binding_description;
+}
+
+VkVertexInputBindingDescription vk_get_binding_description(transparent_instance input)
+{
+    VkVertexInputBindingDescription binding_description = {};
+
+    binding_description.binding = 1;
+    binding_description.stride = sizeof(transparent_instance);
+    binding_description.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    return binding_description;
+}
+
+const VkVertexInputAttributeDescription opaque_instance_input_attribute_descriptions[] = 
+{
+    // Vertex Members
     {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, position)},
-    {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex, color)},
-    {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, texture_coord)}
+    {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, texture_coord)},
+    
+    // Instance Members
+    {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(opaque_instance, offsets)},
+    {3, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(opaque_instance, color)},
+    {4, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(opaque_instance, scale)},
+    {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(opaque_instance, corners)}
 };
 
-VkVertexInputAttributeDescription* vk_get_attribute_descriptions(vertex input, int* len)
+VkVertexInputAttributeDescription* vk_get_attribute_descriptions(opaque_instance input, int* len)
 {
     if(len)
     {
-        *len = sizeof(vertex_input_attribute_descriptions)/sizeof(VkVertexInputAttributeDescription);
+        *len = sizeof(opaque_instance_input_attribute_descriptions)/sizeof(VkVertexInputAttributeDescription);
     }
-    return (VkVertexInputAttributeDescription*)vertex_input_attribute_descriptions;
+    return (VkVertexInputAttributeDescription*)opaque_instance_input_attribute_descriptions;
+}
+
+const VkVertexInputAttributeDescription transparent_instance_input_attribute_descriptions[] = 
+{
+    // Vertex Members
+    {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, position)},
+    {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, texture_coord)},
+    
+    // Instance Members
+    {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(transparent_instance, offsets)},
+    {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(transparent_instance, color)},
+    {4, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(transparent_instance, scale)},
+    {5, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(transparent_instance, corners)},
+    {6, 1, VK_FORMAT_R32_SINT, offsetof(transparent_instance, image_index)}
+};
+
+VkVertexInputAttributeDescription* vk_get_attribute_descriptions(transparent_instance input, int* len)
+{
+    if(len)
+    {
+        *len = sizeof(transparent_instance_input_attribute_descriptions)/sizeof(VkVertexInputAttributeDescription);
+    }
+    return (VkVertexInputAttributeDescription*)transparent_instance_input_attribute_descriptions;
 }
 
 const float mat2_identity[2][2] = {{1, 0}, {0, 1}};

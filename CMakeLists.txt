@@ -39,7 +39,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES -pthread -Og")
 # Use vulkan headers from glfw:
 #include_directories(${GLFW_DIR}/deps)
 
-file(GLOB runtime_sources backend/runtime.cpp backend/arena.cpp backend/arena_string.cpp backend/DOM.cpp)
+file(GLOB runtime_sources backend/runtime.cpp backend/arena.cpp backend/arena_string.cpp backend/DOM.cpp backend/platform_linux.cpp backend/platform_windows.cpp backend/graphics_types.cpp backend/platform_vulkan.cpp)
 #add_executable(runtime ${runtime_sources})
 add_library(runtime ${runtime_sources})
 

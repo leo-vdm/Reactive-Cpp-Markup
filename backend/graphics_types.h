@@ -41,6 +41,29 @@ struct vec3
     };
 };
 
+struct vec4
+{
+    union
+    {
+        float r;
+    };
+
+    union
+    {
+        float g;
+    };
+    
+    union
+    {
+        float b;
+    };
+    
+    union
+    {
+        float a;
+    };
+};
+
 struct ivec2 
 {
     union
@@ -143,8 +166,36 @@ struct mat4
 struct vertex
 {
     vec2 position;
-    vec3 color;
     vec2 texture_coord;
+};
+
+//struct opaque_vertex
+//{
+//    vec2 position;
+//    vec2 texture_coord;
+//};
+//
+//struct transparent_vertex
+//{
+//    vec2 position;
+//    vec2 texture_coord;
+//};
+
+struct opaque_instance
+{
+    vec3 offsets;
+    vec3 color;
+    vec2 scale;
+    vec4 corners;
+};
+
+struct transparent_instance
+{
+    vec3 offsets;
+    vec4 color;
+    vec2 scale;
+    vec4 corners;
+    int32_t image_index;
 };
 
 struct UniformBufferObject
@@ -154,8 +205,16 @@ struct UniformBufferObject
     mat4 projection;
 };
 
-VkVertexInputBindingDescription vk_get_binding_description(vertex input); 
-VkVertexInputAttributeDescription* vk_get_attribute_descriptions(vertex input, int* len = NULL);
+VkVertexInputBindingDescription vk_get_binding_description(vertex input);
+VkVertexInputBindingDescription vk_get_binding_description(opaque_instance input); 
+VkVertexInputBindingDescription vk_get_binding_description(transparent_instance input); 
+
+VkVertexInputAttributeDescription* vk_get_attribute_descriptions(opaque_instance input, int* len = NULL);
+VkVertexInputAttributeDescription* vk_get_attribute_descriptions(transparent_instance input, int* len = NULL);
+
+
+//VkVertexInputBindingDescription vk_get_binding_description(transparent_vertex input); 
+//VkVertexInputBindingDescription vk_get_binding_description(opaque_vertex input);
 
 void Identity(mat2* matrix);
 void Identity(mat3* matrix);

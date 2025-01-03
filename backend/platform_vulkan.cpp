@@ -36,6 +36,9 @@ struct vk_shader_pair
 struct vk_optional_features
 {
     bool SAMPLER_ANISOTROPY;
+    bool RENDERER_MSAA;
+    VkSampleCountFlagBits MSAA_SAMPLES;
+    bool RENDERER_SAMPLE_SHADING;
 };
 
 
@@ -70,14 +73,20 @@ struct VulkanRenderPlatform
     
     VkSwapchainCreateInfoKHR vk_swapchain_settings;
     
-    vk_shader_pair vk_main_shader;
+    vk_shader_pair vk_opaque_shader;
+    vk_shader_pair vk_transparent_shader;
     
     vk_optional_features vk_supported_optionals;
     
     bool vk_graphics_pipeline_initialized;
     VkRenderPass vk_main_render_pass;
-    VkPipeline vk_main_graphics_pipeline;
-    VkPipelineLayout vk_main_graphics_pipeline_layout;
+    
+    VkPipeline vk_opaque_graphics_pipeline;
+    VkPipelineLayout vk_opaque_graphics_pipeline_layout;
+    
+    VkPipeline vk_transparent_graphics_pipeline;
+    VkPipelineLayout vk_transparent_graphics_pipeline_layout;
+    
     VkCommandPool vk_main_command_pool;
     VkCommandPool vk_transient_command_pool;
     VkDescriptorPool vk_main_descriptor_pool;
@@ -120,7 +129,7 @@ bool vk_extensions_supported(const VulkanSupportedExtensions supported_extension
 }
 
 
-bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface, int* present_family_index = NULL)
+bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface, int avoided_family_index, int* present_family_index = NULL)
 {
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, nullptr);
@@ -130,6 +139,8 @@ bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface,
     
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, supported_families);
     
+    bool found_avoided_family = false;
+    
     for(int i = 0; i < queue_family_count; i++)
     {
         VkBool32 present_supported = false;
@@ -137,6 +148,13 @@ bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface,
     
         if(present_supported)
         {
+            // This family is compatible but non-ideal, continue searching
+            if(i == avoided_family_index)
+            {
+                found_avoided_family = true;
+                continue;
+            }
+        
             if(present_family_index)
             {
                 *present_family_index = i;
@@ -148,11 +166,22 @@ bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface,
     }
     
     DeAllocScratch(allocated_space);
+    
+    // We found a compatible family but it was the non-ideal one
+    if(found_avoided_family)
+    {
+        if(present_family_index)
+        {
+            *present_family_index = avoided_family_index;
+        }
+        return true;
+    }
+    
     return false;
 }
 
 
-bool vk_device_queues_supported(VkPhysicalDevice* target_device, int* graphics_family_index = NULL)
+bool vk_device_queues_supported(VkPhysicalDevice* target_device, int avoided_family_index, int* graphics_family_index = NULL)
 {
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, nullptr);
@@ -162,10 +191,19 @@ bool vk_device_queues_supported(VkPhysicalDevice* target_device, int* graphics_f
     
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, supported_families);
     
+    bool found_avoided_family = false;
+    
     for(int i = 0; i < queue_family_count; i++)
     {
         if((supported_families + i)->queueFlags & VK_QUEUE_GRAPHICS_BIT)
         {
+            // This family is compatible but non-ideal, continue searching
+            if(i == avoided_family_index)
+            {
+                found_avoided_family = true;
+                continue;
+            }
+            
             if(graphics_family_index)
             {
                 *graphics_family_index = i;
@@ -178,6 +216,17 @@ bool vk_device_queues_supported(VkPhysicalDevice* target_device, int* graphics_f
     }
     
     DeAllocScratch(allocated_space);
+    
+    // We found a compatible family but it was the non-ideal one
+    if(found_avoided_family)
+    {
+        if(graphics_family_index)
+        {
+            *graphics_family_index = avoided_family_index;
+        }
+        return true;
+    }
+    
     return false;
 }
 
@@ -205,7 +254,7 @@ VkPhysicalDevice* vk_pick_physical_device(VkPhysicalDevice* physical_devices, in
         score += device_properties.limits.maxImageDimension2D;
         
         // Check if device is incompatible
-        if(!device_features.geometryShader || !vk_device_queues_supported(physical_devices + i))
+        if(!device_features.geometryShader || !vk_device_queues_supported(physical_devices + i, -1))
         {
             score = 0;
         }
@@ -257,8 +306,11 @@ VkSurfaceFormatKHR vk_pick_surface_format(VkSurfaceKHR surface)
     for(int i = 0; i < format_count; i++)
     {
         VkSurfaceFormatKHR* curr_format = supported_formats + i;
+        // Note(Leo): AMD drivers tend to mess up gamma (darkens the image) when doing device side MSAA in SRGB format, 
+        // UNORM seems to fix it without causing gamma problems (lightening the image) in drivers that dont have issues. 
+        // Note(Leo): Images also have to be loaded in UNORM because of it being used here!
         // Ideal format
-        if(curr_format->format == VK_FORMAT_B8G8R8A8_SRGB && curr_format->colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        if(curr_format->format == VK_FORMAT_B8G8R8A8_UNORM && curr_format->colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
         {
             DeAllocScratch(allocated_space);
             return *curr_format;
@@ -353,13 +405,13 @@ bool vk_initialize_logical_device(VkSurfaceKHR surface, const char** device_exte
 {
     // Find the queue family index for our device
     int graphics_family_index;
-    if(!vk_device_queues_supported(&(rendering_platform.vk_physical_device), &graphics_family_index))
+    if(!vk_device_queues_supported(&(rendering_platform.vk_physical_device), -1, &graphics_family_index))
     {
         printf("Failed to initialize graphics queue!\n");
     }
     
     int present_family_index;
-    if(!vk_present_supported(&(rendering_platform.vk_physical_device), surface, &present_family_index))
+    if(!vk_present_supported(&(rendering_platform.vk_physical_device), surface, graphics_family_index, &present_family_index))
     {
         printf("Failed to initialize presentation queue!\n");
     }
@@ -391,6 +443,10 @@ bool vk_initialize_logical_device(VkSurfaceKHR surface, const char** device_exte
     {
         device_features.samplerAnisotropy = VK_TRUE;
     }
+    if(rendering_platform.vk_supported_optionals.RENDERER_SAMPLE_SHADING)
+    {
+        device_features.sampleRateShading = VK_TRUE;
+    }
     
     VkDeviceCreateInfo logical_create_info = {};
     logical_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -401,7 +457,6 @@ bool vk_initialize_logical_device(VkSurfaceKHR surface, const char** device_exte
     #if VK_USE_VALIDATION
     logical_create_info.enabledLayerCount = sizeof(validation_layers)/sizeof(char**);
     logical_create_info.ppEnabledLayerNames = validation_layers;
-            
     #else
     logical_create_info.enabledLayerCount = 0;
     #endif
@@ -478,6 +533,30 @@ bool vk_create_swapchain(VkSurfaceKHR surface, int window_width, int widow_heigh
     return true;
 }
 
+bool vk_create_image_view(VkImage image, VkFormat format, VkImageAspectFlags aspect_flags, VkImageView* target_view)
+{
+    VkImageViewCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    create_info.image = image;
+    create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    create_info.format = format;
+    create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    create_info.subresourceRange.aspectMask = aspect_flags;
+    create_info.subresourceRange.baseMipLevel = 0;
+    create_info.subresourceRange.levelCount = 1;
+    create_info.subresourceRange.baseArrayLayer = 0;
+    create_info.subresourceRange.layerCount = 1;
+    
+    if(vkCreateImageView(rendering_platform.vk_device, &create_info, 0, target_view) != VK_SUCCESS)
+    {
+        return false;
+    }
+    return true;
+}
+
 LinkedPointer* vk_create_swapchain_image_views(VkSwapchainKHR swapchain)
 {
     uint32_t image_count;
@@ -509,6 +588,11 @@ LinkedPointer* vk_create_swapchain_image_views(VkSwapchainKHR swapchain)
         }
         prev = curr;
         
+        if(!vk_create_image_view(swapchain_images[i], rendering_platform.vk_swapchain_settings.imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, created))
+        {
+            printf("Failed to create image view!\n");
+        }
+        /*
         VkImageViewCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         create_info.image = swapchain_images[i];
@@ -528,6 +612,7 @@ LinkedPointer* vk_create_swapchain_image_views(VkSwapchainKHR swapchain)
         {
             printf("Failed to create image view!\n");
         }
+        */
         
     }
     
@@ -536,9 +621,10 @@ LinkedPointer* vk_create_swapchain_image_views(VkSwapchainKHR swapchain)
     return first;
 }
 
-LinkedPointer* vk_create_frame_buffers(LinkedPointer* first_swapchain_image_view, int window_width, int window_height)
+//LinkedPointer* vk_create_frame_buffers(LinkedPointer* first_swapchain_image_view, int window_width, int window_height, VkImageView window_depth_view)
+LinkedPointer* vk_create_frame_buffers(PlatformWindow* window)
 {
-    LinkedPointer* curr_image_view = first_swapchain_image_view;
+    LinkedPointer* curr_image_view = window->vk_first_image_view;
     
     
     LinkedPointer* prev_added = {};
@@ -561,16 +647,34 @@ LinkedPointer* vk_create_frame_buffers(LinkedPointer* first_swapchain_image_view
         }
         prev_added = curr_added;
         
-        VkImageView attachments[] = { *((VkImageView*)curr_image_view->data) };
+        VkImageView attachments[3];
+        if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+        {
+            attachments[0] = window->vk_msaa_image_view;
+            attachments[1] = window->vk_depth_image_view;
+            attachments[2] = *((VkImageView*)curr_image_view->data);     
+        }
+        else
+        {
+            attachments[0] = *((VkImageView*)curr_image_view->data); 
+            attachments[1] = window->vk_depth_image_view; 
+        }
     
         VkFramebufferCreateInfo framebuffer_info = {};
         
         framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebuffer_info.renderPass = rendering_platform.vk_main_render_pass;
-        framebuffer_info.attachmentCount = 1;
+        framebuffer_info.attachmentCount = sizeof(attachments)/sizeof(VkImageView);
+        
+        // Note(Leo): excludes MSAA view if it isnt supported
+        if(!rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+        {
+            framebuffer_info.attachmentCount -= 1;
+        }
+        
         framebuffer_info.pAttachments = attachments;
-        framebuffer_info.width = window_width;
-        framebuffer_info.height = window_height;
+        framebuffer_info.width = window->width;
+        framebuffer_info.height = window->height;
         framebuffer_info.layers = 1;
         
         if(vkCreateFramebuffer(rendering_platform.vk_device, &framebuffer_info, 0, created) != VK_SUCCESS)
@@ -581,6 +685,157 @@ LinkedPointer* vk_create_frame_buffers(LinkedPointer* first_swapchain_image_view
     }
     
     return first_added;
+}
+
+uint32_t vk_find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties)
+{
+    VkPhysicalDeviceMemoryProperties memory_properties;
+    vkGetPhysicalDeviceMemoryProperties(rendering_platform.vk_physical_device, &memory_properties);
+    
+    for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++)
+    {
+        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties)
+        {
+            return i;
+        }
+    }
+    
+    assert(0);
+    printf("Unable to find sutaible memory type with desired properties!\n");
+    return 0;
+}
+
+bool vk_format_has_stencil(VkFormat format)
+{
+    return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+}
+
+bool vk_pick_depth_format(VkFormat* target)
+{
+    const VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
+    int candidate_count = sizeof(candidates)/sizeof(VkFormat);
+    
+    for(int i = 0; i < candidate_count; i++)
+    {
+        VkFormatProperties properties;
+        vkGetPhysicalDeviceFormatProperties(rendering_platform.vk_physical_device, candidates[i], &properties);
+        
+        if(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
+        {
+            *target = candidates[i];
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+bool vk_create_depth_image(PlatformWindow* window)
+{
+    VkFormat picked_format;
+    if(!vk_pick_depth_format(&picked_format))
+    {
+        printf("No supported format found for depth buffer!\n");
+        return false;
+    }
+    
+    VkImageCreateInfo image_info = {};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = window->width;
+    image_info.extent.height = window->height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = picked_format;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        image_info.samples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+    }
+    else
+    {
+        image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    }
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if(vkCreateImage(rendering_platform.vk_device, &image_info, 0, &(window->vk_window_depth_image)) != VK_SUCCESS)
+    {
+        printf("Couldnt allocate depth buffer image memory!\n");
+        return false;
+    }
+
+    VkMemoryRequirements memory_requirements;
+    vkGetImageMemoryRequirements(rendering_platform.vk_device, window->vk_window_depth_image, &memory_requirements);
+    
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = vk_find_memory_type(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    if(vkAllocateMemory(rendering_platform.vk_device, &alloc_info, 0, &(window->vk_depth_image_memory)) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    vkBindImageMemory(rendering_platform.vk_device, window->vk_window_depth_image, window->vk_depth_image_memory, 0);
+    
+    if(!vk_create_image_view(window->vk_window_depth_image, picked_format, VK_IMAGE_ASPECT_DEPTH_BIT, &(window->vk_depth_image_view)))
+    {
+        printf("Failed to create image view for depth buffer!\n");
+        return false;
+    }
+    
+    return true;
+}
+
+bool vk_create_msaa_image(PlatformWindow* window)
+{
+    VkImageCreateInfo image_info = {};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = window->width;
+    image_info.extent.height = window->height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = rendering_platform.vk_swapchain_settings.imageFormat;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    image_info.samples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if(vkCreateImage(rendering_platform.vk_device, &image_info, 0, &(window->vk_window_msaa_image)) != VK_SUCCESS)
+    {
+        printf("Couldnt allocate msaa image memory!\n");
+        return false;
+    }
+    
+    VkMemoryRequirements memory_requirements;
+    vkGetImageMemoryRequirements(rendering_platform.vk_device, window->vk_window_msaa_image, &memory_requirements);
+    
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = vk_find_memory_type(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    if(vkAllocateMemory(rendering_platform.vk_device, &alloc_info, 0, &(window->vk_msaa_image_memory)) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    vkBindImageMemory(rendering_platform.vk_device, window->vk_window_msaa_image, window->vk_msaa_image_memory, 0);
+    
+    if(!vk_create_image_view(window->vk_window_msaa_image, rendering_platform.vk_swapchain_settings.imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, &(window->vk_msaa_image_view)))
+    {
+        printf("Failed to create image view for depth buffer!\n");
+        return false;
+    }
+    
+    return true;
 }
 
 bool vk_create_shader_module(void* binary, int binary_length, VkShaderModule* created)
@@ -602,35 +857,105 @@ bool vk_create_render_pass(VkRenderPass* render_pass)
 {
     VkAttachmentDescription color_attachment = {};
     color_attachment.format = rendering_platform.vk_swapchain_settings.imageFormat;
-    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     
+    
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_attachment.samples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+        color_attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+    else
+    {
+        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    }
+        
     VkAttachmentReference color_attachment_ref = {};
     color_attachment_ref.attachment = 0;
     color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription color_resolve_attachment = {};
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        color_resolve_attachment.format = rendering_platform.vk_swapchain_settings.imageFormat;
+        color_resolve_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        color_resolve_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color_resolve_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        color_resolve_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color_resolve_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_resolve_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        color_resolve_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    }
     
+    VkAttachmentReference color_resolve_ref = {};
+    color_resolve_ref.attachment = 2;
+    color_resolve_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    
+    VkFormat depth_format;
+    if(!vk_pick_depth_format(&depth_format))
+    {
+        return false;
+    }
+    
+    VkAttachmentDescription depth_attatchment = {};
+    depth_attatchment.format = depth_format;
+    
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        depth_attatchment.samples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+    }
+    else
+    {
+        depth_attatchment.samples = VK_SAMPLE_COUNT_1_BIT;
+    }
+    
+    depth_attatchment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attatchment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attatchment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth_attatchment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attatchment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth_attatchment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depth_attatchment_ref = {};
+    depth_attatchment_ref.attachment = 1;
+    depth_attatchment_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
     
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &color_attachment_ref;
-
+    subpass.pDepthStencilAttachment = &depth_attatchment_ref;
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        subpass.pResolveAttachments = &color_resolve_ref;
+    }
+    
+    VkAttachmentDescription attatchments[] = {color_attachment,  depth_attatchment, color_resolve_attachment};
     VkRenderPassCreateInfo render_pass_info = {};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_info.attachmentCount = 1;
-    render_pass_info.pAttachments = &color_attachment;
+    render_pass_info.attachmentCount = sizeof(attatchments)/sizeof(VkAttachmentDescription);
+    
+    // Note(Leo): Keeps the array the same but excludes the MSAA attatchment
+    if(!rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        render_pass_info.attachmentCount -= 1;
+    }
+
+    render_pass_info.pAttachments = attatchments;
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass;
     render_pass_info.dependencyCount = 1;
@@ -644,8 +969,7 @@ bool vk_create_render_pass(VkRenderPass* render_pass)
     return true;
 }
 
-
-bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, void* frag_shader_bin, int frag_bin_length)
+bool vk_create_transparent_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, void* frag_shader_bin, int frag_bin_length)
 {
     VkShaderModule vert_shader_module;
     VkShaderModule frag_shader_module;
@@ -685,11 +1009,15 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     
     VkVertexInputBindingDescription input_binding_description = vk_get_binding_description(vertex());
-    vertex_input_info.pVertexBindingDescriptions = &input_binding_description;
-    vertex_input_info.vertexBindingDescriptionCount = 1;
+    VkVertexInputBindingDescription instance_binding_description = vk_get_binding_description(transparent_instance());
+    
+    VkVertexInputBindingDescription input_binding_descriptions[] = { input_binding_description, instance_binding_description };
+    
+    vertex_input_info.pVertexBindingDescriptions = input_binding_descriptions;
+    vertex_input_info.vertexBindingDescriptionCount = sizeof(input_binding_descriptions)/sizeof(VkVertexInputBindingDescription);
     
     int attribute_description_count = 0;
-    vertex_input_info.pVertexAttributeDescriptions = vk_get_attribute_descriptions(vertex(), &attribute_description_count);
+    vertex_input_info.pVertexAttributeDescriptions = vk_get_attribute_descriptions(transparent_instance(), &attribute_description_count);
     vertex_input_info.vertexAttributeDescriptionCount = (uint32_t)attribute_description_count;
     
     VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
@@ -714,8 +1042,23 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     
     VkPipelineMultisampleStateCreateInfo multisampling = {};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        multisampling.rasterizationSamples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+    }
+    else
+    {
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    }
+    if(rendering_platform.vk_supported_optionals.RENDERER_SAMPLE_SHADING)
+    {
+        multisampling.sampleShadingEnable = VK_TRUE;
+        multisampling.minSampleShading = 0.2f;
+    }
+    else
+    {
+        multisampling.sampleShadingEnable = VK_FALSE;
+    }
     
     VkPipelineColorBlendAttachmentState color_blend_attachment = {};
     color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -738,6 +1081,20 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     color_blending.blendConstants[2] = 0.0f;
     color_blending.blendConstants[3] = 0.0f;
     
+    VkPipelineDepthStencilStateCreateInfo depth_stencil = {};
+    depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_stencil.depthTestEnable = VK_TRUE;
+    depth_stencil.depthWriteEnable = VK_FALSE;
+    depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depth_stencil.depthBoundsTestEnable = VK_FALSE;
+    depth_stencil.maxDepthBounds = 1.0f; 
+    depth_stencil.minDepthBounds = 0.0f; 
+    depth_stencil.stencilTestEnable = VK_FALSE;
+    depth_stencil.front = {}; 
+    depth_stencil.back = {};
+    
+    // Note(Leo): This should be initialized by the opaque pipeline!
+    /*
     VkDescriptorSetLayoutBinding ubo_layout_binding = {};
     ubo_layout_binding.binding = 0;
     ubo_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -756,6 +1113,7 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     {
         return false;
     }
+    */
     
     VkDescriptorSetLayoutBinding sampler_layout_binding = {};
     sampler_layout_binding.binding = 0;
@@ -792,15 +1150,9 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     pipeline_layout_info.pushConstantRangeCount = 0;
     pipeline_layout_info.pPushConstantRanges = 0;
 
-    if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_main_graphics_pipeline_layout)) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_transparent_graphics_pipeline_layout)) != VK_SUCCESS)
     {
         printf("Failed to create pipeline layout!\n");
-        return false;
-    }
-    
-    if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
-    {
-        printf("Failed to create renderpass!\n");
         return false;
     }
     
@@ -813,14 +1165,197 @@ bool vk_create_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, voi
     pipeline_info.pViewportState = &viewport_state;
     pipeline_info.pRasterizationState = &rasterizer;
     pipeline_info.pMultisampleState = &multisampling;
-    pipeline_info.pDepthStencilState = nullptr;
+    pipeline_info.pDepthStencilState = &depth_stencil;
     pipeline_info.pColorBlendState = &color_blending;
     pipeline_info.pDynamicState = &dynamic_state;
-    pipeline_info.layout = rendering_platform.vk_main_graphics_pipeline_layout;
+    pipeline_info.layout = rendering_platform.vk_transparent_graphics_pipeline_layout;
     pipeline_info.renderPass = rendering_platform.vk_main_render_pass;
     pipeline_info.subpass = 0;
     
-    if(vkCreateGraphicsPipelines(rendering_platform.vk_device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &rendering_platform.vk_main_graphics_pipeline) != VK_SUCCESS)
+    if(vkCreateGraphicsPipelines(rendering_platform.vk_device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &rendering_platform.vk_transparent_graphics_pipeline) != VK_SUCCESS)
+    {
+        printf("Failed on creating pipeline!\n");
+        return false;
+    }
+    
+    return true;
+}
+
+bool vk_create_opaque_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, void* frag_shader_bin, int frag_bin_length)
+{
+    VkShaderModule vert_shader_module;
+    VkShaderModule frag_shader_module;
+    
+    if(!vk_create_shader_module(vert_shader_bin, vert_bin_length, &vert_shader_module))
+    {
+        printf("Failed to create vertex shader module!\n");
+        return false;
+    }
+    if(!vk_create_shader_module(frag_shader_bin, frag_bin_length, &frag_shader_module))
+    {
+        printf("Failed to create fragment shader module!\n");
+        return false;
+    }
+    
+    VkPipelineShaderStageCreateInfo vert_shader_stage_info = {};
+    vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    vert_shader_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vert_shader_stage_info.module = vert_shader_module;
+    vert_shader_stage_info.pName = "main";
+    
+    VkPipelineShaderStageCreateInfo frag_shader_stage_info = {};
+    frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    frag_shader_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    frag_shader_stage_info.module = frag_shader_module;
+    frag_shader_stage_info.pName = "main";
+    
+    VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
+    
+    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamic_state = {};
+    dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state.dynamicStateCount = (uint32_t)sizeof(dynamic_states)/sizeof(VkDynamicState);
+    dynamic_state.pDynamicStates = dynamic_states;
+    
+    VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
+    vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    
+    VkVertexInputBindingDescription vertex_binding_description = vk_get_binding_description(vertex());
+    VkVertexInputBindingDescription instance_binding_description = vk_get_binding_description(opaque_instance());
+    
+    VkVertexInputBindingDescription input_binding_descriptions[] = { vertex_binding_description, instance_binding_description };
+    
+    vertex_input_info.pVertexBindingDescriptions = input_binding_descriptions;
+    vertex_input_info.vertexBindingDescriptionCount = sizeof(input_binding_descriptions)/sizeof(VkVertexInputBindingDescription);
+    
+    int attribute_description_count = 0;
+    vertex_input_info.pVertexAttributeDescriptions = vk_get_attribute_descriptions(opaque_instance(), &attribute_description_count);
+    vertex_input_info.vertexAttributeDescriptionCount = (uint32_t)attribute_description_count;
+    
+    VkPipelineInputAssemblyStateCreateInfo input_assembly = {};
+    input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    input_assembly.primitiveRestartEnable = VK_FALSE;
+    
+    VkPipelineViewportStateCreateInfo viewport_state = {};
+    viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1;
+    viewport_state.scissorCount = 1;
+    
+    VkPipelineRasterizationStateCreateInfo rasterizer = {};
+    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizer.depthClampEnable = VK_FALSE;
+    rasterizer.rasterizerDiscardEnable = VK_FALSE;
+    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.lineWidth = 1.0f;
+    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.depthBiasEnable = VK_FALSE;
+    
+    VkPipelineMultisampleStateCreateInfo multisampling = {};
+    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        multisampling.rasterizationSamples = rendering_platform.vk_supported_optionals.MSAA_SAMPLES;
+    }
+    else
+    {
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    }
+    if(rendering_platform.vk_supported_optionals.RENDERER_SAMPLE_SHADING)
+    {
+        multisampling.sampleShadingEnable = VK_TRUE;
+        multisampling.minSampleShading = 0.2f;
+    }
+    else
+    {
+        multisampling.sampleShadingEnable = VK_FALSE;
+    }
+    
+    VkPipelineColorBlendAttachmentState color_blend_attachment = {};
+    color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    color_blend_attachment.blendEnable = VK_TRUE;
+    color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+    color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    
+    VkPipelineColorBlendStateCreateInfo color_blending = {};
+    color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blending.logicOpEnable = VK_FALSE;
+    color_blending.logicOp = VK_LOGIC_OP_COPY; 
+    color_blending.attachmentCount = 1;
+    color_blending.pAttachments = &color_blend_attachment;
+    color_blending.blendConstants[0] = 0.0f;
+    color_blending.blendConstants[1] = 0.0f;
+    color_blending.blendConstants[2] = 0.0f;
+    color_blending.blendConstants[3] = 0.0f;
+    
+    VkPipelineDepthStencilStateCreateInfo depth_stencil = {};
+    depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_stencil.depthTestEnable = VK_TRUE;
+    depth_stencil.depthWriteEnable = VK_TRUE;
+    depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depth_stencil.depthBoundsTestEnable = VK_FALSE;
+    depth_stencil.maxDepthBounds = 1.0f; 
+    depth_stencil.minDepthBounds = 0.0f; 
+    depth_stencil.stencilTestEnable = VK_FALSE;
+    depth_stencil.front = {}; 
+    depth_stencil.back = {};
+    
+    VkDescriptorSetLayoutBinding ubo_layout_binding = {};
+    ubo_layout_binding.binding = 0;
+    ubo_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_layout_binding.descriptorCount = 1;
+    ubo_layout_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    ubo_layout_binding.pImmutableSamplers = 0;
+
+    VkDescriptorSetLayoutBinding ubo_bindings[] = { ubo_layout_binding };
+
+    VkDescriptorSetLayoutCreateInfo ubo_descriptor_set_create_info = {};
+    ubo_descriptor_set_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ubo_descriptor_set_create_info.bindingCount = (uint32_t)sizeof(ubo_bindings)/sizeof(VkDescriptorSetLayoutBinding);
+    ubo_descriptor_set_create_info.pBindings = ubo_bindings;
+    
+    if(vkCreateDescriptorSetLayout(rendering_platform.vk_device, &ubo_descriptor_set_create_info, 0, &(rendering_platform.vk_uniform_descriptor_layout)) != VK_SUCCESS)
+    {
+        return false;
+    }
+        
+    VkDescriptorSetLayout set_layouts[] = { rendering_platform.vk_uniform_descriptor_layout };
+    
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {};
+    pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_layout_info.setLayoutCount = sizeof(set_layouts)/sizeof(VkDescriptorSetLayout); 
+    pipeline_layout_info.pSetLayouts = set_layouts; 
+    pipeline_layout_info.pushConstantRangeCount = 0;
+    pipeline_layout_info.pPushConstantRanges = 0;
+
+    if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_opaque_graphics_pipeline_layout)) != VK_SUCCESS)
+    {
+        printf("Failed to create pipeline layout!\n");
+        return false;
+    }
+            
+    VkGraphicsPipelineCreateInfo pipeline_info = {};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_info.stageCount = 2;
+    pipeline_info.pStages = shader_stages;
+    pipeline_info.pVertexInputState = &vertex_input_info;
+    pipeline_info.pInputAssemblyState = &input_assembly;
+    pipeline_info.pViewportState = &viewport_state;
+    pipeline_info.pRasterizationState = &rasterizer;
+    pipeline_info.pMultisampleState = &multisampling;
+    pipeline_info.pDepthStencilState = &depth_stencil;
+    pipeline_info.pColorBlendState = &color_blending;
+    pipeline_info.pDynamicState = &dynamic_state;
+    pipeline_info.layout = rendering_platform.vk_opaque_graphics_pipeline_layout;
+    pipeline_info.renderPass = rendering_platform.vk_main_render_pass;
+    pipeline_info.subpass = 0;
+    
+    if(vkCreateGraphicsPipelines(rendering_platform.vk_device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &rendering_platform.vk_opaque_graphics_pipeline) != VK_SUCCESS)
     {
         printf("Failed on creating pipeline!\n");
         return false;
@@ -834,7 +1369,8 @@ bool vk_create_command_pools()
     VkCommandPoolCreateInfo pool_info = {};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    pool_info.queueFamilyIndex = rendering_platform.vk_present_queue_family;
+    //pool_info.queueFamilyIndex = rendering_platform.vk_present_queue_family;
+    pool_info.queueFamilyIndex = rendering_platform.vk_graphics_queue_family;
     
     if(vkCreateCommandPool(rendering_platform.vk_device, &pool_info, 0, &rendering_platform.vk_main_command_pool) != VK_SUCCESS)
     {
@@ -986,24 +1522,6 @@ bool vk_create_command_buffer(VkCommandBuffer* target)
     return true;
 }
 
-uint32_t vk_find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags properties)
-{
-    VkPhysicalDeviceMemoryProperties memory_properties;
-    vkGetPhysicalDeviceMemoryProperties(rendering_platform.vk_physical_device, &memory_properties);
-    
-    for (uint32_t i = 0; i < memory_properties.memoryTypeCount; i++)
-    {
-        if ((type_filter & (1 << i)) && (memory_properties.memoryTypes[i].propertyFlags & properties) == properties)
-        {
-            return i;
-        }
-    }
-    
-    assert(0);
-    printf("Unable to find sutaible memory type with desired properties!\n");
-    return 0;
-}
-
 bool vk_create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer* target_buffer, VkDeviceMemory* target_physical_memory)
 {
     VkBufferCreateInfo buffer_info = {};
@@ -1038,7 +1556,7 @@ bool vk_create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPrope
     return true;
 }
 
-bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, int image_index, int index_count)
+bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, int image_index, int index_count, int opaque_instance_count, int opaque_instance_offset, int transparent_instance_count, int transparent_instance_offset)
 {
     VkCommandBufferBeginInfo begin_recording_info = {};
     begin_recording_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1065,13 +1583,15 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     render_pass_info.framebuffer = used_frame_buffer;
     render_pass_info.renderArea.offset = {0, 0};
     render_pass_info.renderArea.extent = {(uint32_t)window->width, (uint32_t)window->height};
+    
     VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-    render_pass_info.clearValueCount = 1;
-    render_pass_info.pClearValues = &clear_color;
+    VkClearValue depth_clear = {};
+    depth_clear.depthStencil = {1.0f, 0};
     
-    vkCmdBeginRenderPass(buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+    VkClearValue clear_values[] = {clear_color, depth_clear};
     
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_main_graphics_pipeline);
+    render_pass_info.clearValueCount = sizeof(clear_values)/sizeof(depth_clear);
+    render_pass_info.pClearValues = clear_values;
     
     VkViewport viewport = {};
     viewport.x = 0.0f;
@@ -1080,22 +1600,55 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     viewport.height = (float)window->height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(buffer, 0, 1, &viewport);
     
     VkRect2D scissor = {};
     scissor.offset = {0, 0};
     scissor.extent = {(uint32_t)window->width, (uint32_t)window->height};
-    vkCmdSetScissor(buffer, 0, 1, &scissor);
     
+    vkCmdBeginRenderPass(buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+    
+    // Note(Leo): Opaque pass
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_opaque_graphics_pipeline);
+    
+    vkCmdSetViewport(buffer, 0, 1, &viewport);
+    vkCmdSetScissor(buffer, 0, 1, &scissor);
 
-    VkBuffer vertex_buffers[] = {window->vk_window_vertex_buffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
+    VkBuffer vertex_buffers[] = { window->vk_window_vertex_buffer };
+    VkDeviceSize opaque_offsets[] = { 0 };
+    // Vertices
+    // Note(Leo): Both pipelines share vertices since they draw the same shape
+    vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, opaque_offsets);
+    
+    VkDeviceSize opaque_instance_offsets[] = { (uint64_t)opaque_instance_offset };
+    // Instances
+    vkCmdBindVertexBuffers(buffer, 1, 1, vertex_buffers, opaque_instance_offsets);
+    
+    // Note(Leo): Both pipelines share indices since they draw the same shape 
     vkCmdBindIndexBuffer(buffer, window->vk_window_index_buffer, 0, VK_INDEX_TYPE_UINT16);
     
-    VkDescriptorSet descriptor_sets[2] = { window->vk_uniform_descriptor, rendering_platform.vk_image_descriptors };
-    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_main_graphics_pipeline_layout, 0, 2, descriptor_sets, 0, 0);
-    vkCmdDrawIndexed(buffer, index_count, 1, 0, 0, 0);
+    VkDescriptorSet opaque_descriptor_sets[1] = { window->vk_uniform_descriptor };
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_opaque_graphics_pipeline_layout, 0, 1, opaque_descriptor_sets, 0, 0);
+    vkCmdDrawIndexed(buffer, index_count, opaque_instance_count, 0, 0, 0);
+
+    // Note(Leo): Transparent pass    
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_transparent_graphics_pipeline);
+    
+    vkCmdSetViewport(buffer, 0, 1, &viewport);
+    vkCmdSetScissor(buffer, 0, 1, &scissor);
+
+    VkDeviceSize transparent_offsets[] = { 0 };
+    // Vertices
+    vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, transparent_offsets);
+    
+    VkDeviceSize transparent_instance_offsets[] = { (uint64_t)transparent_instance_offset };
+    // Instances
+    vkCmdBindVertexBuffers(buffer, 1, 1, vertex_buffers, transparent_instance_offsets);
+    
+    vkCmdBindIndexBuffer(buffer, window->vk_window_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+    
+    VkDescriptorSet transparent_descriptor_sets[2] = { window->vk_uniform_descriptor, rendering_platform.vk_image_descriptors };
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_transparent_graphics_pipeline_layout, 0, 2, transparent_descriptor_sets, 0, 0);
+    vkCmdDrawIndexed(buffer, index_count, transparent_instance_count, 0, 0, 0);
     
     vkCmdEndRenderPass(buffer);
     
@@ -1167,7 +1720,26 @@ void vk_destroy_swapchain_frame_buffers(LinkedPointer* first_frame_buffer)
     rendering_platform.vk_pointer_arrays->first_free.next_free = (FreeBlock*)first_frame_buffer;
 }
 
-int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* vert_shader, FILE* frag_shader, int image_buffer_size)
+bool vk_check_msaa_support(VkPhysicalDevice checked_device, VkSampleCountFlagBits* msaa_level_target)
+{
+    VkPhysicalDeviceProperties support_properties;
+    vkGetPhysicalDeviceProperties(checked_device, &support_properties);
+    VkSampleCountFlags supported_sample_count = support_properties.limits.framebufferColorSampleCounts & support_properties.limits.framebufferDepthSampleCounts;
+    
+    // MSAA Supported
+    if(supported_sample_count & VK_SAMPLE_COUNT_64_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_64_BIT; return true; }
+    if(supported_sample_count & VK_SAMPLE_COUNT_32_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_32_BIT; return true; }
+    if(supported_sample_count & VK_SAMPLE_COUNT_16_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_16_BIT; return true; }
+    if(supported_sample_count & VK_SAMPLE_COUNT_8_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_8_BIT; return true; }
+    if(supported_sample_count & VK_SAMPLE_COUNT_4_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_4_BIT; return true; }
+    if(supported_sample_count & VK_SAMPLE_COUNT_2_BIT) { *msaa_level_target = VK_SAMPLE_COUNT_2_BIT; return true; }
+
+    // MSAA not supported
+    *msaa_level_target = VK_SAMPLE_COUNT_1_BIT;
+    return false;
+}
+
+int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, int image_buffer_size)
 {
     uint32_t extension_count;
     vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL);
@@ -1278,6 +1850,19 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     {
         rendering_platform.vk_supported_optionals.SAMPLER_ANISOTROPY = true;
     }
+
+    if(supported_features.sampleRateShading)
+    {
+        rendering_platform.vk_supported_optionals.RENDERER_SAMPLE_SHADING = true;
+    }
+    
+    VkSampleCountFlagBits supported_msaa_level;
+    if(vk_check_msaa_support(rendering_platform.vk_physical_device, &supported_msaa_level))
+    {
+        rendering_platform.vk_supported_optionals.RENDERER_MSAA = true;
+        rendering_platform.vk_supported_optionals.MSAA_SAMPLES = supported_msaa_level;
+    }
+
     
     DeAllocScratch(allocated_space);
     
@@ -1297,8 +1882,11 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     *(rendering_platform.vk_image_handles) = CreateArena(1000*sizeof(LoadedImageHandle), sizeof(LoadedImageHandle));
     
     
-    rendering_platform.vk_main_shader.vert_shader_bin = vk_read_shader_bin(vert_shader, &rendering_platform.vk_main_shader.vert_shader_length);
-    rendering_platform.vk_main_shader.frag_shader_bin = vk_read_shader_bin(frag_shader, &rendering_platform.vk_main_shader.frag_shader_length);
+    rendering_platform.vk_opaque_shader.vert_shader_bin = vk_read_shader_bin(opaque_vert_shader, &rendering_platform.vk_opaque_shader.vert_shader_length);
+    rendering_platform.vk_opaque_shader.frag_shader_bin = vk_read_shader_bin(opaque_frag_shader, &rendering_platform.vk_opaque_shader.frag_shader_length);
+    
+    rendering_platform.vk_transparent_shader.vert_shader_bin = vk_read_shader_bin(transparent_vert_shader, &rendering_platform.vk_transparent_shader.vert_shader_length);
+    rendering_platform.vk_transparent_shader.frag_shader_bin = vk_read_shader_bin(transparent_frag_shader, &rendering_platform.vk_transparent_shader.frag_shader_length);
     
     rendering_platform.vk_image_buffer_size = image_buffer_size;
     
@@ -1394,8 +1982,8 @@ bool vk_create_staging_buffer(int staging_size, PlatformWindow* window)
 
 bool vk_create_vertex_buffer_with_index(int size_vertices, int size_indexes, PlatformWindow* window)
 {
-    // Note(Leo): +1 to leave space for alignment
-    VkDeviceSize vertex_buffer_size = sizeof(vertex) * (size_vertices + 1);
+    // Note(Leo): +2 to leave space for alignment
+    VkDeviceSize vertex_buffer_size = sizeof(vertex) * (size_vertices + 2);
     VkDeviceSize index_buffer_size = sizeof(uint16_t) * (size_indexes + 1);
     
     window->vk_vertex_staging_buffer_size = vertex_buffer_size;
@@ -1670,7 +2258,8 @@ void vk_init_empty_image()
     image_info.extent.depth = 1;
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1;
-    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    //image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -1705,6 +2294,12 @@ void vk_init_empty_image()
     memset(staging_data, 0, image_size);
     vkUnmapMemory(rendering_platform.vk_device, temp_stage_memory);
     
+    VkMemoryRequirements created_requirements = {};
+    vkGetImageMemoryRequirements(rendering_platform.vk_device, created_image, &created_requirements);
+    
+    // Note(Leo): This is required in the windows version of the Vulkan spec, linux seems to work without it but it is better to leave it for both
+    rendering_platform.vk_next_image_offset = align_offset_to(rendering_platform.vk_next_image_offset, created_requirements.alignment);
+    
     vkBindImageMemory(rendering_platform.vk_device, created_image, rendering_platform.vk_image_memory, rendering_platform.vk_next_image_offset);
     created_handle->vk_image_memory_offset = rendering_platform.vk_next_image_offset; 
     
@@ -1712,7 +2307,8 @@ void vk_init_empty_image()
     
     created_handle->vk_image_texture = created_image;
     
-    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    //if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
     {
         printf("Failed transitioning layout for image!\n");
         return;
@@ -1723,7 +2319,8 @@ void vk_init_empty_image()
         return;
     }
     
-    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    //if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
     {
         printf("Failed transitioning layout for image!\n");
         return;
@@ -1736,7 +2333,8 @@ void vk_init_empty_image()
     image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_info.image = created_handle->vk_image_texture;
     image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    //image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_view_info.format = VK_FORMAT_R8G8B8A8_UNORM;
     image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     image_view_info.subresourceRange.baseMipLevel = 0;
     image_view_info.subresourceRange.levelCount = 1;
@@ -1754,12 +2352,23 @@ void vk_init_empty_image()
         printf("ERROR: Another image was initialized before the empty image!");
         assert(0);
     }
-    
+    /*
     if(!vk_create_image_descriptor(rendering_platform.vk_image_descriptors, created_handle->vk_image_texture_view, rendering_platform.vk_next_image_index))
     {
         printf("Failed to update image descriptor for image!\n");
         return;
     }
+    */
+    // Note(Leo): Initialize all image descriptors to point to the empty image (stops vulkan from complaining that they are uninitialized)
+    for(int i = 0; i < MAX_TEXTURE_COUNT; i++)
+    {
+        if(!vk_create_image_descriptor(rendering_platform.vk_image_descriptors, created_handle->vk_image_texture_view, i))
+        {
+            printf("Failed to update image descriptor for image!\n");
+            return;
+        }
+    }
+    
     rendering_platform.vk_next_image_index++;
     
 }
@@ -1795,7 +2404,8 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     image_info.extent.depth = 1;
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1;
-    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+    //image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -1832,6 +2442,12 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     
     stbi_image_free(image_pixels);
     
+    VkMemoryRequirements created_requirements = {};
+    vkGetImageMemoryRequirements(rendering_platform.vk_device, created_image, &created_requirements);
+    
+    // Note(Leo): This is required in the windows version of the Vulkan spec, linux seems to work without it but it is better to leave it for both
+    rendering_platform.vk_next_image_offset = align_offset_to(rendering_platform.vk_next_image_offset, created_requirements.alignment);
+    
     vkBindImageMemory(rendering_platform.vk_device, created_image, rendering_platform.vk_image_memory, rendering_platform.vk_next_image_offset);
     created_handle->vk_image_memory_offset = rendering_platform.vk_next_image_offset; 
     
@@ -1839,7 +2455,8 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     
     created_handle->vk_image_texture = created_image;
     
-    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    //if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
     {
         printf("Failed transitioning layout for image!\n");
         return;
@@ -1850,7 +2467,8 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
         return;
     }
     
-    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    //if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    if(!vk_transition_image_layout(created_image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
     {
         printf("Failed transitioning layout for image!\n");
         return;
@@ -1859,19 +2477,9 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     vkDestroyBuffer(rendering_platform.vk_device, temp_stage, 0);
     vkFreeMemory(rendering_platform.vk_device, temp_stage_memory, 0);
     
-    VkImageViewCreateInfo image_view_info = {};
-    image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    image_view_info.image = created_handle->vk_image_texture;
-    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    image_view_info.subresourceRange.baseMipLevel = 0;
-    image_view_info.subresourceRange.levelCount = 1;
-    image_view_info.subresourceRange.baseArrayLayer = 0;
-    image_view_info.subresourceRange.layerCount = 1;
-
-    if(vkCreateImageView(rendering_platform.vk_device, &image_view_info, 0, &(created_handle->vk_image_texture_view)) != VK_SUCCESS)
-    {   
+    //if(!vk_create_image_view(created_handle->vk_image_texture, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, &(created_handle->vk_image_texture_view)))
+    if(!vk_create_image_view(created_handle->vk_image_texture, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, &(created_handle->vk_image_texture_view)))
+    {
         printf("Failed to create imageview for image!\n");
         return;
     }
@@ -1884,6 +2492,13 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     rendering_platform.vk_next_image_index++;
 }
 
+#define vk_copy_to_buffer_aligned(buffer_next, copy_src, alloc_size, align_type)  vk_copy_to_buffer_aligned_f(align_mem((void*)buffer_next, align_type), (void*)copy_src, alloc_size)
+
+void* vk_copy_to_buffer_aligned_f(void* aligned_buffer_next, void* copy_src, int alloc_size)
+{
+    memcpy(aligned_buffer_next, copy_src, alloc_size);
+    return aligned_buffer_next;
+}
 
 void RenderplatformDrawWindow(PlatformWindow* window)
 {
@@ -1901,26 +2516,41 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     vkResetFences(rendering_platform.vk_device, 1, &(window->vk_in_flight_fence));
     vkResetCommandBuffer(window->vk_command_buffer, 0);
     
-    const vertex temp_vertices[] = {
-        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
+    // Note(Leo): Quad
+    const uint16_t shared_indices[] = { 0, 1, 2, 2, 3, 0 };
+    
+    const vertex shared_vertices[] = {
+        {{0.0f, 0.0f}, {0.0f, 0.0f}},
+        {{1.0f, 0.0f}, {1.0f, 0.0f}},
+        {{1.0f, 1.0f},  {1.0f, 1.0f}},
+        {{0.0f, 1.0f}, {0.0f, 1.0f}},
     };
     
-    const uint16_t temp_indices[] = {
-        0, 1, 2, 2, 3, 0
+    const transparent_instance temp_transparent_instances[] = {
+        {{0.0f, -1.0f, 0.2f}, {0.2f, 0.2f, 0.5f, 0.5f}, {1.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}, { 1 } },
+        {{-0.5f, -1.0f, 0.0f}, {0.2f, 0.2f, 0.5f, 0.5f}, {1.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}, { 0 } },
+    };
+
+    const opaque_instance temp_opaque_instances[] = {
+        {{0.0f, 0.0f, 1.0f}, {0.2f, 0.2f, 0.5f}, {2.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}},  
+        {{-1.0f, -1.0f, 1.0f}, {0.2f, 0.2f, 0.0f}, {1.0f, 2.0f}, {0.1f, 0.1f, 0.1f, 0.1f}},  
     };
     
-    void* first_vertex_address = align_mem(window->vk_staging_mapped_address, vertex);
-    int first_vertex_offset = ((uintptr_t)first_vertex_address) - ((uintptr_t)window->vk_staging_mapped_address);
-    int temp_vertex_count = sizeof(temp_vertices)/sizeof(vertex);
-    memcpy(first_vertex_address, temp_vertices, sizeof(temp_vertices));
+    void* first_vertex_address = vk_copy_to_buffer_aligned(window->vk_staging_mapped_address, shared_vertices, sizeof(shared_vertices), vertex);
+    int first_vertex_offset = offset_of(first_vertex_address , window->vk_staging_mapped_address);
+    int shared_vertex_count = sizeof(shared_vertices)/sizeof(vertex);
     
-    void* first_index_address = align_mem(((vertex*)first_vertex_address + temp_vertex_count), uint16_t);
-    int first_index_offset = ((uintptr_t)first_index_address) - ((uintptr_t)window->vk_staging_mapped_address);
-    int temp_index_count = sizeof(temp_indices)/sizeof(uint16_t);
-    memcpy(first_index_address, temp_indices, sizeof(temp_indices));
+    void* first_index_address = vk_copy_to_buffer_aligned(((vertex*)first_vertex_address + shared_vertex_count), shared_indices, sizeof(shared_indices), uint16_t);
+    int first_index_offset = offset_of(first_index_address, window->vk_staging_mapped_address);
+    int shared_index_count = sizeof(shared_indices)/sizeof(uint16_t);
+
+    void* first_opaque_instance_address = vk_copy_to_buffer_aligned(((uint16_t*)first_index_address + shared_index_count), temp_opaque_instances, sizeof(temp_opaque_instances), opaque_instance);
+    int first_opaque_instance_offset = offset_of(first_opaque_instance_address, window->vk_staging_mapped_address); 
+    int temp_opaque_instance_count = sizeof(temp_opaque_instances)/sizeof(opaque_instance);
+    
+    void* first_transparent_instance_address = vk_copy_to_buffer_aligned(((opaque_instance*)first_opaque_instance_address + temp_opaque_instance_count), temp_transparent_instances, sizeof(temp_transparent_instances), transparent_instance);
+    int first_transparent_instance_offset = offset_of(first_transparent_instance_address, window->vk_staging_mapped_address);
+    int temp_transparent_instance_count = sizeof(temp_transparent_instances)/sizeof(transparent_instance);
     
     // Set uniform buffer transforms
     UniformBufferObject ubo = {};
@@ -1933,33 +2563,31 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     //ubo.projection.m[0][0] = (float)window->height / (float)window->width;
     ubo.projection.m[1][1] = (float)window->width / (float)window->height;
     
-    {
-        static float start = 0.0f;
-        start += 0.001f;
-        if(start >= 0.3f)
-        {
-            start = 0.0f;
-        }
-        ubo.projection.m[0][0] -= start; 
-    }
-    
-    //ubo.projection.m[2][1] = 1.0f;
-    //ubo.projection.m[2][0] = 1.0f;
-    //ubo.projection.m[3][0] = 1.0f;
-    
     memcpy(window->vk_uniform_mapped_address, &ubo, sizeof(ubo));
     
-    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_vertex_buffer, sizeof(temp_vertices), first_vertex_offset))
+    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_vertex_buffer, sizeof(shared_vertices), first_vertex_offset))
     {
         printf("ERROR: Failed while copying staging buffer to vertex buffer!");
     }
     
-    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_index_buffer, sizeof(temp_indices), first_index_offset))
+    int final_opaque_instance_offset = align_offset_to(sizeof(shared_vertices), alignof(opaque_instance));
+    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_vertex_buffer, sizeof(temp_opaque_instances), first_opaque_instance_offset, final_opaque_instance_offset))
+    {
+        printf("ERROR: Failed while copying staging buffer to vertex buffer!");
+    }
+    
+    int final_transparent_instance_offset = align_offset_to((final_opaque_instance_offset + sizeof(temp_opaque_instances)), alignof(transparent_instance));
+    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_vertex_buffer, sizeof(temp_transparent_instances), first_transparent_instance_offset, final_transparent_instance_offset))
+    {
+        printf("ERROR: Failed while copying staging buffer to vertex buffer!");
+    }
+    
+    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_index_buffer, sizeof(shared_indices), first_index_offset))
     {
         printf("ERROR: Failed while copying staging buffer to index buffer!");
     }
     
-    if(!vk_record_command_buffer(window->vk_command_buffer, window, image_index, temp_index_count))
+    if(!vk_record_command_buffer(window->vk_command_buffer, window, image_index, shared_index_count, temp_opaque_instance_count, final_opaque_instance_offset, temp_transparent_instance_count, final_transparent_instance_offset))
     {
         printf("ERROR: Couldnt record command buffer!\n");
     }
@@ -2020,6 +2648,17 @@ void vk_window_resized(PlatformWindow* window)
     vk_destroy_swapchain_image_views(window->vk_first_image_view);
     vk_destroy_swapchain(window->vk_window_swapchain);
     
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        vkDestroyImageView(rendering_platform.vk_device, window->vk_msaa_image_view, 0);
+        vkDestroyImage(rendering_platform.vk_device, window->vk_window_msaa_image, 0);
+        vkFreeMemory(rendering_platform.vk_device, window->vk_msaa_image_memory, 0);
+    }  
+    
+    vkDestroyImageView(rendering_platform.vk_device, window->vk_depth_image_view, 0);
+    vkDestroyImage(rendering_platform.vk_device, window->vk_window_depth_image, 0);
+    vkFreeMemory(rendering_platform.vk_device, window->vk_depth_image_memory, 0);
+    
     vkDestroySemaphore(rendering_platform.vk_device, window->vk_image_available_semaphore, nullptr);
     vkDestroySemaphore(rendering_platform.vk_device, window->vk_render_finished_semaphore, nullptr);
     vkDestroyFence(rendering_platform.vk_device, window->vk_in_flight_fence, nullptr);
@@ -2030,7 +2669,22 @@ void vk_window_resized(PlatformWindow* window)
     }
     
     window->vk_first_image_view = vk_create_swapchain_image_views(window->vk_window_swapchain);
-    window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height);
+    
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        if(!vk_create_msaa_image(window))
+        {
+            printf("ERROR: Couldn't re-create window depth image!\n");
+        } 
+    }
+    
+    if(!vk_create_depth_image(window))
+    {
+        printf("ERROR: Couldn't re-create window depth image!\n");
+    }
+    
+    //window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height, window->vk_depth_image_view);
+    window->vk_first_framebuffer = vk_create_frame_buffers(window);
     
     vk_create_sync_objects(window);
 }
@@ -2046,6 +2700,18 @@ void vk_destroy_window_surface(PlatformWindow* window)
     vk_destroy_swapchain_frame_buffers(window->vk_first_framebuffer);
     vk_destroy_swapchain_image_views(window->vk_first_image_view);
     vk_destroy_swapchain(window->vk_window_swapchain);
+    
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        vkDestroyImageView(rendering_platform.vk_device, window->vk_msaa_image_view, 0);
+        vkDestroyImage(rendering_platform.vk_device, window->vk_window_msaa_image, 0);
+        vkFreeMemory(rendering_platform.vk_device, window->vk_msaa_image_memory, 0);
+    }  
+    
+    vkDestroyImageView(rendering_platform.vk_device, window->vk_depth_image_view, 0);
+    vkDestroyImage(rendering_platform.vk_device, window->vk_window_depth_image, 0);
+    vkFreeMemory(rendering_platform.vk_device, window->vk_depth_image_memory, 0);
+    
     vkDestroySurfaceKHR(rendering_platform.vk_instance, window->vk_window_surface, 0);
 }
 
@@ -2088,13 +2754,17 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
     
     if(!rendering_platform.vk_graphics_pipeline_initialized)
     {
-        if(!vk_create_graphics_pipeline(rendering_platform.vk_main_shader.vert_shader_bin, rendering_platform.vk_main_shader.vert_shader_length, rendering_platform.vk_main_shader.frag_shader_bin, rendering_platform.vk_main_shader.frag_shader_length))
+        if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
         {
-            printf("Failed to initialize graphics pipeline!");
+            printf("Failed to create renderpass!\n");
         }
-        else
+        if(!vk_create_opaque_graphics_pipeline(rendering_platform.vk_opaque_shader.vert_shader_bin, rendering_platform.vk_opaque_shader.vert_shader_length, rendering_platform.vk_opaque_shader.frag_shader_bin, rendering_platform.vk_opaque_shader.frag_shader_length))
         {
-            printf("Succesfully initialize graphics pipeline!");
+            printf("Failed to initialize opaque graphics pipeline!");
+        }
+        if(!vk_create_transparent_graphics_pipeline(rendering_platform.vk_transparent_shader.vert_shader_bin, rendering_platform.vk_transparent_shader.vert_shader_length, rendering_platform.vk_transparent_shader.frag_shader_bin, rendering_platform.vk_transparent_shader.frag_shader_length))
+        {
+            printf("Failed to initialize transparent graphics pipeline!");
         }
         if(!vk_create_image_sampler(&(rendering_platform.vk_main_image_sampler)))
         {
@@ -2125,9 +2795,23 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
         rendering_platform.vk_graphics_pipeline_initialized = true;
     }
     
-    window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height);
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        if(!vk_create_msaa_image(window))
+        {
+            printf("Failed to create color buffer for MSAA!");
+        }
+    }
     
-    if(!vk_create_vertex_buffer_with_index(10, 10, window))
+    if(!vk_create_depth_image(window))
+    {
+        printf("Failed to create window depth buffer!\n");
+    }
+    
+    //window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height, window->vk_depth_image_view);
+    window->vk_first_framebuffer = vk_create_frame_buffers(window);
+    
+    if(!vk_create_vertex_buffer_with_index(100, 100, window))
     {
         printf("Failed to create vertex buffers!\n");
     }
@@ -2187,9 +2871,17 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
     
     if(!rendering_platform.vk_graphics_pipeline_initialized)
     {
-        if(!vk_create_graphics_pipeline(rendering_platform.vk_main_shader.vert_shader_bin, rendering_platform.vk_main_shader.vert_shader_length, rendering_platform.vk_main_shader.frag_shader_bin, rendering_platform.vk_main_shader.frag_shader_length))
+        if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
         {
-            printf("Failed to initialize graphics pipeline!\n");
+            printf("Failed to create renderpass!\n");
+        }
+        if(!vk_create_opaque_graphics_pipeline(rendering_platform.vk_opaque_shader.vert_shader_bin, rendering_platform.vk_opaque_shader.vert_shader_length, rendering_platform.vk_opaque_shader.frag_shader_bin, rendering_platform.vk_opaque_shader.frag_shader_length))
+        {
+            printf("Failed to initialize opaque graphics pipeline!");
+        }
+        if(!vk_create_transparent_graphics_pipeline(rendering_platform.vk_transparent_shader.vert_shader_bin, rendering_platform.vk_transparent_shader.vert_shader_length, rendering_platform.vk_transparent_shader.frag_shader_bin, rendering_platform.vk_transparent_shader.frag_shader_length))
+        {
+            printf("Failed to initialize transparent graphics pipeline!");
         }
         else
         {
@@ -2224,9 +2916,23 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
         rendering_platform.vk_graphics_pipeline_initialized = true;
     }
     
-    window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height);
-
-    if(!vk_create_vertex_buffer_with_index(10, 10, window))
+    if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
+    {
+        if(!vk_create_msaa_image(window))
+        {
+            printf("Failed to create color buffer for MSAA!");
+        }
+    }
+    
+    if(!vk_create_depth_image(window))
+    {
+        printf("Failed to create window depth buffer!\n");
+    }
+    
+    //window->vk_first_framebuffer = vk_create_frame_buffers(window->vk_first_image_view, window->width, window->height, window->vk_depth_image_view);
+    window->vk_first_framebuffer = vk_create_frame_buffers(window);
+    
+    if(!vk_create_vertex_buffer_with_index(100, 100, window))
     {
         printf("Failed to create vertex buffers!\n");
     }

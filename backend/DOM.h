@@ -19,6 +19,15 @@
 // Aligns the given pointer to a pointer aligned address (8 byte aligned)
 #define align_ptr(ptr) ((void*)((uintptr_t)ptr + alignof(decltype(ptr)) - ((uintptr_t)ptr % alignof(decltype(ptr)))))
 
+// Aligns the given memory to the given alignment requirement 
+#define align_mem_to(ptr, alignoftype) (void*)((uintptr_t)ptr + alignoftype - ((uintptr_t)ptr % alignoftype))
+
+// Aligns the given offset to the given alignment requirement assuming that the offset is ofsetting of an aligned address 
+#define align_offset_to(offset, alignoftype) (int)(offset + alignoftype - (offset % alignoftype))
+
+// Ineger offset in bytes of a pointer from a 'base' pointer
+#define offset_of(ptr_offset, ptr_base) (((uintptr_t)ptr_offset) - ((uintptr_t)ptr_base))
+
 // Element Flags //
 
 

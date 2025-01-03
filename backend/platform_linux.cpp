@@ -236,21 +236,25 @@ int main()
     x_defaults.default_root_window = XDefaultRootWindow(x_display);
     x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
     
-    FILE* main_vert_shader = linux_open_relative_file_path("compiled_shaders/vert.spv", "rb");
-
-    FILE* main_frag_shader = linux_open_relative_file_path("compiled_shaders/frag.spv", "rb");
+    FILE* opaque_vert_shader = linux_open_relative_file_path("compiled_shaders/opaque_vert.spv", "rb");
+    FILE* opaque_frag_shader = linux_open_relative_file_path("compiled_shaders/opaque_frag.spv", "rb");
+    
+    FILE* transparent_vert_shader = linux_open_relative_file_path("compiled_shaders/transparent_vert.spv", "rb");
+    FILE* transparent_frag_shader = linux_open_relative_file_path("compiled_shaders/transparent_frag.spv", "rb");
         
-    if(!main_vert_shader || !main_frag_shader)
+    if(!opaque_vert_shader || !opaque_frag_shader || !transparent_vert_shader || !transparent_frag_shader)
     {
         printf("Error: Shaders could not be loaded!\n");
         return 1;
     }
     
     int required_extension_count = sizeof(linux_required_vk_extensions) / sizeof(char**);
-    InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, main_vert_shader, main_frag_shader,  100000000);
+    InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, 100000000);
     
-    fclose(main_vert_shader);
-    fclose(main_frag_shader);
+    fclose(opaque_vert_shader);
+    fclose(opaque_frag_shader);
+    fclose(transparent_vert_shader);
+    fclose(transparent_frag_shader);
     
     platform.search_results = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
     *(platform.search_results) = CreateArena(sizeof(FileSearchResult)*1000, sizeof(FileSearchResult));
@@ -282,7 +286,7 @@ int main()
         RenderplatformLoadImage(opened, curr_image->file_name);
         
         fclose(opened);
-        curr_image = first_image++;
+        curr_image++;
     }
     
     PlatformWindow* curr_window = platform.first_window;

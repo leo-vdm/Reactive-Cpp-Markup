@@ -131,7 +131,7 @@ FILE* win32_open_relative_file_path(const char* relative_path, const char* open_
 
 FileSearchResult* win32_find_markup_binaries(Arena* search_results_arena, Arena* search_result_values_arena)
 {
-    FileSearchResult* first = (FileSearchResult*)search_results_arena->next_adddress;
+    FileSearchResult* first = (FileSearchResult*)search_results_arena->next_address;
     char* working_dir = win32_get_execution_dir();
     SearchDir(search_results_arena, search_result_values_arena, working_dir, ".bin");
     
@@ -214,21 +214,26 @@ int main()
     
     window_class_atom = RegisterClassA(&window_class);
     
-    FILE* main_vert_shader = win32_open_relative_file_path("compiled_shaders/vert.spv", "rb");
+    FILE* opaque_vert_shader = win32_open_relative_file_path("compiled_shaders/opaque_vert.spv", "rb");    
+    FILE* opaque_frag_shader = win32_open_relative_file_path("compiled_shaders/opaque_frag.spv", "rb");
     
-    FILE* main_frag_shader = win32_open_relative_file_path("compiled_shaders/frag.spv", "rb");
+    FILE* transparent_vert_shader = win32_open_relative_file_path("compiled_shaders/transparent_vert.spv", "rb");    
+    FILE* transparent_frag_shader = win32_open_relative_file_path("compiled_shaders/transparent_frag.spv", "rb");
     
-    if(!main_vert_shader || !main_frag_shader)
+    
+    if(!opaque_vert_shader || !opaque_frag_shader || !transparent_vert_shader || !transparent_frag_shader)
     {
         printf("Error: Shaders could not be loaded!\n");
         return 1;
     }
     
     int required_extension_count = sizeof(win32_required_vk_extensions) / sizeof(char**);
-    InitializeVulkan(&(platform.master_arena), win32_required_vk_extensions, required_extension_count, main_vert_shader, main_frag_shader, 100000000);
+    InitializeVulkan(&(platform.master_arena), win32_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, 100000000);
     
-    fclose(main_vert_shader);
-    fclose(main_frag_shader);
+    fclose(opaque_vert_shader);
+    fclose(opaque_frag_shader);
+    fclose(transparent_vert_shader);
+    fclose(transparent_frag_shader);
     
     if(!window_class_atom)
     {
@@ -267,7 +272,7 @@ int main()
         FILE* opened = fopen(curr_image->file_path, "rb");
         RenderplatformLoadImage(opened, curr_image->file_name);
         fclose(opened);
-        curr_image = first_image++;
+        curr_image++;
     }
     
     PlatformWindow* curr_window = platform.first_window;

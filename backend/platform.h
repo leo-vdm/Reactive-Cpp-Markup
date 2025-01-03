@@ -22,11 +22,19 @@ struct PlatformWindow
     void* window_dom;
 
     HWND window_handle;
+    VkCommandBuffer vk_command_buffer;
     VkSurfaceKHR vk_window_surface;
     VkSwapchainKHR vk_window_swapchain;
     LinkedPointer* vk_first_image_view;
     LinkedPointer* vk_first_framebuffer;
-    VkCommandBuffer vk_command_buffer;
+    
+    VkImage vk_window_depth_image;
+    VkDeviceMemory vk_depth_image_memory;
+    VkImageView vk_depth_image_view;
+
+    VkImage vk_window_msaa_image;
+    VkDeviceMemory vk_msaa_image_memory;
+    VkImageView vk_msaa_image_view;
         
     VkSemaphore vk_image_available_semaphore;
     VkSemaphore vk_render_finished_semaphore;
@@ -85,6 +93,14 @@ struct PlatformWindow
     LinkedPointer* vk_first_framebuffer;
     VkCommandBuffer vk_command_buffer;
     GC window_gc;
+    
+    VkImage vk_window_depth_image;
+    VkDeviceMemory vk_depth_image_memory;
+    VkImageView vk_depth_image_view;
+    
+    VkImage vk_window_msaa_image;
+    VkDeviceMemory vk_msaa_image_memory;
+    VkImageView vk_msaa_image_view;    
     
     VkSemaphore vk_image_available_semaphore;
     VkSemaphore vk_render_finished_semaphore;
@@ -165,8 +181,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary);
 
 bool RuntimeInstanceMainPage();
 
-int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* vert_shader, FILE* frag_shader, int image_buffer_size);
-
+int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, int image_buffer_size);
 void PlatformRegisterDom(void* dom);
 /*
 // Returns flags for the runtime to know the status of the window
