@@ -23,7 +23,7 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->static_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->cached_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->dynamic_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
-    *(target->strings) = CreateArena(sizeof(StringBlock)*100000, sizeof(StringBlock));
+    *(target->strings) = CreateArena(sizeof(StringBlock)*10000, sizeof(StringBlock));
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*5000, sizeof(Element));
     *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));

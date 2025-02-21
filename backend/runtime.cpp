@@ -43,7 +43,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
 
     FileSearchResult* curr = first_binary;
         
-    // Load all page/comp bins
+    // Load all page/comp binaries
     while(curr->file_path)
     {
         printf("Found binary \"%s\"\n", curr->file_name);

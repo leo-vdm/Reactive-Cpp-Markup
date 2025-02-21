@@ -152,7 +152,7 @@ FILE* linux_open_relative_file_path(const char* relative_path, const char* open_
     desired_len++; // +1 to make space for \0
     char* file_path = (char*)AllocScratch(desired_len);
     sprintf(file_path, "%s/%s", working_dir, relative_path);
-    
+
     FILE* opened = fopen(file_path, open_params);
     DeAllocScratch(file_path);
     DeAllocScratch(working_dir);
@@ -175,10 +175,10 @@ FileSearchResult* linux_find_image_resources(Arena* search_results_arena, Arena*
     FileSearchResult* first = (FileSearchResult*)search_results_arena->next_address;
     char* working_dir = linux_get_execution_dir();
 
-    #define RESOURCE_DIR_NAME "resources"
+    #define RESOURCE_DIR_NAME "resources/images"
     int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     desired_len++; // + 1 to fit \0
-    char* resource_dir_path = (char*)AllocScratch(desired_len*sizeof(char));
+    char* resource_dir_path = (char*)AllocScratch(desired_len * sizeof(char));
     sprintf(resource_dir_path, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     DeAllocScratch(working_dir);
     
@@ -213,9 +213,9 @@ void linux_destroy_window(Arena* windows_arena, PlatformWindow* window)
 linux_platform_state platform;
 
 int main()
-{
+{   
     platform = {};
-    InitScratch(sizeof(char)*100000);
+    InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
     
     x_display = XOpenDisplay(NULL);
@@ -236,6 +236,13 @@ int main()
     x_defaults.default_root_window = XDefaultRootWindow(x_display);
     x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
     
+    InitializeFontPlatform(&(platform.master_arena), 0);
+    
+    FILE* default_font = linux_open_relative_file_path("resources/fonts/default.ttf", "rb");
+    FontPlatformLoadFace("platform_default_font.ttf", default_font);
+    fclose(default_font);
+    
+    
     FILE* opaque_vert_shader = linux_open_relative_file_path("compiled_shaders/opaque_vert.spv", "rb");
     FILE* opaque_frag_shader = linux_open_relative_file_path("compiled_shaders/opaque_frag.spv", "rb");
     
@@ -247,7 +254,7 @@ int main()
         printf("Error: Shaders could not be loaded!\n");
         return 1;
     }
-    
+        
     int required_extension_count = sizeof(linux_required_vk_extensions) / sizeof(char**);
     InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, 100000000);
     

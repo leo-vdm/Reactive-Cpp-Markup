@@ -5,7 +5,8 @@ struct FreeBlock {
     FreeBlock* next_free;
 };
 
-struct Arena {
+struct Arena
+{
     uintptr_t mapped_address;
     uintptr_t next_address;
     FreeBlock first_free;

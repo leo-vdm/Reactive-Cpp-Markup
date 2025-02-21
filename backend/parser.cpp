@@ -526,6 +526,12 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         // Determine the attribute type
         new_attribute->type = GetAttributeFromName((char*)curr_token->token_value, curr_token->value_length);
         
+        if(new_attribute->type == AttributeType::CUSTOM)
+        {
+            new_attribute->Custom.name_length = curr_token->value_length;
+            new_attribute->Custom.name = (char*)Alloc(values_arena, new_attribute->Custom.name_length*sizeof(char));
+            memcpy(new_attribute->Custom.name, curr_token->token_value, new_attribute->Custom.name_length);
+        }
         
         if(!expect_eat(TokenType::EQUALS))
         {

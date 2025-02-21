@@ -1,5 +1,6 @@
 #include "arena.h"
 #include <string.h>
+#include <cassert>
 
 #include <stdio.h>
 #include <iostream>
@@ -20,7 +21,16 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
 
 void* Alloc(Arena* arena, int size, uint64_t flags)
 {
+    #ifndef NDEBUG
+    if(size == 0)
+    {
+        printf("Debug: Warning, allocation with size of 0 bytes occured, ensure that is intentional!\n");
+    }
     
+    printf("Allocation: %d\n", size);
+    #endif
+    assert(size >= 0);
+    assert(arena);
     void* allocatedAddress = (void*)arena->next_address;
     
     // If allocation is 1 item, try to use a freeblock if there is one
@@ -123,6 +133,14 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
 
 void* Alloc(Arena* arena, int size, uint64_t flags)
 {
+    #ifdef DEBUG
+    if(size == 0)
+    {
+        printf("Debug: Warning, allocation with size of 0 bytes occured, ensure that is intentional!\n");
+    }
+    #endif
+    assert(size >= 0);
+    assert(arena);
     void* allocatedAddress = (void*)arena->next_address;
     
     // If allocation is 1 item, try to use a freeblock if there is one
@@ -205,11 +223,16 @@ void FreeArena(Arena* arena)
 // Get space from the scratch arena
 void* AllocScratch(int alloc_size, uint64_t flags)
 {
+    assert(alloc_size > 0);
     if(scratch_arena.mapped_address == 0)
     {
         printf("Scratch arena not initialized!");
         return NULL;
     }
+    
+    #ifndef NDEBUG
+    printf("Scratch Allocation: %d\n", alloc_size);
+    #endif
     
     uintptr_t allocated_address = (uintptr_t)Alloc(&scratch_arena, alloc_size, flags); 
     
@@ -230,7 +253,7 @@ void DeAllocScratch(void* address)
         scratch_arena.next_address = scratch_arena.mapped_address;
         return;
     }   
-    // TODO: Implement an actual de-allocation system.
+    // TODO(Leo): Implement an actual de-allocation system.
 }
 
 

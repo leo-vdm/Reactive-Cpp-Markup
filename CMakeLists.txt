@@ -12,22 +12,7 @@ endif()
 
 set(CMAKE_CXX_STANDARD 11)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES -pthread")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES -pthread -Og")
-
-# GLFW
-#set(GLFW_DIR glfw) # Set this to point to an up-to-date GLFW repo
-#option(GLFW_BUILD_EXAMPLES "Build the GLFW example programs" OFF)
-#option(GLFW_BUILD_WAYLAND "INFien" OFF)
-#option(GLFW_BUILD_TESTS "Build the GLFW test programs" OFF)
-#option(GLFW_BUILD_DOCS "Build the GLFW documentation" OFF)
-#option(GLFW_INSTALL "Generate installation target" OFF)
-#option(GLFW_DOCUMENT_INTERNALS "Include internals in documentation" OFF)
-#add_subdirectory(${GLFW_DIR} binary_dir EXCLUDE_FROM_ALL)
-#include_directories(${GLFW_DIR}/include)
-
-# Dear ImGui
-#set(IMGUI_DIR imgui)
-#include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES -finput-charset=utf-8 -DUNICODE -pthread -Og -DDEBUG")
 
 # Libraries
 #find_package(Vulkan REQUIRED)
@@ -39,7 +24,9 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES -pthread -Og")
 # Use vulkan headers from glfw:
 #include_directories(${GLFW_DIR}/deps)
 
-file(GLOB runtime_sources backend/runtime.cpp backend/arena.cpp backend/arena_string.cpp backend/DOM.cpp backend/platform_linux.cpp backend/platform_windows.cpp backend/graphics_types.cpp backend/platform_vulkan.cpp)
+include_directories(/usr/local/include/freetype2) 
+
+file(GLOB runtime_sources backend/runtime.cpp backend/arena.cpp backend/arena_string.cpp backend/DOM.cpp backend/platform_linux.cpp backend/platform_windows.cpp backend/graphics_types.cpp backend/platform_vulkan.cpp backend/harfbuzz_module.cpp backend/platform_font.cpp)
 #add_executable(runtime ${runtime_sources})
 add_library(runtime ${runtime_sources})
 

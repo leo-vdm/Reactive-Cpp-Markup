@@ -1,9 +1,14 @@
 #include "arena.h"
 #include <vulkan/vulkan.h>
 #include "DOM.h"
+#include <cassert>
 
 #define MAX_WINDOW_COUNT 100
 #define MAX_TEXTURE_COUNT 30
+
+#define Kilobytes(num_bytes) (num_bytes * 1000 * sizeof(char)) 
+#define Megabytes(num_bytes) (num_bytes * 1000000 * sizeof(char))
+#define Gigabytes(num_bytes) (num_bytes * 1000000000 * sizeof(char))
 
 #pragma once
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
@@ -183,7 +188,35 @@ bool RuntimeInstanceMainPage();
 
 int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, int image_buffer_size);
 void PlatformRegisterDom(void* dom);
-/*
-// Returns flags for the runtime to know the status of the window
-int ProcessWindowEvents(PlatformWindow* target_window);
-*/
+
+struct FontPlatformShapedGlyph
+{
+    // Note(Leo): All dimensions here are scaled versions of those of fixed size glyphs to fit the requested font size
+    // Note(Leo): Dimensions are in pixels and should be converted to relative screenspace coords in the vulkan layer
+    int horizontal_offset;
+    int vertical_offset;
+    int width;
+    int height;
+    uint32_t glyph_code;
+};
+
+struct FontPlatformGlyph
+{
+    // Note(Leo): Here so that if a glyph is evicted but the reference in the cache map isnt it can be caught by comparing expected to actual code
+    uint32_t glyph_code;
+    int bearing_x;
+    int bearing_y;
+    int width;
+    int height;
+    
+    // Note(Leo): Data goes after the end of rasterised glyph but is non-determined in size at compile time
+};
+
+#define FontHandle int
+
+int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
+
+void FontPlatformLoadFace(const char* font_name, FILE* font_file);
+void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle font_handle, int font_size, int area_width, int area_height);
+FontHandle FontPlatformGetFont(const char* font_name);
+FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);

@@ -144,10 +144,10 @@ FileSearchResult* win32_find_image_resources(Arena* search_results_arena, Arena*
     FileSearchResult* first = (FileSearchResult*)search_results_arena->next_address;
     char* working_dir = win32_get_execution_dir();
 
-    #define RESOURCE_DIR_NAME "resources"
+    #define RESOURCE_DIR_NAME "resources/images"
     int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     desired_len++; // + 1 to fit \0
-    char* resource_dir_path = (char*)AllocScratch(desired_len*sizeof(char));
+    char* resource_dir_path = (char*)AllocScratch(desired_len * sizeof(char));
     sprintf(resource_dir_path, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     DeAllocScratch(working_dir);
     
@@ -201,7 +201,7 @@ win32_platform_state platform;
 int main()
 {
     platform = {};
-    InitScratch(sizeof(char)*100000);
+    InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
     
     win32_module_handle = GetModuleHandleA(0);
@@ -213,6 +213,12 @@ int main()
     window_class.lpszClassName = WINDOWS_WINDOW_CLASS_NAME;
     
     window_class_atom = RegisterClassA(&window_class);
+    
+    InitializeFontPlatform(&(platform.master_arena), 0);
+    
+    FILE* default_font = win32_open_relative_file_path("resources/fonts/default.ttf", "rb");
+    FontPlatformLoadFace("platform_default_font.ttf", default_font);
+    fclose(default_font);    
     
     FILE* opaque_vert_shader = win32_open_relative_file_path("compiled_shaders/opaque_vert.spv", "rb");    
     FILE* opaque_frag_shader = win32_open_relative_file_path("compiled_shaders/opaque_frag.spv", "rb");

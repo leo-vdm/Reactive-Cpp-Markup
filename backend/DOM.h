@@ -22,7 +22,7 @@
 // Aligns the given memory to the given alignment requirement 
 #define align_mem_to(ptr, alignoftype) (void*)((uintptr_t)ptr + alignoftype - ((uintptr_t)ptr % alignoftype))
 
-// Aligns the given offset to the given alignment requirement assuming that the offset is ofsetting of an aligned address 
+// Aligns the given offset to the given alignment requirement assuming that the offset is ofsetting off an aligned address 
 #define align_offset_to(offset, alignoftype) (int)(offset + alignoftype - (offset % alignoftype))
 
 // Ineger offset in bytes of a pointer from a 'base' pointer
