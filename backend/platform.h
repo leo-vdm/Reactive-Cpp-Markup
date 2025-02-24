@@ -5,6 +5,7 @@
 
 #define MAX_WINDOW_COUNT 100
 #define MAX_TEXTURE_COUNT 30
+#define GLYPH_ATLAS_COUNT 200
 
 #define Kilobytes(num_bytes) (num_bytes * 1000 * sizeof(char)) 
 #define Megabytes(num_bytes) (num_bytes * 1000000 * sizeof(char))
@@ -186,7 +187,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary);
 
 bool RuntimeInstanceMainPage();
 
-int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, int image_buffer_size);
+int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, FILE* text_vert_shader, FILE* text_frag_shader, int image_buffer_size);
 void PlatformRegisterDom(void* dom);
 
 struct FontPlatformShapedGlyph
@@ -220,3 +221,4 @@ void FontPlatformLoadFace(const char* font_name, FILE* font_file);
 void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle font_handle, int font_size, int area_width, int area_height);
 FontHandle FontPlatformGetFont(const char* font_name);
 FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
+int FontPlatformGetGlyphSize();

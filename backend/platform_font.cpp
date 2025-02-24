@@ -75,6 +75,11 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     return 0;
 }
 
+int FontPlatformGetGlyphSize()
+{
+    return font_platform.standard_glyph_size;
+}
+
 inline loaded_font_handle* platform_get_font(FontHandle handle)
 {
     assert(handle > 0);

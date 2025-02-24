@@ -39,6 +39,18 @@ VkVertexInputBindingDescription vk_get_binding_description(transparent_instance 
     return binding_description;
 }
 
+
+VkVertexInputBindingDescription vk_get_binding_description(text_instance input)
+{
+    VkVertexInputBindingDescription binding_description = {};
+
+    binding_description.binding = 1;
+    binding_description.stride = sizeof(text_instance);
+    binding_description.inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    return binding_description;
+}
+
 const VkVertexInputAttributeDescription opaque_instance_input_attribute_descriptions[] = 
 {
     // Vertex Members
@@ -82,6 +94,30 @@ VkVertexInputAttributeDescription* vk_get_attribute_descriptions(transparent_ins
         *len = sizeof(transparent_instance_input_attribute_descriptions)/sizeof(VkVertexInputAttributeDescription);
     }
     return (VkVertexInputAttributeDescription*)transparent_instance_input_attribute_descriptions;
+}
+
+
+const VkVertexInputAttributeDescription text_instance_input_attribute_descriptions[] = 
+{
+    // Vertex Members
+    {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, position)},
+    {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex, texture_coord)},
+    
+    // Instance Members
+    {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(text_instance, offsets)},
+    {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(text_instance, color)},
+    {4, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(text_instance, scale)},
+    {5, 1, VK_FORMAT_R32G32B32_UINT, offsetof(text_instance, instance_glyph_offset)},
+    {6, 1, VK_FORMAT_R32G32_UINT, offsetof(text_instance, instance_glyph_size)},
+};
+
+VkVertexInputAttributeDescription* vk_get_attribute_descriptions(text_instance input, int* len)
+{
+    if(len)
+    {
+        *len = sizeof(text_instance_input_attribute_descriptions)/sizeof(VkVertexInputAttributeDescription);
+    }
+    return (VkVertexInputAttributeDescription*)text_instance_input_attribute_descriptions;
 }
 
 const float mat2_identity[2][2] = {{1, 0}, {0, 1}};

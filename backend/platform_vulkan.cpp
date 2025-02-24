@@ -1,7 +1,7 @@
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #define VK_USE_PLATFORM_WIN32_KHR 1
 #endif
-#if defined(__linux__) && !defined(_WIN32)
+#if defined(__linux__) && !defined(_WIN32) 
 #define VK_USE_PLATFORM_XLIB_KHR 1 
 #endif
 
@@ -76,6 +76,7 @@ struct VulkanRenderPlatform
     
     vk_shader_pair vk_opaque_shader;
     vk_shader_pair vk_transparent_shader;
+    vk_shader_pair vk_text_shader;
     
     vk_optional_features vk_supported_optionals;
     
@@ -85,6 +86,9 @@ struct VulkanRenderPlatform
     VkPipeline vk_opaque_graphics_pipeline;
     VkPipelineLayout vk_opaque_graphics_pipeline_layout;
     
+    VkPipeline vk_text_graphics_pipeline;
+    VkPipelineLayout vk_text_graphics_pipeline_layout;
+    
     VkPipeline vk_transparent_graphics_pipeline;
     VkPipelineLayout vk_transparent_graphics_pipeline_layout;
     
@@ -92,8 +96,8 @@ struct VulkanRenderPlatform
     VkCommandPool vk_transient_command_pool;
     VkDescriptorPool vk_main_descriptor_pool;
     VkDescriptorSetLayout vk_uniform_descriptor_layout;
-    VkSampler vk_main_image_sampler;
     
+    VkSampler vk_main_image_sampler;
     bool vk_image_buffer_initialized;
     int vk_image_buffer_size;
     int vk_next_image_offset;
@@ -102,7 +106,15 @@ struct VulkanRenderPlatform
     VkDescriptorSet vk_image_descriptors;
     VkDescriptorSetLayout vk_image_descriptor_layout;
     int vk_next_image_index;
-        
+    
+
+    VkDescriptorSetLayout vk_text_descriptor_layout;
+    VkDescriptorSet vk_text_descriptor_set;
+    VkSampler vk_glyph_atlas_sampler;
+    VkImage vk_glyph_atlas_image;
+    VkImageView vk_glyph_atlas_image_view;
+    VkDeviceMemory vk_glyph_atlas_memory; 
+    
     Arena* vk_master_arena;
     Arena* vk_pointer_arrays;
     Arena* vk_swapchain_image_views;
@@ -957,6 +969,7 @@ struct vk_pipeline_settings
     VkPipelineColorBlendAttachmentState color_blend_attachment;
     VkPipelineColorBlendStateCreateInfo color_blending;
     VkPipelineDepthStencilStateCreateInfo depth_stencil;
+    VkPushConstantRange push_constants;
     VkGraphicsPipelineCreateInfo pipeline_info;
 };
 
@@ -965,6 +978,8 @@ bool vk_create_descriptor_set_layouts()
     assert(rendering_platform.vk_device);
     // Already initialized!
     assert(!rendering_platform.vk_uniform_descriptor_layout);
+    
+    // UBO Layout
     
     VkDescriptorSetLayoutBinding ubo_layout_binding = {};
     ubo_layout_binding.binding = 0;
@@ -982,8 +997,11 @@ bool vk_create_descriptor_set_layouts()
     
     if(vkCreateDescriptorSetLayout(rendering_platform.vk_device, &ubo_descriptor_set_create_info, 0, &(rendering_platform.vk_uniform_descriptor_layout)) != VK_SUCCESS)
     {
+        assert(0);
         return false;
     }
+    
+    // Image and Sampler layout (transparent pipeline)
     
     VkDescriptorSetLayoutBinding sampler_layout_binding = {};
     sampler_layout_binding.binding = 0;
@@ -1008,6 +1026,36 @@ bool vk_create_descriptor_set_layouts()
     
     if(vkCreateDescriptorSetLayout(rendering_platform.vk_device, &images_descriptor_set_create_info, 0, &(rendering_platform.vk_image_descriptor_layout)) != VK_SUCCESS)
     {
+        assert(0);
+        return false;
+    }
+
+    // Glyph atlas and 1D sampler layout ()
+    
+    VkDescriptorSetLayoutBinding glyph_sampler_layout_binding = {};
+    glyph_sampler_layout_binding.binding = 0;
+    glyph_sampler_layout_binding.descriptorCount = 1;
+    glyph_sampler_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    glyph_sampler_layout_binding.pImmutableSamplers = 0;
+    glyph_sampler_layout_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding glyph_atlas_binding = {};
+    glyph_atlas_binding.binding = 1;
+    glyph_atlas_binding.descriptorCount = 1;
+    glyph_atlas_binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    glyph_atlas_binding.pImmutableSamplers = 0;
+    glyph_atlas_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    
+    VkDescriptorSetLayoutBinding text_bindings[] = { glyph_sampler_layout_binding, glyph_atlas_binding };
+    
+    VkDescriptorSetLayoutCreateInfo text_descriptor_set_create_info = {};
+    text_descriptor_set_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    text_descriptor_set_create_info.bindingCount = (uint32_t)sizeof(text_bindings)/sizeof(VkDescriptorSetLayoutBinding);
+    text_descriptor_set_create_info.pBindings = text_bindings;
+    
+    if(vkCreateDescriptorSetLayout(rendering_platform.vk_device, &text_descriptor_set_create_info, 0, &(rendering_platform.vk_text_descriptor_layout)) != VK_SUCCESS)
+    {
+        assert(0);
         return false;
     }
     
@@ -1092,7 +1140,11 @@ vk_pipeline_settings* vk_pipeline_default(bool enable_depth_test_write)
     {
         created_settings->depth_stencil.depthWriteEnable = VK_FALSE;    
     }
-
+    
+    created_settings->push_constants.offset = 0;
+    created_settings->push_constants.size = sizeof(PushConstants);
+    created_settings->push_constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    
     created_settings->pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     created_settings->pipeline_info.pInputAssemblyState = &(created_settings->input_assembly);
     created_settings->pipeline_info.pViewportState = &(created_settings->viewport_state);
@@ -1279,6 +1331,8 @@ bool vk_create_opaque_graphics_pipeline(void* vert_shader_bin, int vert_bin_leng
 
 bool vk_create_text_graphics_pipeline(void* vert_shader_bin, int vert_bin_length, void* frag_shader_bin, int frag_bin_length)
 {
+    // Note(Leo): When sampling into a uint8 3d texture use a usampler3d, give integer coords and then only take the r component of the output (the thing u want)
+    //https://github.com/godotengine/godot/issues/57841
     VkShaderModule vert_shader_module;
     VkShaderModule frag_shader_module;
     
@@ -1317,7 +1371,7 @@ bool vk_create_text_graphics_pipeline(void* vert_shader_bin, int vert_bin_length
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     
     VkVertexInputBindingDescription vertex_binding_description = vk_get_binding_description(vertex());
-    VkVertexInputBindingDescription instance_binding_description = vk_get_binding_description(opaque_instance());
+    VkVertexInputBindingDescription instance_binding_description = vk_get_binding_description(text_instance());
     
     VkVertexInputBindingDescription input_binding_descriptions[] = { vertex_binding_description, instance_binding_description };
     
@@ -1325,21 +1379,22 @@ bool vk_create_text_graphics_pipeline(void* vert_shader_bin, int vert_bin_length
     vertex_input_info.vertexBindingDescriptionCount = sizeof(input_binding_descriptions)/sizeof(VkVertexInputBindingDescription);
     
     int attribute_description_count = 0;
-    vertex_input_info.pVertexAttributeDescriptions = vk_get_attribute_descriptions(opaque_instance(), &attribute_description_count);
+    vertex_input_info.pVertexAttributeDescriptions = vk_get_attribute_descriptions(text_instance(), &attribute_description_count);
     vertex_input_info.vertexAttributeDescriptionCount = (uint32_t)attribute_description_count;
     
     vk_pipeline_settings* pipeline_settings = vk_pipeline_default(true);
     
-    VkDescriptorSetLayout set_layouts[] = { rendering_platform.vk_uniform_descriptor_layout };
+    VkDescriptorSetLayout set_layouts[] = { rendering_platform.vk_uniform_descriptor_layout, rendering_platform.vk_text_descriptor_layout };
     
     VkPipelineLayoutCreateInfo pipeline_layout_info = {};
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = sizeof(set_layouts)/sizeof(VkDescriptorSetLayout); 
-    pipeline_layout_info.pSetLayouts = set_layouts; 
-    pipeline_layout_info.pushConstantRangeCount = 0;
-    pipeline_layout_info.pPushConstantRanges = 0;
+    pipeline_layout_info.pSetLayouts = set_layouts;
+    
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &(pipeline_settings->push_constants); 
 
-    if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_opaque_graphics_pipeline_layout)) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_text_graphics_pipeline_layout)) != VK_SUCCESS)
     {
         printf("Failed to create pipeline layout!\n");
         return false;
@@ -1348,11 +1403,11 @@ bool vk_create_text_graphics_pipeline(void* vert_shader_bin, int vert_bin_length
     pipeline_settings->pipeline_info.stageCount = 2;
     pipeline_settings->pipeline_info.pStages = shader_stages;
     pipeline_settings->pipeline_info.pVertexInputState = &vertex_input_info;
-    pipeline_settings->pipeline_info.layout = rendering_platform.vk_opaque_graphics_pipeline_layout;
+    pipeline_settings->pipeline_info.layout = rendering_platform.vk_text_graphics_pipeline_layout;
     pipeline_settings->pipeline_info.renderPass = rendering_platform.vk_main_render_pass;
     pipeline_settings->pipeline_info.pDynamicState = &dynamic_state;
     
-    if(vkCreateGraphicsPipelines(rendering_platform.vk_device, VK_NULL_HANDLE, 1, &(pipeline_settings->pipeline_info), nullptr, &rendering_platform.vk_opaque_graphics_pipeline) != VK_SUCCESS)
+    if(vkCreateGraphicsPipelines(rendering_platform.vk_device, VK_NULL_HANDLE, 1, &(pipeline_settings->pipeline_info), nullptr, &rendering_platform.vk_text_graphics_pipeline) != VK_SUCCESS)
     {
         printf("Failed on creating pipeline!\n");
         return false;
@@ -1398,11 +1453,11 @@ bool vk_create_descriptor_pool()
     
     VkDescriptorPoolSize sampler_pool_size = {};
     sampler_pool_size.type = VK_DESCRIPTOR_TYPE_SAMPLER;
-    sampler_pool_size.descriptorCount = 2; // Note(Leo): + 1 to stop vulkan complaining that theres 0 space left.
+    sampler_pool_size.descriptorCount = 3; // Note(Leo): + 1 to stop vulkan complaining that theres 0 space left.
     
     VkDescriptorPoolSize images_pool_size = {};
     images_pool_size.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    images_pool_size.descriptorCount = MAX_TEXTURE_COUNT;
+    images_pool_size.descriptorCount = MAX_TEXTURE_COUNT + 1; // Note(Leo): +1 to fit glyph atlas
     
     VkDescriptorPoolSize pool_sizes[] = { ubo_pool_size, sampler_pool_size, images_pool_size};
     
@@ -1410,7 +1465,7 @@ bool vk_create_descriptor_pool()
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.poolSizeCount = sizeof(pool_sizes)/sizeof(VkDescriptorPoolSize);
     pool_info.pPoolSizes = pool_sizes;
-    pool_info.maxSets = MAX_WINDOW_COUNT + MAX_TEXTURE_COUNT + 1; // Note(Leo): +1 for sampler set?
+    pool_info.maxSets = MAX_WINDOW_COUNT + MAX_TEXTURE_COUNT + 3; // Note(Leo): +2 for samplers, + 1 for glyph image 
     
     if(vkCreateDescriptorPool(rendering_platform.vk_device, &pool_info, 0, &(rendering_platform.vk_main_descriptor_pool)) != VK_SUCCESS)
     {
@@ -1505,6 +1560,52 @@ bool vk_create_uniform_descriptor(VkDescriptorSet* target, VkBuffer uniform_buff
     return true;
 }
 
+bool vk_create_text_descriptor(VkImageView glyph_atlas_imageview, VkSampler atlas_sampler)
+{
+    VkDescriptorSetAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool = rendering_platform.vk_main_descriptor_pool;
+    alloc_info.descriptorSetCount = 1;
+    alloc_info.pSetLayouts = &(rendering_platform.vk_text_descriptor_layout);
+    
+    if(vkAllocateDescriptorSets(rendering_platform.vk_device, &alloc_info, &(rendering_platform.vk_text_descriptor_set)) != VK_SUCCESS)
+    {
+        return false;
+    }
+    
+    VkDescriptorImageInfo sampler_info = {};
+    sampler_info.sampler = atlas_sampler;
+    
+    VkWriteDescriptorSet sampler_descriptor_write = {};
+    sampler_descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    sampler_descriptor_write.dstSet = rendering_platform.vk_text_descriptor_set;
+    sampler_descriptor_write.dstBinding = 0;
+    sampler_descriptor_write.dstArrayElement = 0;
+    sampler_descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    sampler_descriptor_write.descriptorCount = 1;
+    sampler_descriptor_write.pImageInfo = &sampler_info;
+    
+    vkUpdateDescriptorSets(rendering_platform.vk_device, 1, &sampler_descriptor_write, 0, 0);
+    
+    VkDescriptorImageInfo atlas_info = {};
+    atlas_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    atlas_info.imageView = glyph_atlas_imageview;
+    atlas_info.sampler = 0;
+    
+    VkWriteDescriptorSet atlas_descriptor_write = {};
+    atlas_descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    atlas_descriptor_write.dstSet = rendering_platform.vk_text_descriptor_set;
+    atlas_descriptor_write.dstBinding = 1;
+    atlas_descriptor_write.dstArrayElement = 0;
+    atlas_descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    atlas_descriptor_write.descriptorCount = 1;
+    atlas_descriptor_write.pImageInfo = &atlas_info;
+    
+    vkUpdateDescriptorSets(rendering_platform.vk_device, 1, &atlas_descriptor_write, 0, 0);
+    
+    return true;
+}
+
 bool vk_create_command_buffer(VkCommandBuffer* target)
 {
     VkCommandBufferAllocateInfo alloc_info = {};
@@ -1555,7 +1656,7 @@ bool vk_create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPrope
     return true;
 }
 
-bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, int image_index, int index_count, int opaque_instance_count, int opaque_instance_offset, int transparent_instance_count, int transparent_instance_offset)
+bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, int image_index, int index_count, int opaque_instance_count, int opaque_instance_offset, int transparent_instance_count, int transparent_instance_offset, int text_instance_count, int text_instance_offset)
 {
     VkCommandBufferBeginInfo begin_recording_info = {};
     begin_recording_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1628,7 +1729,32 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     VkDescriptorSet opaque_descriptor_sets[1] = { window->vk_uniform_descriptor };
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_opaque_graphics_pipeline_layout, 0, 1, opaque_descriptor_sets, 0, 0);
     vkCmdDrawIndexed(buffer, index_count, opaque_instance_count, 0, 0, 0);
+    
+    // Note(Leo): Text pass
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_text_graphics_pipeline);
+    
+    vkCmdSetViewport(buffer, 0, 1, &viewport);
+    vkCmdSetScissor(buffer, 0, 1, &scissor);
 
+    VkDeviceSize text_offsets[] = { 0 };
+    // Vertices
+    vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, text_offsets);
+    
+    VkDeviceSize text_instance_offsets[] = { (uint64_t)text_instance_offset };
+    // Instances
+    vkCmdBindVertexBuffers(buffer, 1, 1, vertex_buffers, text_instance_offsets);
+    
+    // Indeces
+    vkCmdBindIndexBuffer(buffer, window->vk_window_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+    
+    PushConstants constants = {};
+    constants.screen_size = { (float)window->width, (float)window->height };
+    vkCmdPushConstants(buffer, rendering_platform.vk_text_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &constants);
+    
+    VkDescriptorSet text_descriptor_sets[2] = { window->vk_uniform_descriptor, rendering_platform.vk_text_descriptor_set };
+    vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_text_graphics_pipeline_layout, 0, 2, text_descriptor_sets, 0, 0);
+    vkCmdDrawIndexed(buffer, index_count, text_instance_count, 0, 0, 0);
+    
     // Note(Leo): Transparent pass    
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_transparent_graphics_pipeline);
     
@@ -1738,7 +1864,7 @@ bool vk_check_msaa_support(VkPhysicalDevice checked_device, VkSampleCountFlagBit
     return false;
 }
 
-int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, int image_buffer_size)
+int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, FILE* text_vert_shader, FILE* text_frag_shader, int image_buffer_size)
 {
     uint32_t extension_count;
     vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL);
@@ -1861,7 +1987,15 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
         rendering_platform.vk_supported_optionals.RENDERER_MSAA = true;
         rendering_platform.vk_supported_optionals.MSAA_SAMPLES = supported_msaa_level;
     }
-
+    
+    VkImageFormatProperties supported_glyph_atlas_size = {};
+    if(vkGetPhysicalDeviceImageFormatProperties(rendering_platform.vk_physical_device, VK_FORMAT_R8_UINT, VK_IMAGE_TYPE_3D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, &supported_glyph_atlas_size) != VK_SUCCESS)
+    {
+        assert(0);
+        return 0;
+    }
+    printf("Max size for 2D, 1 Byte textures: %d x %d x %d, (%ld bytes)\n", supported_glyph_atlas_size.maxExtent.width, supported_glyph_atlas_size.maxExtent.height, supported_glyph_atlas_size.maxExtent.depth, supported_glyph_atlas_size.maxResourceSize);
+    
     
     DeAllocScratch(allocated_space);
     
@@ -1886,6 +2020,9 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     
     rendering_platform.vk_transparent_shader.vert_shader_bin = vk_read_shader_bin(transparent_vert_shader, &rendering_platform.vk_transparent_shader.vert_shader_length);
     rendering_platform.vk_transparent_shader.frag_shader_bin = vk_read_shader_bin(transparent_frag_shader, &rendering_platform.vk_transparent_shader.frag_shader_length);
+    
+    rendering_platform.vk_text_shader.vert_shader_bin = vk_read_shader_bin(text_vert_shader, &rendering_platform.vk_text_shader.vert_shader_length);
+    rendering_platform.vk_text_shader.frag_shader_bin = vk_read_shader_bin(text_frag_shader, &rendering_platform.vk_text_shader.frag_shader_length);
     
     rendering_platform.vk_image_buffer_size = image_buffer_size;
     
@@ -2501,6 +2638,122 @@ void* vk_copy_to_buffer_aligned_f(void* aligned_buffer_next, void* copy_src, int
     return aligned_buffer_next;
 }
 
+// Note(Leo): Glyphs are assumed to be square
+uvec3 vk_pick_glyph_atlas_dimensions(int total_glyph_target, int glyph_width)
+{
+    VkImageFormatProperties supported_glyph_atlas_size = {};
+    if(vkGetPhysicalDeviceImageFormatProperties(rendering_platform.vk_physical_device, VK_FORMAT_R8_UINT, VK_IMAGE_TYPE_3D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 0, &supported_glyph_atlas_size) != VK_SUCCESS)
+    {
+        assert(0);
+        return {0, 0, 0};
+    }
+    
+    uint32_t max_width = supported_glyph_atlas_size.maxExtent.width;
+    uint32_t max_height = supported_glyph_atlas_size.maxExtent.height;
+    
+    // Shrink max width/height to be a factor of the glyph width so we can fit an even number of glyphs
+    uint32_t glyph_aligned_width = max_width - (max_width % glyph_width);
+    uint32_t glyph_aligned_height = max_height - (max_height % glyph_width);
+    
+    uint32_t glyphs_per_layer = (glyph_aligned_width / glyph_width) *  (glyph_aligned_height / glyph_width);
+    // Round up desired glyph count so that we can get an ineger when finding the amount of layers needed
+    uint32_t rounded_desired_glyphs = total_glyph_target + ( glyphs_per_layer - (total_glyph_target % glyphs_per_layer));
+    
+    uint32_t required_depth = rounded_desired_glyphs / glyphs_per_layer;
+    
+    return { glyph_aligned_width, glyph_aligned_height, required_depth };
+}
+
+bool vk_initialize_font_atlas()
+{
+    uint32_t glyph_size = (uint32_t)FontPlatformGetGlyphSize();
+    uvec3 glyph_atlas_dimensions = vk_pick_glyph_atlas_dimensions(GLYPH_ATLAS_COUNT, glyph_size);
+    uint32_t actual_glyph_capacity = (glyph_atlas_dimensions.x / glyph_size) * (glyph_atlas_dimensions.y / glyph_size) * glyph_atlas_dimensions.z;
+    
+    VkImageCreateInfo image_info = {};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_3D;
+    image_info.extent.width = glyph_atlas_dimensions.x;
+    image_info.extent.height = glyph_atlas_dimensions.y;
+    image_info.extent.depth = glyph_atlas_dimensions.z;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.format = VK_FORMAT_R8_UINT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.flags = 0;
+    
+    if(vkCreateImage(rendering_platform.vk_device, &image_info, 0, &(rendering_platform.vk_glyph_atlas_image)) != VK_SUCCESS)
+    {
+        assert(0);
+        return false;
+    }
+    
+    VkMemoryRequirements memory_requirements;
+    vkGetImageMemoryRequirements(rendering_platform.vk_device, rendering_platform.vk_glyph_atlas_image, &memory_requirements);
+    
+    VkMemoryAllocateInfo alloc_info = {};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = vk_find_memory_type(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    
+    if(vkAllocateMemory(rendering_platform.vk_device, &alloc_info, 0, &(rendering_platform.vk_glyph_atlas_memory)) != VK_SUCCESS)
+    {
+        printf("Failed to create image buffer!\n");
+        return false;
+    }
+    
+    vkBindImageMemory(rendering_platform.vk_device, rendering_platform.vk_glyph_atlas_image, rendering_platform.vk_glyph_atlas_memory, 0);
+    
+    VkImageViewCreateInfo image_view_info = {};
+    image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_info.image = rendering_platform.vk_glyph_atlas_image;
+    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+    image_view_info.format = VK_FORMAT_R8_UINT;
+    image_view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    image_view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    image_view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    image_view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_view_info.subresourceRange.baseMipLevel = 0;
+    image_view_info.subresourceRange.levelCount = 1;
+    image_view_info.subresourceRange.baseArrayLayer = 0;
+    image_view_info.subresourceRange.layerCount = 1;
+    
+    if(vkCreateImageView(rendering_platform.vk_device, &image_view_info, 0, &(rendering_platform.vk_glyph_atlas_image_view)) != VK_SUCCESS)
+    {
+        return false;
+    }
+    
+    VkSamplerCreateInfo sampler_info = {};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.anisotropyEnable = VK_FALSE;
+    sampler_info.maxAnisotropy = 1.0f;    
+    sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_info.compareEnable = VK_FALSE;
+    sampler_info.compareOp = VK_COMPARE_OP_NEVER;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.mipLodBias = 0.0f;
+    sampler_info.minLod = 0.0f;
+    sampler_info.maxLod = 0.0f;
+    
+    if(vkCreateSampler(rendering_platform.vk_device, &sampler_info, 0, &(rendering_platform.vk_glyph_atlas_sampler)) != VK_SUCCESS)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
 void RenderplatformDrawWindow(PlatformWindow* window)
 {
     vkWaitForFences(rendering_platform.vk_device, 1, &(window->vk_in_flight_fence), VK_TRUE, UINT64_MAX);
@@ -2537,6 +2790,10 @@ void RenderplatformDrawWindow(PlatformWindow* window)
         {{-1.0f, -1.0f, 1.0f}, {0.2f, 0.2f, 0.0f}, {1.0f, 2.0f}, {0.1f, 0.1f, 0.1f, 0.1f}},  
     };
     
+    const text_instance temp_text_instances[] = {
+        {{0.0f, 0.0f, 0.5f}, {0.2f, 0.0f, 0.0f}, {100.0f, 100.0f}, {0, 0, 0}, {200, 200}},
+    };
+    
     void* first_vertex_address = vk_copy_to_buffer_aligned(window->vk_staging_mapped_address, shared_vertices, sizeof(shared_vertices), vertex);
     int first_vertex_offset = offset_of(first_vertex_address , window->vk_staging_mapped_address);
     int shared_vertex_count = sizeof(shared_vertices)/sizeof(vertex);
@@ -2553,6 +2810,10 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     int first_transparent_instance_offset = offset_of(first_transparent_instance_address, window->vk_staging_mapped_address);
     int temp_transparent_instance_count = sizeof(temp_transparent_instances)/sizeof(transparent_instance);
     
+    void* first_text_instance_address = vk_copy_to_buffer_aligned(((transparent_instance*)first_transparent_instance_address + temp_transparent_instance_count), temp_text_instances, sizeof(temp_text_instances), text_instance);
+    int first_text_instance_offset = offset_of(first_text_instance_address, window->vk_staging_mapped_address);
+    int temp_text_instance_count = sizeof(temp_text_instances)/sizeof(text_instance);
+    
     // Set uniform buffer transforms
     UniformBufferObject ubo = {};
     
@@ -2560,7 +2821,8 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     Identity(&(ubo.view));
     Identity(&(ubo.projection));
     
-    // Note(Leo): Aspect ratio correction    
+    // Note(Leo): Aspect ratio correction
+    // Todo(Leo): Refactor shaders to use pixel sizes instead and convert to screen coordinates (0-1) in shader, remove this entirely
     //ubo.projection.m[0][0] = (float)window->height / (float)window->width;
     ubo.projection.m[1][1] = (float)window->width / (float)window->height;
     
@@ -2583,12 +2845,18 @@ void RenderplatformDrawWindow(PlatformWindow* window)
         printf("ERROR: Failed while copying staging buffer to vertex buffer!");
     }
     
+    int final_text_instance_offset = align_offset_to((final_transparent_instance_offset + sizeof(temp_transparent_instances)), alignof(text_instance));
+    if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_vertex_buffer, sizeof(temp_text_instances), first_text_instance_offset, final_text_instance_offset))
+    {
+        printf("ERROR: Failed while copying staging buffer to vertex buffer!");
+    }
+    
     if(!vk_copy_buffer(window->vk_window_staging_buffer, window->vk_window_index_buffer, sizeof(shared_indices), first_index_offset))
     {
         printf("ERROR: Failed while copying staging buffer to index buffer!");
     }
     
-    if(!vk_record_command_buffer(window->vk_command_buffer, window, image_index, shared_index_count, temp_opaque_instance_count, final_opaque_instance_offset, temp_transparent_instance_count, final_transparent_instance_offset))
+    if(!vk_record_command_buffer(window->vk_command_buffer, window, image_index, shared_index_count, temp_opaque_instance_count, final_opaque_instance_offset, temp_transparent_instance_count, final_transparent_instance_offset, temp_text_instance_count, final_text_instance_offset))
     {
         printf("ERROR: Couldnt record command buffer!\n");
     }
@@ -2896,6 +3164,15 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
         {
             printf("Succesfully initialized graphics pipeline!\n");
         }
+        if(!vk_create_text_graphics_pipeline(rendering_platform.vk_text_shader.vert_shader_bin, rendering_platform.vk_text_shader.vert_shader_length, rendering_platform.vk_text_shader.frag_shader_bin, rendering_platform.vk_text_shader.frag_shader_length))
+        {
+            printf("Failed to initialize text graphics pipeline!\n");
+        }
+        else
+        {
+            printf("Succesfuly initialized text graphics pipeline!\n");
+        }
+        
         if(!vk_create_image_sampler(&(rendering_platform.vk_main_image_sampler)))
         {
             printf("Failed to initialize image sampler!\n");
@@ -2921,8 +3198,17 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
             printf("Failed to create image descriptor!\n");
         }
         vk_init_empty_image();
+        if(!vk_initialize_font_atlas())
+        {
+            printf("Failed to initialize font glyph atlas!\n");
+        }
+        if(!vk_create_text_descriptor(rendering_platform.vk_glyph_atlas_image_view, rendering_platform.vk_glyph_atlas_sampler))
+        {
+            printf("Failed to create text pipeline descriptors!\n");
+        }
         
         rendering_platform.vk_graphics_pipeline_initialized = true;
+        
     }
     
     if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)

@@ -249,19 +249,25 @@ int main()
     FILE* transparent_vert_shader = linux_open_relative_file_path("compiled_shaders/transparent_vert.spv", "rb");
     FILE* transparent_frag_shader = linux_open_relative_file_path("compiled_shaders/transparent_frag.spv", "rb");
         
-    if(!opaque_vert_shader || !opaque_frag_shader || !transparent_vert_shader || !transparent_frag_shader)
+    
+    FILE* text_vert_shader = linux_open_relative_file_path("compiled_shaders/text_vert.spv", "rb");
+    FILE* text_frag_shader = linux_open_relative_file_path("compiled_shaders/text_frag.spv", "rb");
+        
+    if(!opaque_vert_shader || !opaque_frag_shader || !transparent_vert_shader || !transparent_frag_shader || !text_vert_shader || !text_frag_shader )
     {
         printf("Error: Shaders could not be loaded!\n");
         return 1;
     }
         
     int required_extension_count = sizeof(linux_required_vk_extensions) / sizeof(char**);
-    InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, 100000000);
+    InitializeVulkan(&(platform.master_arena), linux_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, text_vert_shader, text_frag_shader, 100000000);
     
     fclose(opaque_vert_shader);
     fclose(opaque_frag_shader);
     fclose(transparent_vert_shader);
     fclose(transparent_frag_shader);
+    fclose(text_vert_shader);
+    fclose(text_frag_shader);
     
     platform.search_results = (Arena*)Alloc(&(platform.master_arena), sizeof(Arena));
     *(platform.search_results) = CreateArena(sizeof(FileSearchResult)*1000, sizeof(FileSearchResult));
