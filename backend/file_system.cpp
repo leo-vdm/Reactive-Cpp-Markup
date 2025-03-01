@@ -355,7 +355,7 @@ void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, con
 {
     int parent_len = strlen(dir_ref);
     WIN32_FIND_DATAA item;
-    char* curr_dir_search = (char*)AllocScratch(sizeof(char)*(parent_len + 3)); // +3 to fit \, * and \0
+    char* curr_dir_search = (char*)AllocScratch(sizeof(char)*(parent_len + 3), no_zero()); // +3 to fit \, * and \0
     memcpy(curr_dir_search, dir_ref, parent_len*sizeof(char));
     curr_dir_search[parent_len] = '\\';
     curr_dir_search[parent_len + 1] = '*';
@@ -379,7 +379,7 @@ void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, con
         }
         if(item.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) // indicates a directory
         {
-            char* new_dir_name = (char*)AllocScratch(sizeof(char)*(len + parent_len + 2));
+            char* new_dir_name = (char*)AllocScratch(sizeof(char)*(len + parent_len + 2), no_zero());
             memcpy(new_dir_name, dir_ref, parent_len*sizeof(char));
             new_dir_name[parent_len] = '\\';
             memcpy((new_dir_name + parent_len + 1), item.cFileName, len*sizeof(char));
@@ -457,7 +457,7 @@ void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, con
                 {
                 break;
                 }
-                char* new_dir_name = (char*)AllocScratch(sizeof(char)*(len + parent_len + 2));
+                char* new_dir_name = (char*)AllocScratch(sizeof(char)*(len + parent_len + 2), no_zero());
                 memcpy(new_dir_name, dir_ref, parent_len*sizeof(char));
                 new_dir_name[parent_len] = '/';
                 memcpy((new_dir_name + parent_len + 1), item->d_name, len*sizeof(char));

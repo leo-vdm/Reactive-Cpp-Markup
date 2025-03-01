@@ -125,7 +125,7 @@ void Append(ArenaString* target, ArenaString* source, int flags)
 char* Flatten(ArenaString* string)
 {
     StringBlock* curr_block = string->head;
-    char* out_buffer = (char*)AllocScratch((string->length + 1)*sizeof(char)); // +1 to fit \0
+    char* out_buffer = (char*)AllocScratch((string->length + 1)*sizeof(char), no_zero()); // +1 to fit \0
     
     int buffer_index = 0;
     

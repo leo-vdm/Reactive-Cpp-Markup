@@ -2,7 +2,7 @@
 #extension GL_ARB_separate_shader_objects : enable
 
 layout(location = 0) in vec3 frag_color;
-layout(location = 1) in vec2 frag_scale;
+layout(location = 1) in float shape_aspect_ratio;
 layout(location = 2) in vec2 frag_texture_coord;
 layout(location = 3) in vec4 frag_corners;
 
@@ -24,10 +24,13 @@ float individual_corner_box(vec2 centre_position, vec2 measurements, vec4 radii)
 void main()
 {
     // The pixel space scale of the rectangle.
-    vec2 shape_size = vec2(1.0f, 1.0f) * frag_scale;
-
+    vec2 size = vec2(1.0f, 1.0f);
+    size.x = shape_aspect_ratio;
+    
     // Calculate distance to edge.   
-    float distance = individual_corner_box(frag_texture_coord - (shape_size / 2.0f), shape_size / 2.0f, frag_corners);
+    //float distance = individual_corner_box((frag_texture_coord - vec2(0.5f, 0.5f)), vec2(0.5f, 0.5f), frag_corners);
+    float distance = individual_corner_box((frag_texture_coord - (size/2)), size/2, frag_corners);
+
 
     // Note(Leo): No smooth implementation 
     // Todo(Leo): blanket AA method for after frame is fully rendered.
@@ -35,6 +38,6 @@ void main()
     {
         discard;
     }
-    
-    out_color = vec4(frag_color, 1);
+
+    out_color = vec4(frag_color, 1.0f);
 }

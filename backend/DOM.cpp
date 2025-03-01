@@ -297,7 +297,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     
     // Allocate the element lookup array and align it so we can store pointers
     // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
-    void* element_addresses_unaligned = AllocScratch((comp_bin->file_info.tag_count + 2) * sizeof(Element*));
+    void* element_addresses_unaligned = AllocScratch((comp_bin->file_info.tag_count + 2) * sizeof(Element*), zero());
     void** element_addresses = (void**)align_ptr(element_addresses_unaligned);
     
     // Note(Leo): We use element id to index into this array, since id's are local to the file we know that they are in the range 1 - num_tags + 1

@@ -5,7 +5,7 @@ layout(set = 1, binding = 0) uniform sampler samp;
 layout(set = 1, binding = 1) uniform texture2D textures[30];
 
 layout(location = 0) in vec4 frag_color;
-layout(location = 1) in vec2 frag_scale;
+layout(location = 1) in float shape_aspect_ratio;
 layout(location = 2) in vec2 frag_texture_coord;
 layout(location = 3) in vec4 frag_corners;
 layout(location = 4) in flat int frag_image_index; 
@@ -29,12 +29,13 @@ float individual_corner_box(vec2 centre_position, vec2 measurements, vec4 radii)
 void main()
 {
     // The pixel space scale of the rectangle.
-    vec2 size = vec2(1.0f, 1.0f) * frag_scale;
+    vec2 size = vec2(1.0f, 1.0f);
+    size.x = shape_aspect_ratio;
     
     // Calculate distance to edge.   
-    float distance = individual_corner_box(frag_texture_coord.xy - (size/2.0f), size / 2.0f, frag_corners);
+    float distance = individual_corner_box((frag_texture_coord - (size/2)), size/2, frag_corners);
    
-    vec4 sampled_color = (frag_image_index != 0) ? texture(sampler2D(textures[frag_image_index], samp), frag_texture_coord) : frag_color;   
+    vec4 sampled_color = (frag_image_index != 0) ? texture(sampler2D(textures[frag_image_index], samp), frag_texture_coord / vec2(shape_aspect_ratio, 1.0f)) : frag_color;   
     
     // Note(Leo): No smooth implementation 
     // Todo(Leo): blanket AA method for after frame is fully rendered.

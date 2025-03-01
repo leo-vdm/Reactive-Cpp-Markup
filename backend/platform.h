@@ -181,6 +181,8 @@ bool RenderplatformSafeToDelete(PlatformWindow* window);
 
 void RenderplatformLoadImage(FILE* image_file, const char* name);
 
+void RenderPlatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot);
+
 //void InitializePlatform(Arena* master_arena);
 
 int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary);
@@ -198,19 +200,17 @@ struct FontPlatformShapedGlyph
     int vertical_offset;
     int width;
     int height;
-    uint32_t glyph_code;
+    uint32_t gpu_glyph_slot; 
+    // Note(Leo) gpu_glyph_slot is just the index into the arena that the glyph is
+    // at (ie your position in the arena is the position for your glyph on GPU), there is no ability for a glyph to be not on GPU ATM
 };
 
 struct FontPlatformGlyph
 {
-    // Note(Leo): Here so that if a glyph is evicted but the reference in the cache map isnt it can be caught by comparing expected to actual code
-    uint32_t glyph_code;
     int bearing_x;
     int bearing_y;
     int width;
     int height;
-    
-    // Note(Leo): Data goes after the end of rasterised glyph but is non-determined in size at compile time
 };
 
 #define FontHandle int
@@ -220,5 +220,6 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
 void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle font_handle, int font_size, int area_width, int area_height);
 FontHandle FontPlatformGetFont(const char* font_name);
-FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
+//FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();
+void FontPlatformUpdateCache(int new_size_glyphs);

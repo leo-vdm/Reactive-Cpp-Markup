@@ -240,8 +240,8 @@ struct text_instance
     vec3 offsets;
     vec3 color;
     vec2 scale;
-    uvec3 instance_glyph_offset;
-    uvec2 instance_glyph_size;
+    vec3 instance_glyph_offset;
+    vec2 instance_glyph_size;
 };
 
 struct UniformBufferObject
@@ -254,6 +254,7 @@ struct UniformBufferObject
 struct PushConstants
 {
     vec2 screen_size;
+    vec2 atlas_size;
 };
 
 VkVertexInputBindingDescription vk_get_binding_description(vertex input);

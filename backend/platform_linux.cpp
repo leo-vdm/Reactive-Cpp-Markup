@@ -70,7 +70,7 @@ void linux_process_window_events(PlatformWindow* target_window)
                 //XFlush(x_display);
                 break;
             }
-            
+            /*
             case(Expose):
             {
                 int x = x_event.xexpose.x;
@@ -80,6 +80,7 @@ void linux_process_window_events(PlatformWindow* target_window)
                 XFillRectangle(x_display, target_window->window_handle, target_window->window_gc, x, y, width, height);
                 break;
             }
+            */
             case(KeyPress):
             {
                 int key_code = x_event.xkey.keycode;
@@ -134,7 +135,7 @@ int find_last_of(const char* c_string, char searched_char)
 char* linux_get_execution_dir()
 {
     #define MAX_PATH_LEN 2000
-    char* executable_path = (char*)AllocScratch(sizeof(char)*MAX_PATH_LEN);
+    char* executable_path = (char*)AllocScratch(sizeof(char)*MAX_PATH_LEN, no_zero());
     if(readlink("/proc/self/exe", executable_path, MAX_PATH_LEN) == MAX_PATH_LEN)
     {
         assert(0);
@@ -150,7 +151,7 @@ FILE* linux_open_relative_file_path(const char* relative_path, const char* open_
     char* working_dir = linux_get_execution_dir();
     int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, relative_path);
     desired_len++; // +1 to make space for \0
-    char* file_path = (char*)AllocScratch(desired_len);
+    char* file_path = (char*)AllocScratch(desired_len, no_zero());
     sprintf(file_path, "%s/%s", working_dir, relative_path);
 
     FILE* opened = fopen(file_path, open_params);
@@ -178,7 +179,7 @@ FileSearchResult* linux_find_image_resources(Arena* search_results_arena, Arena*
     #define RESOURCE_DIR_NAME "resources/images"
     int desired_len = snprintf(NULL, 0, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     desired_len++; // + 1 to fit \0
-    char* resource_dir_path = (char*)AllocScratch(desired_len * sizeof(char));
+    char* resource_dir_path = (char*)AllocScratch(desired_len * sizeof(char), no_zero());
     sprintf(resource_dir_path, "%s/%s", working_dir, RESOURCE_DIR_NAME);
     DeAllocScratch(working_dir);
     

@@ -45,15 +45,14 @@ extern Arena scratch_arena;
 Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags = 0);
 
 // Get space from the scratch arena
+
 void* AllocScratch(int alloc_size, uint64_t flags = 0);
 
 // Return space to the scratch arena
 void DeAllocScratch(void* address);
 
 //void* Alloc(Arena* arena); // Allocate based on the alloc_size
-
 void* Alloc(Arena* arena, int size, uint64_t flags = 0); // Allocate an arbitrary size
-
 void DeAlloc(Arena* arena, void* address);
 
 void ResetArena(Arena* arena);

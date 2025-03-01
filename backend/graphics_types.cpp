@@ -107,8 +107,8 @@ const VkVertexInputAttributeDescription text_instance_input_attribute_descriptio
     {2, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(text_instance, offsets)},
     {3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(text_instance, color)},
     {4, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(text_instance, scale)},
-    {5, 1, VK_FORMAT_R32G32B32_UINT, offsetof(text_instance, instance_glyph_offset)},
-    {6, 1, VK_FORMAT_R32G32_UINT, offsetof(text_instance, instance_glyph_size)},
+    {5, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(text_instance, instance_glyph_offset)},
+    {6, 1, VK_FORMAT_R32G32_SFLOAT, offsetof(text_instance, instance_glyph_size)},
 };
 
 VkVertexInputAttributeDescription* vk_get_attribute_descriptions(text_instance input, int* len)

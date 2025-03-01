@@ -56,7 +56,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
     
         int name_len = strlen(curr->file_name);
         name_len -= 3; // -4 to exclude .bin, + 1 to fit \0
-        char* name = (char*)AllocScratch(sizeof(name_len));
+        char* name = (char*)AllocScratch(sizeof(name_len), no_zero());
         memcpy(name, curr->file_name, name_len);
         name[name_len - 1] = '\0';
         

@@ -6,14 +6,13 @@
 #include "harfbuzz/harfbuzz-10.1.0/src/hb.h"
 #include "harfbuzz/harfbuzz-10.1.0/src/hb-ft.h"
 
-#define DEFAULT_FACE_SIZE_PIXELS 250
-#define FACE_CACHE_SIZE_GLYPHS 100
+#define DEFAULT_FACE_SIZE_PIXELS 500
+#define CACHE_SIZE_GLYPHS 2000
 
 struct loaded_font_handle
 {
     FT_Face face;
     hb_font_t* font;
-    Arena* glyph_cache;
     // Todo(Leo): This is probably really stupid so dont do it!
     // Note(Leo): Glyphs are stored in same sized large containers and sampled down in the shader
     std::map<uint32_t, FontPlatformGlyph*>* glyph_cache_map;
@@ -26,20 +25,19 @@ struct FontPlatform
     
     Arena* loaded_fonts;
     Arena* font_binaries;
+    Arena* cached_glyphs; // Glyphs that are currently on the GPU.
     
     std::map<std::string, loaded_font_handle*>* loaded_font_map;
     
     hb_buffer_t* shaping_buffer;
     
     int standard_glyph_size;
+    int cache_slot_count;
 };
 
 FontPlatform font_platform;
 
-// Note(Leo): Since a rasterised glyph consists of the struct with a defined size and the blob of glyph data afterwards
-// this is required to get the true size
-// Note(Leo): +1 char in size to account for alignment requirements of the byte blob
-#define GlyphSizeBytes() ((font_platform.standard_glyph_size * font_platform.standard_glyph_size * sizeof(char)) + sizeof(char) + sizeof(FontPlatformGlyph))
+#define GlyphSlot(glyph_ptr) (((uintptr_t)glyph_ptr - font_platform.cached_glyphs->mapped_address) / sizeof(FontPlatformGlyph)) 
 
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
 {
@@ -50,7 +48,6 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     font_platform.loaded_fonts = (Arena*)Alloc(font_platform.master_arena, sizeof(Arena), zero());
     *(font_platform.loaded_fonts) = CreateArena(200*sizeof(loaded_font_handle), sizeof(loaded_font_handle));
     
-    
     font_platform.font_binaries = (Arena*)Alloc(font_platform.master_arena, sizeof(Arena), zero());
     *(font_platform.font_binaries) = CreateArena(Megabytes(20), sizeof(char));
     
@@ -59,6 +56,10 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     {
         font_platform.standard_glyph_size = standard_glyph_size;
     }
+    
+    font_platform.cached_glyphs = (Arena*)Alloc(font_platform.master_arena, sizeof(Arena), zero());
+    *(font_platform.cached_glyphs) = CreateArena(sizeof(FontPlatformGlyph) * CACHE_SIZE_GLYPHS, sizeof(FontPlatformGlyph));
+    font_platform.cache_slot_count = CACHE_SIZE_GLYPHS;
     
     int error = FT_Init_FreeType(&(font_platform.freetype));
     if(error)
@@ -73,6 +74,25 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     hb_buffer_pre_allocate(font_platform.shaping_buffer, Megabytes(1));
     
     return 0;
+}
+
+// Note(Leo): This is here since the GPU is very likely going to over allocate its glyph cache so we should use that space
+void FontPlatformUpdateCache(int new_size_glyphs)
+{
+    if(font_platform.cache_slot_count == new_size_glyphs)
+    {
+        return;
+    }
+    
+    // Inform all fonts that cached glyphs have been destroyed
+    for(auto font : *(font_platform.loaded_font_map))
+    {
+        font.second->glyph_cache_map->clear();
+    }
+    
+    FreeArena(font_platform.cached_glyphs);
+    *(font_platform.cached_glyphs) = CreateArena(sizeof(FontPlatformGlyph) * new_size_glyphs, sizeof(FontPlatformGlyph));
+    font_platform.cache_slot_count = new_size_glyphs;
 }
 
 int FontPlatformGetGlyphSize()
@@ -120,11 +140,7 @@ void FontPlatformLoadFace(const char* font_name, FILE* font_file)
     created_font->font = hb_ft_font_create_referenced(created_font->face);
     
     created_font->glyph_cache_map = new std::map<uint32_t, FontPlatformGlyph*>;
-    
-    created_font->glyph_cache = (Arena*)Alloc(font_platform.master_arena, sizeof(Arena), zero());
-    
-    *(created_font->glyph_cache) = CreateArena(FACE_CACHE_SIZE_GLYPHS * GlyphSizeBytes(), GlyphSizeBytes());
-    
+
     font_platform.loaded_font_map->insert({ font_name, created_font });
 }
 
@@ -158,13 +174,11 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     
     FT_Bitmap glyph_bitmap = slot->bitmap;
     
-    FontPlatformGlyph* added_glyph = (FontPlatformGlyph*)Alloc(font->glyph_cache, GlyphSizeBytes());
+    FontPlatformGlyph* added_glyph = (FontPlatformGlyph*)Alloc(font_platform.cached_glyphs, sizeof(FontPlatformGlyph));
     
     // Todo(Leo): Actually implement the least recently used cache eviction rather than just running out of space!
     // Check if weve run out of space
-    assert(font->glyph_cache->next_address + GlyphSizeBytes() < font->glyph_cache->next_address + font->glyph_cache->size);
-    
-    char* glyph_data = align_mem((added_glyph + 1), char);
+    assert(font_platform.cached_glyphs->next_address + sizeof(FontPlatformGlyph) < font_platform.cached_glyphs->next_address + font_platform.cached_glyphs->size);
     
     added_glyph->width = glyph_bitmap.width;
     added_glyph->height = glyph_bitmap.rows;
@@ -172,13 +186,15 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     added_glyph->bearing_x = slot->bitmap_left;
     added_glyph->bearing_y = slot->bitmap_top;
     
-    added_glyph->glyph_code = glyph_index;
-    
-    memcpy(glyph_data, glyph_bitmap.buffer, added_glyph->width * added_glyph->height);
-    
     font->glyph_cache_map->insert({glyph_index, added_glyph});
     
-    #if 1
+    // Dont upload glyphs with no size
+    if(added_glyph->width && added_glyph->height)
+    {
+        RenderPlatformUploadGlyph(glyph_bitmap.buffer, glyph_bitmap.width, glyph_bitmap.rows, GlyphSlot(added_glyph));    
+    }
+    
+    #if 0
     for(int iy = 0; iy < glyph_bitmap.rows; iy++)
     {
         for(int ix = 0; ix < glyph_bitmap.width; ix++)
@@ -233,17 +249,18 @@ void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle f
     FT_Set_Pixel_Sizes(used_font->face, font_size, font_size);
     hb_ft_font_changed(used_font->font);
 
-    
-    
     hb_shape(used_font->font, font_platform.shaping_buffer, shaping_features, sizeof(shaping_features) / sizeof(hb_feature_t));
     
     unsigned int glyph_count;
     hb_glyph_info_t* glyph_info = hb_buffer_get_glyph_infos(font_platform.shaping_buffer, &glyph_count);
     hb_glyph_position_t* glyph_pos = hb_buffer_get_glyph_positions(font_platform.shaping_buffer, &glyph_count);
+    
+    FT_Set_Pixel_Sizes(used_font->face, font_platform.standard_glyph_size, font_platform.standard_glyph_size);
+    hb_ft_font_changed(used_font->font);
+    
     if(!glyph_info || !glyph_pos)
     {
-        FT_Set_Pixel_Sizes(used_font->face, font_platform.standard_glyph_size, font_platform.standard_glyph_size);
-        hb_ft_font_changed(used_font->font);
+
         mark_end();
         return;
     }
@@ -264,13 +281,11 @@ void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle f
     
         added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
         
-        // Note(Leo): This might be bad to do since if a glyph gets evicted between here and the GPU upload we will raster it twice
-        // but its convienient to have the info here and that should be rare in most cases
         FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, glyph_info[i].codepoint);
         
-        added_glyph->glyph_code = glyph_info[i].codepoint;
+        added_glyph->gpu_glyph_slot = GlyphSlot(added_glyph_raster_info);
         
-        printf("Shaping char \"%d\"\n", glyph_info[i].codepoint);
+//        printf("Shaping char \"%d\"\n", glyph_info[i].codepoint);
         
         // Bearings are relative to the glyph's raster size which is different from the size of the font so scale it
         float font_scale = (float)font_size / (float)font_platform.standard_glyph_size;
@@ -289,7 +304,7 @@ void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle f
         cursor_x += glyph_pos[i].x_advance / 64;
         cursor_y += glyph_pos[i].y_advance / 64;
         
-        printf("Cursor at (%d, %d)\n", cursor_x, cursor_y);
+//        printf("Cursor at (%d, %d)\n", cursor_x, cursor_y);
         
         // Note(Leo): This assumes text is from side to side rather than top to bottom (like in some languages)
         // Clip text once area is filled
@@ -299,7 +314,5 @@ void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle f
         }
     }
     
-    FT_Set_Pixel_Sizes(used_font->face, font_platform.standard_glyph_size, font_platform.standard_glyph_size);
-    hb_ft_font_changed(used_font->font);    
     mark_end();
 }

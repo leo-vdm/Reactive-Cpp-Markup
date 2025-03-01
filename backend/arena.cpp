@@ -222,6 +222,7 @@ void FreeArena(Arena* arena)
 
 // Get space from the scratch arena
 void* AllocScratch(int alloc_size, uint64_t flags)
+
 {
     assert(alloc_size > 0);
     if(scratch_arena.mapped_address == 0)
@@ -229,11 +230,7 @@ void* AllocScratch(int alloc_size, uint64_t flags)
         printf("Scratch arena not initialized!");
         return NULL;
     }
-    
-    #ifndef NDEBUG
-    printf("Scratch Allocation: %d\n", alloc_size);
-    #endif
-    
+
     uintptr_t allocated_address = (uintptr_t)Alloc(&scratch_arena, alloc_size, flags); 
     
     // Use alloc size as a counter instead to know how many allocs have taken place

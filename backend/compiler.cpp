@@ -120,7 +120,7 @@ Arena* init_strings_arena(Arena* master_arena)
 void add_main(ArenaString* string, int file_id, const char* used_template)
 {
     int desired_size = snprintf(NULL, 0, used_template, file_id, file_id);
-    char* comp_main = (char*)AllocScratch(desired_size + 1);
+    char* comp_main = (char*)AllocScratch(desired_size + 1, no_zero());
     sprintf(comp_main, used_template, file_id, file_id);
     Append(string, comp_main);
     DeAllocScratch(comp_main);
@@ -188,7 +188,7 @@ int main(int argc, char* argv[])
     {
         // -4 to leave out .cmc, + 1 to make space for \0
         int name_len = strlen(curr->file_name);
-        char* comp_name = (char*)AllocScratch((name_len - 3) * sizeof(char));
+        char* comp_name = (char*)AllocScratch((name_len - 3) * sizeof(char), no_zero());
         memcpy(comp_name, curr->file_name, (name_len - 3)*sizeof(char));
         comp_name[name_len - 4] = '\0';
         
@@ -306,7 +306,7 @@ int main(int argc, char* argv[])
     {
         // -4 to leave out .cmp, + 1 to make space for \0
         int name_len = strlen(curr->file_name);
-        char* page_name = (char*)AllocScratch((name_len - 3)*sizeof(char));
+        char* page_name = (char*)AllocScratch((name_len - 3)*sizeof(char), no_zero());
         memcpy(page_name, curr->file_name, (name_len - 3)*sizeof(char));
         page_name[name_len - 4] = '\0';
         
@@ -428,7 +428,7 @@ std::map<std::string, int> registered_page_map = {};
 int RegisterComponent(char* name, int name_length, CompilerState* state)
 {
     std::string name_string;
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // +1 to fit \0
+    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // +1 to fit \0
     memcpy(terminated_name, name, name_length*sizeof(char));
     terminated_name[name_length] = '\0';
     
@@ -506,7 +506,7 @@ void print_tokens(Arena* tokens, Arena* token_values)
 void print_attribute(Attribute* attribute, Arena* bindings_arena)
 {
     const char* attribute_names[] = {"NONE", "CUSTOM", "TEXT", "STYLE", "CLASS"};
-    char* value_container = (char*)AllocScratch((attribute->value_length) + 1);
+    char* value_container = (char*)AllocScratch((attribute->value_length) + 1, no_zero());
     memcpy(value_container, attribute->attribute_value, attribute->value_length);
     value_container[attribute->Text.value_length] = '\0';
     
@@ -569,7 +569,7 @@ void print_styles(LocalStyles* glob_styles)
     Selector* curr_selector = ((Selector*)glob_styles->selectors->mapped_address);
     while(curr_selector->global_id != 0)
     {
-        char* name = (char*)AllocScratch((curr_selector->name_length + 1)*sizeof(char));
+        char* name = (char*)AllocScratch((curr_selector->name_length + 1)*sizeof(char), no_zero());
         memcpy(name, curr_selector->name, curr_selector->name_length);
         name[curr_selector->name_length] = '\0';
         

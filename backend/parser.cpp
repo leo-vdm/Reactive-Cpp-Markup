@@ -148,7 +148,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 
                 if(curr_tag->type != TagType::TEXT && expected_type != GetTagFromName((char*)curr_token->token_value, curr_token->value_length))
                 {
-                    char* temp = (char*)AllocScratch(curr_token->value_length + 1);
+                    char* temp = (char*)AllocScratch(curr_token->value_length + 1, no_zero());
                     memcpy(temp, curr_token->token_value, curr_token->value_length);
                     temp[curr_token->value_length] = '\0';
                     printf("Unexpected tag end!\n");
@@ -280,7 +280,7 @@ TagType GetTagFromName(const char* value, int value_length)
         return TagType::CUSTOM; 
     }
     
-    char* name = (char*)AllocScratch((MAX_TAG_NAME_LENGTH + 1)*sizeof(char));
+    char* name = (char*)AllocScratch((MAX_TAG_NAME_LENGTH + 1)*sizeof(char), no_zero());
     memcpy(name, value, value_length*sizeof(char));
     
     name[value_length] = '\0';
@@ -307,7 +307,7 @@ AttributeType GetAttributeFromName(char* value, int value_length)
     }
     
     //char name[MAX_ATTRIBUTE_NAME_LENGTH + 1]; // extra charachter to fit the NULL terminator
-    char* name = (char*)AllocScratch((MAX_ATTRIBUTE_NAME_LENGTH + 1)*sizeof(char));
+    char* name = (char*)AllocScratch((MAX_ATTRIBUTE_NAME_LENGTH + 1)*sizeof(char), no_zero());
     memcpy(name, value, value_length*sizeof(char));
     
     name[value_length] = '\0';
@@ -329,7 +329,7 @@ AttributeType GetAttributeFromName(char* value, int value_length)
 
 int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* value, int value_length, int tag_id, RegisteredBindingType type, CompilerState* state)
 {
-    char* name = (char*)AllocScratch((value_length + 1)*sizeof(char)); // extra charachter to fit the NULL terminator
+    char* name = (char*)AllocScratch((value_length + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
     memcpy(name, value, value_length*sizeof(char)); 
     
     name[value_length] = '\0';
@@ -440,7 +440,7 @@ char* ParseStyleStub()
 
 int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, int style_id, int global_prefix, CompilerState* state)
 {
-    char* name = (char*)AllocScratch((value_length + 1) * sizeof(char)); // extra charachter to fit the NULL terminator
+    char* name = (char*)AllocScratch((value_length + 1) * sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
     memcpy(name, value, value_length*sizeof(char)); 
 
     
@@ -731,7 +731,7 @@ StyleFieldType parse_field_name(char* name, int name_length)
         return StyleFieldType::NONE; // Cannot be a correct one 
     }
 
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // extra charachter to fit the NULL terminator
+    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
     memcpy(terminated_name, name, name_length*sizeof(char));
     
     terminated_name[name_length] = '\0';
@@ -759,10 +759,10 @@ Measurement parse_size_field(char* field_value, int field_value_length)
 {
     #define free_scratches() DeAllocScratch(terminated_field); DeAllocScratch(field_unit)
 
-    char* terminated_field = (char*)AllocScratch((field_value_length + 1)*sizeof(char));
+    char* terminated_field = (char*)AllocScratch((field_value_length + 1)*sizeof(char), no_zero());
     memcpy(terminated_field, field_value, field_value_length);
     terminated_field[field_value_length] = '\0'; // Adding null terminator
-    char* field_unit = (char*)AllocScratch((field_value_length + 1)*sizeof(char)); // At max sscanf will put the whole thing in the unit
+    char* field_unit = (char*)AllocScratch((field_value_length + 1)*sizeof(char), no_zero()); // At max sscanf will put the whole thing in the unit
     float size = 0.0f;
     // Get unit in form (size)(unit) - eg 10px
     int result = sscanf(terminated_field, "%f%s", &size, field_unit);

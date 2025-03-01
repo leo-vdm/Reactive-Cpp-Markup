@@ -107,7 +107,7 @@ void copy_between_tag_hit(FILE* destination, FILE* source, char* open_tag, char*
         // potential match, need to save the chars we pop incase it isnt a real match
         if(next_char == *checked_tag)
         {
-            char* saved_string = (char*)AllocScratch(sizeof(char)*LONGEST_META_TAG_LENGTH);
+            char* saved_string = (char*)AllocScratch(sizeof(char)*LONGEST_META_TAG_LENGTH, no_zero());
             int compared_index = 0;
             while(*(checked_tag + compared_index) != '\0' && next_char != EOF)
             {   

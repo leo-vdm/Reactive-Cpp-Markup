@@ -324,7 +324,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
     {
         while(curr_expr->id != 0)
         {
-            char* terminated_fn_name = (char*)AllocScratch((curr_expr->name_length + 3)*sizeof(char)); //+ 2 to fit () + 1 to fit \0
+            char* terminated_fn_name = (char*)AllocScratch((curr_expr->name_length + 3)*sizeof(char), no_zero()); //+ 2 to fit () + 1 to fit \0
             memcpy(terminated_fn_name, curr_expr->eval_fn_name, curr_expr->name_length*sizeof(char));
             // Add back the fn parenthesis as they are cutt off during parsing
             terminated_fn_name[curr_expr->name_length] = '(';
@@ -374,7 +374,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
     while(curr_expr->name_length != 0)
     {
         // Tell the dom to add a new expression and give us the pointer and give it the name of the user function to register to
-        char* terminated_fn_name = (char*)AllocScratch((curr_expr->name_length + 1)*sizeof(char)); // + 1 to fit \0
+        char* terminated_fn_name = (char*)AllocScratch((curr_expr->name_length + 1)*sizeof(char), no_zero()); // + 1 to fit \0
         
         memcpy(terminated_fn_name, curr_expr->eval_fn_name, curr_expr->name_length*sizeof(char));
         terminated_fn_name[curr_expr->name_length] = '\0';
@@ -448,7 +448,7 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
     // Add all stub functions
     while(curr_binding->binding_id != 0)
     {   
-        terminated_binding_name = (char*)AllocScratch((curr_binding->name_length + 1)*sizeof(char));
+        terminated_binding_name = (char*)AllocScratch((curr_binding->name_length + 1)*sizeof(char), no_zero());
         memcpy(terminated_binding_name, curr_binding->binding_name, curr_binding->name_length);
         terminated_binding_name[curr_binding->name_length] = '\0';
         
@@ -543,7 +543,7 @@ std::map<std::string, DirectiveType> directive_map =
 
 DirectiveType get_directive_from_name(char* name, int name_length)
 {
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // + 1 to fit null terminator
+    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // + 1 to fit null terminator
     memcpy(terminated_name, name, name_length*sizeof(char));
     
     terminated_name[name_length] = '\0';
@@ -591,7 +591,7 @@ std::map<std::string, int> bound_variables = {};
 // Registers a bound variable if it doesnt exist already and returns the ID
 int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name, int name_length, CompilerState* state)
 {
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // + 1 to fit null terminator
+    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // + 1 to fit null terminator
     memcpy(terminated_name, name, name_length*sizeof(char));
     terminated_name[name_length] = '\0';
     
@@ -632,7 +632,7 @@ int bind_variable_by_name(Arena* bound_vars, Arena* bound_var_names, char* name,
 // Returns 0 if var is not found
 int get_bound_var_id(Arena* bound_vars, char* name, int name_length)
 {
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char)); // + 1 to fit null terminator
+    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // + 1 to fit null terminator
     memcpy(terminated_name, name, name_length*sizeof(char));
     terminated_name[name_length] = '\0';
         
@@ -723,7 +723,7 @@ bool should_add_notify(BindingExpression* context, int depth_context, int bound_
 
 char* get_component_name(char* component_file_name, int name_length)
 {
-    char* new_name = (char*)AllocScratch((name_length + 1)*sizeof(char));
+    char* new_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero());
     char* curr_char = component_file_name;
     for(int i = 0; i < name_length; i++)
     {   

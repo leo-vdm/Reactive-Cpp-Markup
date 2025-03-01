@@ -114,6 +114,7 @@ struct VulkanRenderPlatform
     VkImage vk_glyph_atlas_image;
     VkImageView vk_glyph_atlas_image_view;
     VkDeviceMemory vk_glyph_atlas_memory; 
+    uvec3 vk_glyph_atlas_dimensions;
     
     Arena* vk_master_arena;
     Arena* vk_pointer_arrays;
@@ -147,7 +148,7 @@ bool vk_present_supported(VkPhysicalDevice* target_device, VkSurfaceKHR surface,
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, nullptr);
     
-    void* allocated_space = AllocScratch((queue_family_count + 1)*sizeof(VkQueueFamilyProperties));
+    void* allocated_space = AllocScratch((queue_family_count + 1)*sizeof(VkQueueFamilyProperties), no_zero());
     VkQueueFamilyProperties* supported_families = (VkQueueFamilyProperties*)align_mem(allocated_space, VkQueueFamilyProperties);
     
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, supported_families);
@@ -199,7 +200,7 @@ bool vk_device_queues_supported(VkPhysicalDevice* target_device, int avoided_fam
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, nullptr);
     
-    void* allocated_space = AllocScratch((queue_family_count + 1)*sizeof(VkQueueFamilyProperties));
+    void* allocated_space = AllocScratch((queue_family_count + 1)*sizeof(VkQueueFamilyProperties), no_zero());
     VkQueueFamilyProperties* supported_families = (VkQueueFamilyProperties*)align_mem(allocated_space, VkQueueFamilyProperties);
     
     vkGetPhysicalDeviceQueueFamilyProperties(*target_device, &queue_family_count, supported_families);
@@ -311,7 +312,7 @@ VkSurfaceFormatKHR vk_pick_surface_format(VkSurfaceKHR surface)
     // Should have already verified that formats are non zero before calling this func
     assert(format_count != 0);
     
-    void* allocated_space = AllocScratch((format_count + 1)*sizeof(VkSurfaceFormatKHR));
+    void* allocated_space = AllocScratch((format_count + 1)*sizeof(VkSurfaceFormatKHR), no_zero());
     VkSurfaceFormatKHR* supported_formats = (VkSurfaceFormatKHR*)align_mem(allocated_space, VkSurfaceFormatKHR);
     
     vkGetPhysicalDeviceSurfaceFormatsKHR(rendering_platform.vk_physical_device, surface, &format_count, supported_formats);
@@ -343,7 +344,7 @@ VkPresentModeKHR vk_pick_surface_presentation_mode(VkSurfaceKHR surface)
     // Should have already verified that formats are non zero before calling this func
     assert(mode_count != 0);
     
-    void* allocated_space = AllocScratch((mode_count + 1)*sizeof(VkPresentModeKHR));
+    void* allocated_space = AllocScratch((mode_count + 1)*sizeof(VkPresentModeKHR), no_zero());
     VkPresentModeKHR* supported_modes = (VkPresentModeKHR*)align_mem(allocated_space, VkPresentModeKHR);
     
     vkGetPhysicalDeviceSurfacePresentModesKHR(rendering_platform.vk_physical_device, surface, &mode_count, supported_modes);
@@ -575,7 +576,7 @@ LinkedPointer* vk_create_swapchain_image_views(VkSwapchainKHR swapchain)
     uint32_t image_count;
     vkGetSwapchainImagesKHR(rendering_platform.vk_device, swapchain, &image_count, nullptr);
     
-    void* allocated_space = AllocScratch((image_count + 1)*sizeof(VkImage));
+    void* allocated_space = AllocScratch((image_count + 1)*sizeof(VkImage), no_zero());
     VkImage* swapchain_images = (VkImage*)align_mem(allocated_space, VkImage);
     
     vkGetSwapchainImagesKHR(rendering_platform.vk_device, swapchain, &image_count, swapchain_images);
@@ -1216,8 +1217,9 @@ bool vk_create_transparent_graphics_pipeline(void* vert_shader_bin, int vert_bin
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = sizeof(set_layouts)/sizeof(VkDescriptorSetLayout); 
     pipeline_layout_info.pSetLayouts = set_layouts; 
-    pipeline_layout_info.pushConstantRangeCount = 0;
-    pipeline_layout_info.pPushConstantRanges = 0;
+
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &(pipeline_settings->push_constants); 
 
     if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_transparent_graphics_pipeline_layout)) != VK_SUCCESS)
     {
@@ -1302,8 +1304,9 @@ bool vk_create_opaque_graphics_pipeline(void* vert_shader_bin, int vert_bin_leng
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = sizeof(set_layouts)/sizeof(VkDescriptorSetLayout); 
     pipeline_layout_info.pSetLayouts = set_layouts; 
-    pipeline_layout_info.pushConstantRangeCount = 0;
-    pipeline_layout_info.pPushConstantRanges = 0;
+        
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &(pipeline_settings->push_constants); 
 
     if(vkCreatePipelineLayout(rendering_platform.vk_device, &pipeline_layout_info, 0, &(rendering_platform.vk_opaque_graphics_pipeline_layout)) != VK_SUCCESS)
     {
@@ -1707,8 +1710,14 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     
     vkCmdBeginRenderPass(buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
     
+
     // Note(Leo): Opaque pass
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_opaque_graphics_pipeline);
+    
+    PushConstants constants = {};
+    constants.screen_size = { (float)window->width, (float)window->height };
+    constants.atlas_size = { (float)rendering_platform.vk_glyph_atlas_dimensions.x, (float)rendering_platform.vk_glyph_atlas_dimensions.y };
+    vkCmdPushConstants(buffer, rendering_platform.vk_opaque_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &constants);
     
     vkCmdSetViewport(buffer, 0, 1, &viewport);
     vkCmdSetScissor(buffer, 0, 1, &scissor);
@@ -1732,6 +1741,8 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     
     // Note(Leo): Text pass
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_text_graphics_pipeline);
+
+    vkCmdPushConstants(buffer, rendering_platform.vk_text_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &constants);
     
     vkCmdSetViewport(buffer, 0, 1, &viewport);
     vkCmdSetScissor(buffer, 0, 1, &scissor);
@@ -1747,16 +1758,14 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, in
     // Indeces
     vkCmdBindIndexBuffer(buffer, window->vk_window_index_buffer, 0, VK_INDEX_TYPE_UINT16);
     
-    PushConstants constants = {};
-    constants.screen_size = { (float)window->width, (float)window->height };
-    vkCmdPushConstants(buffer, rendering_platform.vk_text_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &constants);
-    
     VkDescriptorSet text_descriptor_sets[2] = { window->vk_uniform_descriptor, rendering_platform.vk_text_descriptor_set };
     vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_text_graphics_pipeline_layout, 0, 2, text_descriptor_sets, 0, 0);
     vkCmdDrawIndexed(buffer, index_count, text_instance_count, 0, 0, 0);
     
     // Note(Leo): Transparent pass    
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rendering_platform.vk_transparent_graphics_pipeline);
+
+    vkCmdPushConstants(buffer, rendering_platform.vk_transparent_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &constants);
     
     vkCmdSetViewport(buffer, 0, 1, &viewport);
     vkCmdSetScissor(buffer, 0, 1, &scissor);
@@ -1872,7 +1881,7 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     printf("Found %d vulkan extensions\n", extension_count);
     
     // Note(Leo) + 1 since allignment can move the array over an entire element in worst case
-    void* allocated_space = AllocScratch((extension_count + 1)*sizeof(VkExtensionProperties));
+    void* allocated_space = AllocScratch((extension_count + 1)*sizeof(VkExtensionProperties), no_zero());
     VkExtensionProperties* supported_extensions = (VkExtensionProperties*)align_mem(allocated_space, VkExtensionProperties);
     
     vkEnumerateInstanceExtensionProperties(NULL, &extension_count, supported_extensions);
@@ -1955,7 +1964,7 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     }
     
     // Note(Leo): +1 to fit alignment
-    allocated_space = AllocScratch((device_count + 1)*sizeof(VkPhysicalDevice));
+    allocated_space = AllocScratch((device_count + 1)*sizeof(VkPhysicalDevice), no_zero());
     VkPhysicalDevice* physical_devices = align_mem(allocated_space, VkPhysicalDevice);
     
     vkEnumeratePhysicalDevices(rendering_platform.vk_instance, &device_count, physical_devices);    
@@ -2279,6 +2288,22 @@ bool vk_transition_image_layout(VkImage image, VkFormat format, VkImageLayout ol
         source_flags = VK_PIPELINE_STAGE_TRANSFER_BIT;
         destination_flags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
     }
+    else if(old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+    {
+        image_barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        image_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    
+        source_flags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destination_flags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    }
+    else if(old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    {
+        image_barrier.srcAccessMask = 0;
+        image_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        
+        source_flags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destination_flags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    }
     else
     {
         printf("ERROR: Unsuported image transition!\n");
@@ -2305,7 +2330,8 @@ bool vk_transition_image_layout(VkImage image, VkFormat format, VkImageLayout ol
     return true;
 }
 
-bool vk_copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
+
+bool vk_copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height, ivec3 offsets)
 {
     VkCommandBufferAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -2338,7 +2364,7 @@ bool vk_copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uin
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
     
-    region.imageOffset = { 0, 0, 0 };
+    region.imageOffset = { offsets.x, offsets.y, offsets.z };
     region.imageExtent = { width, height, 1 };
     
     vkCmdCopyBufferToImage(temp_command_buffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
@@ -2359,6 +2385,12 @@ bool vk_copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uin
     vkFreeCommandBuffers(rendering_platform.vk_device, rendering_platform.vk_transient_command_pool, 1, &temp_command_buffer);
     return true;
 }
+
+inline bool vk_copy_buffer_to_image(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height)
+{
+    return vk_copy_buffer_to_image(buffer, image, width, height, {0, 0, 0});
+}
+
 
 std::map<std::string, LoadedImageHandle*> loaded_image_map = {};
 
@@ -2664,18 +2696,43 @@ uvec3 vk_pick_glyph_atlas_dimensions(int total_glyph_target, int glyph_width)
     return { glyph_aligned_width, glyph_aligned_height, required_depth };
 }
 
+uvec3 vk_get_glyph_coordinate(int glyph_index)
+{
+    if(glyph_index == 0)
+    {
+        return {0, 0, 0};
+    }
+    
+    uint32_t glyph_size = (uint32_t)FontPlatformGetGlyphSize();
+    uint32_t atlas_width = rendering_platform.vk_glyph_atlas_dimensions.x;
+    uint32_t atlas_height = rendering_platform.vk_glyph_atlas_dimensions.y;
+    
+    uint32_t atlas_width_glyphs = atlas_width / glyph_size; 
+    uint32_t atlas_height_glyphs = atlas_height / glyph_size;
+    
+    uint32_t depth = glyph_index / (atlas_width_glyphs * atlas_height_glyphs);
+    uint32_t depth_remainder = glyph_index % (atlas_width_glyphs * atlas_height_glyphs);
+    
+    uint32_t x_glyph = depth_remainder % atlas_width_glyphs;
+    uint32_t y_glyph = depth_remainder / atlas_width_glyphs;
+    
+    return {x_glyph * glyph_size, y_glyph * glyph_size, depth};
+}
+
 bool vk_initialize_font_atlas()
 {
     uint32_t glyph_size = (uint32_t)FontPlatformGetGlyphSize();
-    uvec3 glyph_atlas_dimensions = vk_pick_glyph_atlas_dimensions(GLYPH_ATLAS_COUNT, glyph_size);
-    uint32_t actual_glyph_capacity = (glyph_atlas_dimensions.x / glyph_size) * (glyph_atlas_dimensions.y / glyph_size) * glyph_atlas_dimensions.z;
+    rendering_platform.vk_glyph_atlas_dimensions = vk_pick_glyph_atlas_dimensions(GLYPH_ATLAS_COUNT, glyph_size);
+    uint32_t actual_glyph_capacity = (rendering_platform.vk_glyph_atlas_dimensions.x / glyph_size) * (rendering_platform.vk_glyph_atlas_dimensions.y / glyph_size) * rendering_platform.vk_glyph_atlas_dimensions.z;
+    
+    FontPlatformUpdateCache(actual_glyph_capacity);
     
     VkImageCreateInfo image_info = {};
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.imageType = VK_IMAGE_TYPE_3D;
-    image_info.extent.width = glyph_atlas_dimensions.x;
-    image_info.extent.height = glyph_atlas_dimensions.y;
-    image_info.extent.depth = glyph_atlas_dimensions.z;
+    image_info.extent.width = rendering_platform.vk_glyph_atlas_dimensions.x;
+    image_info.extent.height = rendering_platform.vk_glyph_atlas_dimensions.y;
+    image_info.extent.depth = rendering_platform.vk_glyph_atlas_dimensions.z;
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1;
     image_info.format = VK_FORMAT_R8_UINT;
@@ -2708,6 +2765,12 @@ bool vk_initialize_font_atlas()
     
     vkBindImageMemory(rendering_platform.vk_device, rendering_platform.vk_glyph_atlas_image, rendering_platform.vk_glyph_atlas_memory, 0);
     
+    if(!vk_transition_image_layout(rendering_platform.vk_glyph_atlas_image, VK_FORMAT_R8_UINT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    {
+        printf("Failed transitioning layout for glyph image!\n");
+        return false;
+    }
+    
     VkImageViewCreateInfo image_view_info = {};
     image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_info.image = rendering_platform.vk_glyph_atlas_image;
@@ -2730,8 +2793,8 @@ bool vk_initialize_font_atlas()
     
     VkSamplerCreateInfo sampler_info = {};
     sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_info.magFilter = VK_FILTER_LINEAR;
-    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.magFilter = VK_FILTER_NEAREST;
+    sampler_info.minFilter = VK_FILTER_NEAREST;
     sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -2741,7 +2804,7 @@ bool vk_initialize_font_atlas()
     sampler_info.unnormalizedCoordinates = VK_FALSE;
     sampler_info.compareEnable = VK_FALSE;
     sampler_info.compareOp = VK_COMPARE_OP_NEVER;
-    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     sampler_info.mipLodBias = 0.0f;
     sampler_info.minLod = 0.0f;
     sampler_info.maxLod = 0.0f;
@@ -2752,6 +2815,50 @@ bool vk_initialize_font_atlas()
     }
     
     return true;
+}
+
+void RenderPlatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot)
+{
+    // Note(Leo): This depends on glyph pixels being 1 byte 
+    int glyph_size = glyph_width * glyph_height * sizeof(char);
+    assert(glyph_size);
+    
+    if(!vk_transition_image_layout(rendering_platform.vk_glyph_atlas_image, VK_FORMAT_R8_UINT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    {
+        printf("Failed transitioning layout for glyph image!\n");
+        return;
+    }
+    
+    VkBuffer temp_stage;
+    VkDeviceMemory temp_stage_memory;
+    
+    if(!vk_create_buffer(glyph_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &temp_stage, &temp_stage_memory))
+    {
+        return;
+    }
+    
+    void* staging_data;
+    vkMapMemory(rendering_platform.vk_device, temp_stage_memory, 0, glyph_size, 0, &staging_data);
+    memcpy(staging_data, glyph_data, glyph_size);
+    vkUnmapMemory(rendering_platform.vk_device, temp_stage_memory);
+    uvec3 found_glyph_offsets = vk_get_glyph_coordinate(glyph_slot);
+    
+    ivec3 glyph_offsets = {(int32_t)found_glyph_offsets.x, (int32_t)found_glyph_offsets.y, (int32_t)found_glyph_offsets.z};
+    printf("Adding glyph to slot %d at location (%d, %d, %d)\n", glyph_slot, glyph_offsets.x, glyph_offsets.y, glyph_offsets.z);
+    
+    if(!vk_copy_buffer_to_image(temp_stage, rendering_platform.vk_glyph_atlas_image, (uint32_t)glyph_width, (uint32_t)glyph_height, glyph_offsets))
+    {
+        return;
+    }
+    
+    if(!vk_transition_image_layout(rendering_platform.vk_glyph_atlas_image, VK_FORMAT_R8_UINT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
+    {
+        printf("Failed transitioning layout for glyph image!\n");
+        return;
+    }
+    
+    vkDestroyBuffer(rendering_platform.vk_device, temp_stage, 0);
+    vkFreeMemory(rendering_platform.vk_device, temp_stage_memory, 0);
 }
 
 void RenderplatformDrawWindow(PlatformWindow* window)
@@ -2770,28 +2877,38 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     vkResetFences(rendering_platform.vk_device, 1, &(window->vk_in_flight_fence));
     vkResetCommandBuffer(window->vk_command_buffer, 0);
     
+    // Note(Leo): Temporary code, REMOVE!!
+    static bool done = false;
+    if(!done)
+    {
+        FontHandle test_font = FontPlatformGetFont("platform_default_font.ttf");
+        Arena temp = CreateArena(sizeof(FontPlatformShapedGlyph)*1000, sizeof(FontPlatformShapedGlyph));
+        FontPlatformShape(&temp, "Deez Nuts", test_font, 40, 500, 500);
+        done = true;
+    }
+    
     // Note(Leo): Quad
     const uint16_t shared_indices[] = { 0, 1, 2, 2, 3, 0 };
     
     const vertex shared_vertices[] = {
         {{0.0f, 0.0f}, {0.0f, 0.0f}},
         {{1.0f, 0.0f}, {1.0f, 0.0f}},
-        {{1.0f, 1.0f},  {1.0f, 1.0f}},
+        {{1.0f, 1.0f}, {1.0f, 1.0f}},
         {{0.0f, 1.0f}, {0.0f, 1.0f}},
     };
     
     const transparent_instance temp_transparent_instances[] = {
-        {{0.0f, -1.0f, 0.2f}, {0.2f, 0.2f, 0.5f, 0.5f}, {1.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}, { 1 } },
-        {{-0.5f, -1.0f, 0.0f}, {0.2f, 0.2f, 0.5f, 0.5f}, {1.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}, { 0 } },
+        {{0.0f, 100.0f, 0.2f}, {0.2f, 0.2f, 0.5f, 0.5f}, {300.0f, 300.0f}, {100.0f, 0.0f, 0.0f, 0.0f}, { 1 } },
+        {{-0.5f, -1.0f, 0.0f}, {0.2f, 0.2f, 0.5f, 0.5f}, {1000.0f, 1000.0f}, {100.0f, 0.0f, 0.0f, 0.0f}, { 0 } },
     };
 
     const opaque_instance temp_opaque_instances[] = {
-        {{0.0f, 0.0f, 1.0f}, {0.2f, 0.2f, 0.5f}, {2.0f, 1.0f}, {0.1f, 0.0f, 0.0f, 0.0f}},  
-        {{-1.0f, -1.0f, 1.0f}, {0.2f, 0.2f, 0.0f}, {1.0f, 2.0f}, {0.1f, 0.1f, 0.1f, 0.1f}},  
+        {{0.0f, 0.0f, 0.9f}, {0.2f, 0.2f, 0.5f}, {1000.0f, 500.0f}, {100.0f, 0.0f, 0.0f, 0.0f}},  
+        {{-1.0f, -1.0f, 1.0f}, {0.2f, 0.2f, 0.0f}, {500.0f, 1000.0f}, {100.0f, 50.0f, 10.0f, 200.0f}},  
     };
     
-    const text_instance temp_text_instances[] = {
-        {{0.0f, 0.0f, 0.5f}, {0.2f, 0.0f, 0.0f}, {100.0f, 100.0f}, {0, 0, 0}, {200, 200}},
+    text_instance temp_text_instances[] = {
+        {{50.0f, 0.0f, 0.5f}, {0.2f, 0.0f, 0.0f}, {500.0f, 1000.0f}, {0, 0, 0}, {500, 500}},
     };
     
     void* first_vertex_address = vk_copy_to_buffer_aligned(window->vk_staging_mapped_address, shared_vertices, sizeof(shared_vertices), vertex);
@@ -2984,6 +3101,68 @@ void vk_destroy_window_surface(PlatformWindow* window)
     vkDestroySurfaceKHR(rendering_platform.vk_instance, window->vk_window_surface, 0);
 }
 
+// Note(Leo): Stuff that can only happen once a window surface has been provided (logical device dependant stuff)
+void vk_late_initialize()
+{
+   if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
+    {
+        printf("Failed to create renderpass!\n");
+    }
+    if(!vk_create_descriptor_set_layouts())
+    {
+        printf("Failed to create descriptor sets!\n");
+    }
+    if(!vk_create_opaque_graphics_pipeline(rendering_platform.vk_opaque_shader.vert_shader_bin, rendering_platform.vk_opaque_shader.vert_shader_length, rendering_platform.vk_opaque_shader.frag_shader_bin, rendering_platform.vk_opaque_shader.frag_shader_length))
+    {
+        printf("Failed to initialize opaque graphics pipeline!");
+    }
+    if(!vk_create_transparent_graphics_pipeline(rendering_platform.vk_transparent_shader.vert_shader_bin, rendering_platform.vk_transparent_shader.vert_shader_length, rendering_platform.vk_transparent_shader.frag_shader_bin, rendering_platform.vk_transparent_shader.frag_shader_length))
+    {
+        printf("Failed to initialize transparent graphics pipeline!");
+    }
+    else
+    {
+        printf("Succesfully initialized graphics pipeline!\n");
+    }
+    if(!vk_create_text_graphics_pipeline(rendering_platform.vk_text_shader.vert_shader_bin, rendering_platform.vk_text_shader.vert_shader_length, rendering_platform.vk_text_shader.frag_shader_bin, rendering_platform.vk_text_shader.frag_shader_length))
+    {
+        printf("Failed to initialize text graphics pipeline!\n");
+    }
+    else
+    {
+        printf("Succesfuly initialized text graphics pipeline!\n");
+    }
+    
+    if(!vk_create_image_sampler(&(rendering_platform.vk_main_image_sampler)))
+    {
+        printf("Failed to initialize image sampler!\n");
+    }
+    if(!vk_create_command_pools())
+    {
+        printf("Failed to create command pool!\n");
+    }
+    if(!vk_create_descriptor_pool())
+    {
+        printf("Failed to create descriptor pool!\n");
+    }
+    if(!vk_initialize_image_descriptor())
+    {
+        printf("Failed to create image descriptor!\n");
+    }
+    vk_init_empty_image();
+    if(!vk_initialize_font_atlas())
+    {
+        printf("Failed to initialize font glyph atlas!\n");
+    }
+    if(!vk_create_text_descriptor(rendering_platform.vk_glyph_atlas_image_view, rendering_platform.vk_glyph_atlas_sampler))
+    {
+        printf("Failed to create text pipeline descriptors!\n");
+    }
+    
+    rendering_platform.vk_graphics_pipeline_initialized = true;
+ 
+}
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle)
@@ -3023,49 +3202,17 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
     
     if(!rendering_platform.vk_graphics_pipeline_initialized)
     {
-        if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
-        {
-            printf("Failed to create renderpass!\n");
-        }
-        if(!vk_create_descriptor_set_layouts())
-        {
-            printf("Failed to create descriptor sets!\n");
-        }
-        if(!vk_create_opaque_graphics_pipeline(rendering_platform.vk_opaque_shader.vert_shader_bin, rendering_platform.vk_opaque_shader.vert_shader_length, rendering_platform.vk_opaque_shader.frag_shader_bin, rendering_platform.vk_opaque_shader.frag_shader_length))
-        {
-            printf("Failed to initialize opaque graphics pipeline!");
-        }
-        if(!vk_create_transparent_graphics_pipeline(rendering_platform.vk_transparent_shader.vert_shader_bin, rendering_platform.vk_transparent_shader.vert_shader_length, rendering_platform.vk_transparent_shader.frag_shader_bin, rendering_platform.vk_transparent_shader.frag_shader_length))
-        {
-            printf("Failed to initialize transparent graphics pipeline!");
-        }
-        if(!vk_create_image_sampler(&(rendering_platform.vk_main_image_sampler)))
-        {
-            printf("Failed to initialize image sampler!\n");
-        }
-        if(!vk_create_command_pools())
-        {
-            printf("Failed to create command pool!\n");
-        }
-        if(!vk_create_command_buffer(&(window->vk_command_buffer)))
-        {
-            printf("Failed to create command buffer\n");
-        }
-        if(!vk_create_sync_objects(window))
-        {
-            printf("Failed to creat sync objects!\n");
-        }
-        if(!vk_create_descriptor_pool())
-        {
-            printf("Failed to create descriptor pool!\n");
-        }
-        if(!vk_initialize_image_descriptor())
-        {
-            printf("Failed to create image descriptor!\n");
-        }
-        vk_init_empty_image();
-        
-        rendering_platform.vk_graphics_pipeline_initialized = true;
+        vk_late_initialize();
+    }
+    
+    if(!vk_create_command_buffer(&(window->vk_command_buffer)))
+    {
+        printf("Failed to create command buffer\n");
+    }
+    
+    if(!vk_create_sync_objects(window))
+    {
+        printf("Failed to creat sync objects!\n");
     }
     
     if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
@@ -3144,71 +3291,16 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
     
     if(!rendering_platform.vk_graphics_pipeline_initialized)
     {
-        if(!vk_create_render_pass(&rendering_platform.vk_main_render_pass))
-        {
-            printf("Failed to create renderpass!\n");
-        }
-        if(!vk_create_descriptor_set_layouts())
-        {
-            printf("Failed to create descriptor sets!\n");
-        }
-        if(!vk_create_opaque_graphics_pipeline(rendering_platform.vk_opaque_shader.vert_shader_bin, rendering_platform.vk_opaque_shader.vert_shader_length, rendering_platform.vk_opaque_shader.frag_shader_bin, rendering_platform.vk_opaque_shader.frag_shader_length))
-        {
-            printf("Failed to initialize opaque graphics pipeline!");
-        }
-        if(!vk_create_transparent_graphics_pipeline(rendering_platform.vk_transparent_shader.vert_shader_bin, rendering_platform.vk_transparent_shader.vert_shader_length, rendering_platform.vk_transparent_shader.frag_shader_bin, rendering_platform.vk_transparent_shader.frag_shader_length))
-        {
-            printf("Failed to initialize transparent graphics pipeline!");
-        }
-        else
-        {
-            printf("Succesfully initialized graphics pipeline!\n");
-        }
-        if(!vk_create_text_graphics_pipeline(rendering_platform.vk_text_shader.vert_shader_bin, rendering_platform.vk_text_shader.vert_shader_length, rendering_platform.vk_text_shader.frag_shader_bin, rendering_platform.vk_text_shader.frag_shader_length))
-        {
-            printf("Failed to initialize text graphics pipeline!\n");
-        }
-        else
-        {
-            printf("Succesfuly initialized text graphics pipeline!\n");
-        }
-        
-        if(!vk_create_image_sampler(&(rendering_platform.vk_main_image_sampler)))
-        {
-            printf("Failed to initialize image sampler!\n");
-        }
-        if(!vk_create_command_pools())
-        {
-            printf("Failed to create command pool!\n");
-        }
-        if(!vk_create_command_buffer(&(window->vk_command_buffer)))
-        {
-            printf("Failed to create command buffer\n");
-        }
-        if(!vk_create_sync_objects(window))
-        {
-            printf("Failed to create sync objects!\n");
-        }
-        if(!vk_create_descriptor_pool())
-        {
-            printf("Failed to create descriptor pool!\n");
-        }
-        if(!vk_initialize_image_descriptor())
-        {
-            printf("Failed to create image descriptor!\n");
-        }
-        vk_init_empty_image();
-        if(!vk_initialize_font_atlas())
-        {
-            printf("Failed to initialize font glyph atlas!\n");
-        }
-        if(!vk_create_text_descriptor(rendering_platform.vk_glyph_atlas_image_view, rendering_platform.vk_glyph_atlas_sampler))
-        {
-            printf("Failed to create text pipeline descriptors!\n");
-        }
-        
-        rendering_platform.vk_graphics_pipeline_initialized = true;
-        
+        vk_late_initialize();
+    }
+    
+    if(!vk_create_command_buffer(&(window->vk_command_buffer)))
+    {
+        printf("Failed to create command buffer\n");
+    }
+    if(!vk_create_sync_objects(window))
+    {
+        printf("Failed to create sync objects!\n");
     }
     
     if(rendering_platform.vk_supported_optionals.RENDERER_MSAA)
