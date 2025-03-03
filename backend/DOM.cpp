@@ -12,13 +12,10 @@ void InitDOM(Arena* master_arena, DOM* target)
     target->pointer_arrays = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->elements = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->bound_expressions = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->bound_vars = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->styles = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->selectors = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->changed_que = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->frame_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->generations = (Arena*)Alloc(master_arena, sizeof(Arena));
     
     *(target->static_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->cached_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
@@ -27,13 +24,10 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*5000, sizeof(Element));
     *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));
-    *(target->bound_expressions) = CreateArena(sizeof(BoundExpression)*1000, sizeof(BoundExpression));
-    *(target->bound_vars) = CreateArena(sizeof(BoundVariable)*1000, sizeof(BoundVariable));
     *(target->styles) = CreateArena(sizeof(Style)*10000, sizeof(Style));
     *(target->selectors) = CreateArena(sizeof(Selector)*1000, sizeof(Selector));
     *(target->changed_que) = CreateArena(sizeof(int*)*1000, sizeof(int*));
     *(target->frame_arena) = CreateArena(sizeof(char)*10000, sizeof(char));
-    *(target->generations) = CreateArena(sizeof(Generation)*1000, sizeof(Generation));
 }
 
 void CalculateStyles()
@@ -51,36 +45,47 @@ void Draw()
     
 }
 
-BoundExpression* register_bound_expr(SubscribedStubVoid, int id)
-{
-    return NULL;
-}
-BoundExpression* register_bound_expr(SubscribedStubString, int id)
-{
-    return NULL;
-}
-BoundExpression* register_bound_expr(SubscribedCompStubVoid, int id)
-{
-    return NULL;
-}
-BoundExpression* register_bound_expr(SubscribedCompStubString, int id)
-{
-    return NULL;
-}
-
-void subscribe_to(BoundExpression* expr, int target_bound_id)
-{
-
-}
-
-void bound_var_changed(int changed_var_id)
-{
-
-}
-
-void bound_var_changed(int changed_var_id, void* d_void)
-{
+// Todo(Leo): Move all bound expression related stuff into runtime since the objects are now shared universally and stored on a runtime arena
+BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id)
+{    
+    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
     
+    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
+    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
+    {   
+        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
+        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
+    }
+    created->expression_id = id;
+    created->type = BoundExpressionType::VOID_RET;
+    created->stub_void = fn;
+    
+    return created;
+}
+
+BoundExpression* register_bound_expr(SubscribedStubString fn, int id)
+{
+    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
+    
+    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
+    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
+    {   
+        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
+        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
+    }
+    created->expression_id = id;
+    created->type = BoundExpressionType::ARENA_STRING;
+    created->stub_string = fn;
+    
+    return created;
+}
+
+// Note(Leo): Expressions are stored in the expression arena as an array with their id as their index
+BoundExpression* GetBoundExpression(int id)
+{
+    assert(id > 0);
+    assert(runtime.bound_expressions->mapped_address);
+    return (BoundExpression*)runtime.bound_expressions->mapped_address + id;
 }
 
 Attribute* GetAttribute(Element* element, AttributeType searched_type)
@@ -99,6 +104,15 @@ Attribute* GetAttribute(Element* element, AttributeType searched_type)
 }
 
 
+void* AllocPage(DOM* dom, int size, int file_id)
+{
+    // TODO(Leo): DONT USE MALLOC HERE THIS IS TEMPORARY, put this onto an arena instead
+    void* allocated = malloc(size);
+    memset(allocated, 0, size);
+    return allocated;
+}
+
+
 void* AllocComponent(DOM* dom, int size, int file_id)
 {
     // TODO(Leo): DONT USE MALLOC HERE THIS IS TEMPORARY, put this onto an arena instead
@@ -107,19 +121,7 @@ void* AllocComponent(DOM* dom, int size, int file_id)
     return allocated;
 }
 
-LinkedPointer* get_attribute_by_expression(Generation* gen, int id)
-{
-    auto search = gen->expression_sub_map->find(id);
-    // Expression already has subscribers
-    if(search != gen->expression_sub_map->end())
-    {
-        return search->second;
-    }
-    // Expression has no subscribers
-    return NULL;
-}
-
-Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attribute, Generation* gen)
+Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attribute)
 {
     Attribute* added = (Attribute*)Alloc(dom->attributes, sizeof(Attribute), zero());
     added->type = (AttributeType)((int)converted_attribute->type);
@@ -139,42 +141,15 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
             text_like:
             added->Text.binding_id = converted_attribute->Text.binding_id;
             added->Text.static_value = converted_attribute->Text.value;
+            added->Text.binding_position = converted_attribute->Text.binding_position;
             added->Text.value_length = converted_attribute->Text.value_length;
             break;
-    }
-    
-    // Note(Leo): Only text like should get to this point, others should early return!
-    if(!added->Text.binding_id)
-    {
-        return added;
-    }
-    
-    LinkedPointer* subscription_target = get_attribute_by_expression(gen, added->Text.binding_id);
-    if(subscription_target) // Found a pre-existing subscriber to this expression
-    {
-        LinkedPointer* added_subscription = (LinkedPointer*)Alloc(dom->pointer_arrays, sizeof(LinkedPointer));
-        added_subscription->next = subscription_target->next;
-        subscription_target->next = added_subscription;
-        added_subscription->data = (void*)added;
-    }
-    else // First attribute to subscribe, add it
-    {
-        LinkedPointer* added_subscription = (LinkedPointer*)Alloc(dom->pointer_arrays, sizeof(LinkedPointer));
-        subscription_target = gen->subscribers_head;
-        LinkedPointer* added_divider = (LinkedPointer*)Alloc(dom->pointer_arrays, sizeof(LinkedPointer), zero()); // Create a dividing entry with NULL data field
-        added_divider->next = subscription_target;
-        added_subscription->next = added_divider;
-        gen->subscribers_head = added_subscription;
-        
-        // Register the new expression subscription
-        // Note(Leo): [] style access was creating a bug, ->insert() works fine
-        gen->expression_sub_map->insert({added->Text.binding_id, added_subscription});
     }
     
     return added;
 }
 
-Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Generation* gen, Element* target_element = NULL)
+Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Element* target_element = NULL)
 {
     Element* added = target_element;
     if(!added)
@@ -190,7 +165,7 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Generation* gen,
     
     for(int i = 0; i < added->num_attributes; i++)
     {
-        curr_added_attribute = convert_saved_attribute(dom, converted_tag->first_attribute + i, gen);
+        curr_added_attribute = convert_saved_attribute(dom, converted_tag->first_attribute + i);
         if(prev_added_attribute)
         {
             prev_added_attribute->next_attribute = curr_added_attribute;
@@ -207,19 +182,17 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Generation* gen,
     return added;
 }
 
-Generation* create_gen(DOM* dom)
+void ConverSelectors(Compiler::Selector* selector)
 {
-    Generation* created = (Generation*)Alloc(dom->generations, sizeof(Generation), zero());
-    // Get the id of the generation from the slot it gets
-    created->generation_id = created - (Generation*)(dom->generations->mapped_address);
     
-    created->expression_sub_map = new std::map<int, LinkedPointer*>();
-    
-    created->subscribers_head = (LinkedPointer*)Alloc(dom->pointer_arrays, sizeof(LinkedPointer), zero());
-    return created;
 }
 
-void InstancePage(DOM* target_dom, int id)
+void ConvertStyles(Compiler::Style* style)
+{
+    
+}
+
+void* InstancePage(DOM* target_dom, int id)
 {
     #define get_pointer(old_base_ptr, new_base_ptr, target_ptr) (target_ptr ? (((uintptr_t)new_base_ptr) + ((uintptr_t)target_ptr - (uintptr_t)old_base_ptr)) : 0)
     
@@ -231,30 +204,33 @@ void InstancePage(DOM* target_dom, int id)
         assert(page_bin);
     }
     
+    // Allocate and setup page object
+    void* created_page;
+    call_page_main(target_dom, page_bin->file_id, &created_page);
+    
     Compiler::Tag* curr = page_bin->root_tag;
     
     Element* added;
     
-    Generation* new_gen = create_gen(target_dom);
-    
     void* tag_base = (void*)page_bin->root_tag;
     void* element_base = (void*)target_dom->elements->mapped_address;
     
-    added = tag_to_element(target_dom, curr, new_gen);
+    added = tag_to_element(target_dom, curr);
     curr++;
-    new_gen->generation_head = added; // Set the root pointer as the head of the page generation
     
     added->parent = NULL;
     added->next_sibling = NULL;
     added->first_child = (Element*)get_pointer(tag_base, element_base, curr->first_child);
-    
+    added->master = created_page;
     
     while(curr->tag_id)
     {
-        added = tag_to_element(target_dom, curr, new_gen);
+        added = tag_to_element(target_dom, curr);
         added->parent = (Element*)get_pointer(tag_base, element_base, curr->parent);;
         added->next_sibling = (Element*)get_pointer(tag_base, element_base, curr->next_sibling);
         added->first_child = (Element*)get_pointer(tag_base, element_base, curr->first_child);
+        
+        added->master = created_page;
         
         // If the element being added is a component, instance it
         if(curr->type == Compiler::TagType::CUSTOM)
@@ -275,6 +251,8 @@ void InstancePage(DOM* target_dom, int id)
         
         curr++;
     }
+    
+    return created_page;
 }
 
 void* InstanceComponent(DOM* target_dom, Element* parent, int id)
@@ -284,7 +262,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     
     if(!comp_bin)
     {   
-        printf("Page binary could not be found!\n");
+        printf("Comp binary could not be found!\n");
         assert(comp_bin);
     }
     
@@ -304,11 +282,8 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     
     Compiler::Tag* curr = comp_bin->root_tag;
     
-    Generation* new_gen = create_gen(target_dom);
-    ((Component*)added_comp)->generation = new_gen->generation_id;
-    
     Element* added = (Element*)Alloc(target_dom->elements, sizeof(Element), zero());
-    tag_to_element(target_dom, curr, new_gen, added);
+    tag_to_element(target_dom, curr, added);
     added->master = added_comp;
     
     // Pre allocate an address for the first child element
@@ -316,8 +291,6 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     element_addresses[curr->first_child->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
     
     element_addresses[curr->tag_id] = (void*)added;
-    
-    new_gen->generation_head = added;
     
     // Note(Leo): Parent is the Custom element type that calls this instance-ing and so it should have no existing children
     assert(!parent->first_child);
@@ -346,7 +319,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
             element_addresses[curr->tag_id] = (void*)added;
         }
         
-        tag_to_element(target_dom, curr, new_gen, added);
+        tag_to_element(target_dom, curr, added);
         added->parent = (Element*)element_addresses[curr->parent->tag_id];
         
         if(curr->next_sibling)

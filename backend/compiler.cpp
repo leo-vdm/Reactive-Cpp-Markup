@@ -92,7 +92,6 @@ CompileTarget init_compile_target(Arena* master_arena)
     created.file_name = NULL;
     created.file_id = 0;
     created.code = NULL;
-    created.header = NULL;
     
     return created;
 }
@@ -105,7 +104,6 @@ void reset_compile_target(CompileTarget* target)
     
     target->code = NULL;
     target->file_name = NULL;
-    target->header = NULL;
     target->file_id = 0;
 }
 
@@ -181,6 +179,8 @@ int main(int argc, char* argv[])
     remove(dom_attatchment_name_temp);
     FILE* dom_attatchment = fopen(dom_attatchment_name_temp, "w");
     
+    fprintf(dom_attatchment, DOM_ATTATCHMENT_INCLUDES);
+    
     ArenaString* main_calls = CreateString(strings);
     Append(main_calls, COMP_MAIN_FN_TEMPLATE);
     
@@ -212,8 +212,6 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        
-        
         generated_code.file_id = comp_id;
         generated_code.file_name = comp_name;
         
@@ -237,14 +235,10 @@ int main(int argc, char* argv[])
         fclose(code_source);
         FILE* component_code = fopen(component_sources.code_file_name, "w");
         generated_code.code = component_code;
-        // Open the header file
-        FILE* component_header = fopen(component_sources.header_file_name, "w");
-        generated_code.header = component_header;
         
         RegisterDirectives(&generated_code, tokens_arena, token_values_arena, &state, is_component());
         RegisterMarkupBindings(&generated_code, target.registered_bindings, tokens_arena, token_values_arena, is_component());
-        
-        fclose(component_header);
+    
         fclose(component_code);
         
         // Create the name for the output binary
@@ -354,14 +348,11 @@ int main(int argc, char* argv[])
         fclose(code_source);
         FILE* page_code = fopen(page_sources.code_file_name, "w");
         generated_code.code = page_code;
-        FILE* page_header = fopen(page_sources.header_file_name, "w");
-        generated_code.header = page_header;
-        
+
         RegisterDirectives(&generated_code, tokens_arena, token_values_arena, &state);
         RegisterMarkupBindings(&generated_code, target.registered_bindings, tokens_arena, token_values_arena);
         
         fclose(page_code);
-        fclose(page_header);
         
         // Create the name for the output binary
         ArenaString* output_binary_name = CreateString(strings);
@@ -455,8 +446,8 @@ int RegisterComponent(char* name, int name_length, CompilerState* state)
 void register_to_dom_attatchment(FILE* dom_attatchment, char* added_file_name)
 {
     // For including the generated code files into the dom attatchment so it can access their methods.
-    #define DOM_ATTATCHMENT_CODE_INCLUDE "#include \"%s.h\"\n"
-    fprintf(dom_attatchment, DOM_ATTATCHMENT_CODE_INCLUDE, added_file_name);
+    #define DOM_ATTATCHMENT_CODE_INCLUDE "#ifndef %s_MACRO\n#include \"%s.cpp\"\n#endif\n"
+    fprintf(dom_attatchment, DOM_ATTATCHMENT_CODE_INCLUDE, added_file_name, added_file_name);
     
 }
 
@@ -469,7 +460,7 @@ void print_tokens(Arena* tokens, Arena* token_values)
         printf("Current token: %s\n", token_names[(int)curr_token->type]);
         printf("Current token value:\n");
         
-        if(curr_token->type == TokenType::TAG_ATTRIBUTE && token_values != NULL)
+        if(curr_token->type == TokenType::TAG_ATTRIBUTE && token_values)
         {
             printf("Hit Attribute");
             Token* base_attribute = TokenizeAttribute(tokens, token_values, curr_token);
@@ -525,7 +516,7 @@ void print_ast(AST* ast)
 {   
     const char* tag_names[] = { "ROOT", "TEXT", "DIV", "CUSTOM"};
     Tag* curr_tag = ast->root_tag;
-    while(curr_tag != NULL)
+    while(curr_tag)
     {
         
         printf("Current tag: %s\n", tag_names[(int)curr_tag->type]);

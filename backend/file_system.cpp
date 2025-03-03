@@ -11,7 +11,7 @@ int push_val_to_combined_arena(Arena* combined_values, char* value, int value_le
 void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name, int file_id, int flags)
 {
     //Note(Leo): we +1 every index so that index 0 can represent NULL ptrs, minus 1 off the index when loading to account
-    #define get_index(arena_ptr, pointer) (uintptr_t)pointer ? ((((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer)) + 1 : 0
+    #define get_index(arena_ptr, pointer) ((uintptr_t)pointer ? ((((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer)) + 1 : 0)
 
     int current_index = 0; // Current index in bytes into the file, PageFileHeader is always at zero
     FILE* out_file = fopen(file_name, "wb+");
@@ -123,7 +123,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     while(curr_selector->global_id != 0)
     {
         added_selector.global_id = curr_selector->global_id;
-        added_selector.name_index = push_val_to_combined_arena((&combined_values_arena), curr_selector->name, curr_selector->name_length);
+        added_selector.name_index = push_val_to_combined_arena(&combined_values_arena, curr_selector->name, curr_selector->name_length);
         added_selector.name_length = curr_selector->name_length;
         
         added_selector.num_styles = curr_selector->num_styles;
@@ -155,6 +155,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
 }
 
 #define debug_load 0
+// Note(Leo): We cannot acces values to print for debugging until the end of the FN since thats when the values get read in.
 LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
     #define get_pointer(base_ptr, index, type) (index ? (type*)(base_ptr + sizeof(type)*(index - 1)) : NULL)
@@ -171,16 +172,11 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
         return handle;
     }
 
-    // Push empty structs onto each arena to seperate previously loaded file records
-    Alloc(tags, sizeof(Tag), zero());
+    
     uintptr_t base_tag = tags->next_address;
-    Alloc(attributes, sizeof(Attribute), zero());
     uintptr_t base_attribute = attributes->next_address;
-    Alloc(styles, sizeof(Style), zero());
     uintptr_t base_style = styles->next_address;
-    Alloc(selectors, sizeof(Selector), zero());
     uintptr_t base_selector = selectors->next_address;
-    Alloc(values, sizeof(char), zero());
     uintptr_t base_value = values->next_address;
     
     PageFileHeader header = PageFileHeader();
@@ -191,6 +187,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     handle.file_id = header.file_id;
     handle.flags = header.flags;
     handle.root_tag = (Tag*)tags->next_address;
+    handle.first_selector = (Selector*)selectors->next_address;
     handle.file_info = header;
     
 #if debug_load
@@ -322,20 +319,20 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
         printf(" --Selector--\n");
         printf("\tGlobal Id: %d\n", added_selector->global_id);
         printf("\t# of Styles: %d\n", added_selector->num_styles);
+        printf("\tName length: %d\n", added_selector->name_length);
 #endif
     }
     
     char* values_blob = (char*)Alloc(values, header.values_length*sizeof(char));
     fread(values_blob, sizeof(char), header.values_length, file);
 
-// unrealiable due to null terminators being mixed into selector names
-//#if debug_load
-//    printf("\n--== Values Blob ==--\n");
-//    printf(" Size: %lu\n", combined_values->next_address - combined_values->mapped_address);
-//    char* end_of_blob = (char*)Alloc(combined_values, sizeof(char));
-//    *end_of_blob = '\0';
-//    printf("%s", (char*)combined_values->mapped_address);
-//#endif
+    // Push empty structs onto each arena to seperate future loaded file records
+    Alloc(tags, sizeof(Tag), zero());
+    Alloc(attributes, sizeof(Attribute), zero());
+    Alloc(styles, sizeof(Style), zero());
+    Alloc(selectors, sizeof(Selector), zero());
+    Alloc(values, sizeof(char), zero());
+
     return handle;
 }
 

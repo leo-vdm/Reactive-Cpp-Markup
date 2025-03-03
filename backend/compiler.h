@@ -327,7 +327,6 @@ enum class DirectiveType
 struct CompileTarget
 {
     FILE* code;
-    FILE* header;
     Arena* bound_vars;
     Arena* bound_var_names;
     Arena* bound_expressions;
@@ -340,11 +339,12 @@ struct CompileTarget
 // Length in chars of the longest directive keyword, currently: USECOMPONENT
 #define MAX_DIRECTIVE_LENGTH 12
 
-#define CALL_PAGE_MAIN_FN_TEMPLATE "case(%d):\n\tpage_main_%d(dom, file_id);\n\tbreak;\n"
+#define CALL_PAGE_MAIN_FN_TEMPLATE "case(%d):\n\tpage_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
 #define CALL_COMP_MAIN_FN_TEMPLATE "case(%d):\n\tcomp_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
 #define COMP_MAIN_FN_TEMPLATE "\nvoid call_comp_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
-#define PAGE_MAIN_FN_TEMPLATE "\nvoid call_page_main(DOM* dom, int file_id){\nswitch(file_id){\n"
+#define PAGE_MAIN_FN_TEMPLATE "\nvoid call_page_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
 #define CLOSE_MAIN_CALL_TEMLATE "default:\n\tprintf(\"Component/Page does not exist!\\n\");\n\tbreak;\n}\n}\n" 
+#define DOM_ATTATCHMENT_INCLUDES "#include \"DOM.h\"\n#include \"overloads.cpp\"\n#include \"dom_attatchment.h\"\n"
 
 };
 

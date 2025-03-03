@@ -104,6 +104,7 @@ struct LoadedFileHandle
     int flags;
     PageFileHeader file_info;
     Compiler::Tag* root_tag;
+    Compiler::Selector* first_selector;
 };
 
 // Filesystem Functions

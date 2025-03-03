@@ -1,6 +1,6 @@
 #include "arena.h"
 #pragma once
-#define STRING_BLOCK_BODY_SIZE 30
+#define STRING_BLOCK_BODY_SIZE 100
 #define no_copy() 1 << 0
 
 // Note(Leo): StringBlock MUST be larger than ArenaString otherwise it cant fit on the same arena

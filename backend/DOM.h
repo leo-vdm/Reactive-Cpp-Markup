@@ -40,7 +40,6 @@ struct LinkedPointer
 
 struct Component 
 {
-    int generation;
     int file_id;
 };
 
@@ -55,13 +54,12 @@ struct DOM
     
     Arena* elements;
     Arena* attributes;
-    Arena* bound_expressions;
+
     Arena* bound_vars;
-    Arena* generations;
-    
+/*    
     Arena* styles;
     Arena* selectors;
-    
+*/    
     Arena* changed_que;
     
     Arena* frame_arena; // Composted every frame
@@ -70,6 +68,9 @@ struct DOM
 struct Runtime
 {
     Arena* master_arena;
+    Arena* doms;
+    Arena* styles;
+    Arena* selectors;
 
     Arena* loaded_files;
 
@@ -78,7 +79,9 @@ struct Runtime
     Arena* loaded_styles;
     Arena* loaded_selectors;
     Arena* static_combined_values;
-    Arena* doms;
+    Arena* bound_expressions;
+  
+    
 };
 
 struct Style 
@@ -111,6 +114,7 @@ COLUMN,
 SRC, // For the VIDEO and IMG tags
 COMP_ID, // For custom components
 ON_CLICK,
+THIS
 };
 
 struct attr_comp_id_body 
@@ -120,12 +124,10 @@ struct attr_comp_id_body
 
 struct attr_text_like_body
 {
-    char* static_value; // \0 terminated string with printf formatting to put the binding value in.
+    char* static_value; // Note(Leo): Text attributes (on text elements) can have EITHER a static value OR a binding but not both!
     int value_length;
+    int binding_position;
     int binding_id;
-    
-    // Cache //
-    char* cached_value;
 };
 
 struct attr_custom_body : attr_text_like_body
@@ -134,11 +136,14 @@ struct attr_custom_body : attr_text_like_body
     int name_length;
 };
 
+// Marks an attribute as having been initialized (for attributes that need initialization in the runtime evaluator)
+#define AttributeInitilized (uint32_t)(1 << 0)
 
 struct Attribute
 {
     Attribute* next_attribute;
     AttributeType type;
+    uint32_t flags;
     
     union 
     {
@@ -168,7 +173,7 @@ struct Element
     int flags;
     ElementType type;
     
-    // Note(Leo): Attributes are not continuous in memory
+    // Note(Leo): Attributes are not contiguous in memory
     Attribute* first_attribute;
     int num_attributes;
     
@@ -176,76 +181,66 @@ struct Element
     Element* next_sibling;
     Element* first_child;
     
-    // Cache related things //
-    Style* cached_final_style;
-    Style* cached_pre_attrib_style; // Style after compiling together all selected styles but before compiling Style="" 
+    // In Flight Vars
+    Style* working_style;
 
     Style* cached_final_sizing;
+    
+    union
+    {
+        struct {
+            // Note(Leo): temporal since its on the frame arena
+            char* temporal_text;
+            int temporal_text_length;
+        } Text;
+        struct {
+        
+        } Video ;
+    };
 };
 
-
-
-struct Generation 
-{
-    int generation_id;
-    Element* generation_head; // The parent element of elements from this gen
-    
-    std::map<int, LinkedPointer*>* expression_sub_map; // Maps expr ids to subsections of the subscribers list containing Attributes subcribed to the given expr
-    
-    LinkedPointer* subscribers_head;
-};
 
 // Types of bound functions
-typedef void (*SubscribedStubVoid)(); 
-typedef ArenaString* (*SubscribedStubString)(); 
-typedef void (*SubscribedCompStubVoid)(void*); 
-typedef ArenaString* (*SubscribedCompStubString)(void*); 
+typedef void (*SubscribedStubVoid)(void*); 
+typedef ArenaString* (*SubscribedStubString)(void*); 
+
+enum class BoundExpressionType
+{
+    NONE,
+    VOID_RET,
+    ARENA_STRING,
+    VOID_PTR,
+};
 
 struct BoundExpression 
 {
-    int id;
+    int expression_id;
+    BoundExpressionType type;
     union {
         SubscribedStubVoid stub_void;
         SubscribedStubString stub_string;
-        SubscribedCompStubVoid comp_stub_void;
-        SubscribedCompStubString comp_stub_string;
     };
     
-    
-    // TODO(Leo): Change this to use the generation system instead
-    //Element** subscribed_elements;
-    //int subscriber_count;
 };
 
-BoundExpression* register_bound_expr(SubscribedStubVoid, int id);
-BoundExpression* register_bound_expr(SubscribedStubString, int id);
-BoundExpression* register_bound_expr(SubscribedCompStubVoid, int id);
-BoundExpression* register_bound_expr(SubscribedCompStubString, int id);
-
-void subscribe_to(BoundExpression* expr, int target_bound_id);
-
-
-struct BoundVariable
-{
-    int id;
-    BoundExpression** subscribers;
-    int subscriber_count;
-};
+BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubString fn, int id);
 
 extern Runtime runtime;
 
-void NotifyVariableSubscirbers(BoundVariable*);
-void NotifyExpressionSubscribers(BoundExpression*);
 
 // Returns the first attribute of a given type that appears in an element's attribtue list.
 Attribute* GetAttribute(Element* element, AttributeType searched_type);
 
 // Note(Leo): Name should be NULL terminated
-Selector* GetSelectorFromName(char* name);
+Selector* GetSelectorFromName(DOM* dom, char* name);
 
 Element* CreateElement(DOM* dom, SavedTag* tag_template);
 
 void InitDOM(Arena* master_arena, DOM* target);
+
+void ConverSelectors(Compiler::Selector* selector);
+void ConvertStyles(Compiler::Style* style);
 
 void CalculateStyles(DOM* dom);
 void BuildRenderQue(DOM* dom);
@@ -256,18 +251,19 @@ void Draw(DOM* dom);
 void SwitchPage(DOM* dom, int id, int flags = 0);
 
 // Expects a DOM with cleared element Arena, instances all the 
-void InstancePage(DOM* target_dom, int id);
+void* InstancePage(DOM* target_dom, int id);
 
 // Instances a component of the type specified by id, returns a pointer to the component's object
 void* InstanceComponent(DOM* target_dom, Element* parent, int id);
 
-void* AllocComponent(DOM* dom, int size, int file_id);
+void* AllocPage(DOM* dom, int size, int file_id);
 
-void bound_var_changed(int changed_var_id);
-void bound_var_changed(int changed_var_id, void* d_void);
+void* AllocComponent(DOM* dom, int size, int file_id);
 
 // Runtime Function Definitions //
 void LoadFromBin(char* file_path, Runtime* runtime);
 
 LoadedFileHandle* GetFileFromId(int id);
 LoadedFileHandle* GetFileFromName(const char* name);
+
+BoundExpression* GetBoundExpression(int id);

@@ -25,9 +25,7 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     if(size == 0)
     {
         printf("Debug: Warning, allocation with size of 0 bytes occured, ensure that is intentional!\n");
-    }
-    
-    printf("Allocation: %d\n", size);
+    }    
     #endif
     assert(size >= 0);
     assert(arena);

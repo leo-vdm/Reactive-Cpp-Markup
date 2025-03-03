@@ -19,6 +19,7 @@ void InitRuntime(Arena* master_arena, Runtime* target)
     target->loaded_selectors = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->static_combined_values = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->doms = (Arena*)Alloc(master_arena, sizeof(Arena));
+    target->bound_expressions = (Arena*)Alloc(master_arena, sizeof(Arena));
 
     *(target->loaded_files) = CreateArena(100*sizeof(LoadedFileHandle), sizeof(LoadedFileHandle));
     *(target->loaded_tags) = CreateArena(10000*sizeof(Compiler::Tag), sizeof(Compiler::Tag));
@@ -27,13 +28,10 @@ void InitRuntime(Arena* master_arena, Runtime* target)
     *(target->loaded_selectors) = CreateArena(10000*sizeof(Compiler::Selector), sizeof(Compiler::Selector));
     *(target->static_combined_values) = CreateArena(100000*sizeof(char), sizeof(char));
     *(target->doms) = CreateArena(100*sizeof(DOM), sizeof(DOM));
+    *(target->bound_expressions) = CreateArena(1000*sizeof(BoundExpression), sizeof(BoundExpression));
 }
 
 Runtime runtime;
-
-// InitializeRuntime(FileSearchResult* first_binary)
-
-
 
 int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
 {   
@@ -72,6 +70,8 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
         curr++;
     }
     
+    register_binding_subscriptions(&runtime);
+    
     return 0;
 }
 
@@ -85,9 +85,6 @@ bool RuntimeInstanceMainPage()
 
     DOM* main_dom = (DOM*)Alloc(runtime.doms, sizeof(DOM), zero());    
     InitDOM(runtime.master_arena, main_dom);
-    
-    register_subscriber_functions(main_dom);
-    register_binding_subscriptions(main_dom);
     
     SwitchPage(main_dom, main_page->file_id);
     
@@ -133,10 +130,88 @@ void SwitchPage(DOM* dom, int id, int flags)
     ResetArena(dom->pointer_arrays);
     ResetArena(dom->elements);
     ResetArena(dom->attributes);
-    ResetArena(dom->generations);
     
-    // Call page main and instance the page.
-    call_page_main(dom, id);
-    InstancePage(dom, id);
-    
+    InstancePage(dom, id);    
+}
+
+// Note(Leo): Called for every element every frame!!!!!!
+void runtime_evaluate_attributes(DOM* dom, Element* element)
+{
+    Attribute* curr_attribute = element->first_attribute;
+    while(curr_attribute)
+    {
+        switch(curr_attribute->type)
+        {
+            case(AttributeType::TEXT):
+            {
+                assert(element->type == ElementType::TEXT);
+                if(!curr_attribute->Text.binding_id) // Text is known
+                {
+                    element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*curr_attribute->Text.value_length);
+                    memcpy(element->Text.temporal_text, curr_attribute->Text.static_value, sizeof(char)*curr_attribute->Text.value_length);
+                    element->Text.temporal_text_length = curr_attribute->Text.value_length;
+                    break;
+                }
+                // Text has to come from a binding
+                BoundExpression* binding = GetBoundExpression(curr_attribute->Text.binding_id);
+                assert(binding->type == BoundExpressionType::ARENA_STRING);
+                assert(element->master);
+                ArenaString* binding_text = binding->stub_string((void*)element->master);
+                
+                element->Text.temporal_text_length = binding_text->length;
+                
+                // Note(Leo): We do a length limited flatten since we dont want a \0
+                element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*binding_text->length);
+                Flatten(binding_text, element->Text.temporal_text, sizeof(char)*binding_text->length);
+                
+                FreeString(binding_text);
+                
+                break;
+            }
+            case(AttributeType::CLASS):
+            {
+                char* class_string = NULL;
+                int class_string_length = curr_attribute->Text.value_length;
+                int class_binding_length = 0;
+                
+                if(curr_attribute->Text.binding_id)
+                {
+                    BoundExpression* binding = GetBoundExpression(curr_attribute->Text.binding_id);
+                    assert(binding->type == BoundExpressionType::ARENA_STRING);
+                    assert(element->master);
+                    ArenaString* binding_text = binding->stub_string((void*)element->master);
+                    class_binding_length = binding_text->length;
+                    class_string_length += class_binding_length;
+                    class_string = (char*)Alloc(dom->frame_arena, class_string_length*sizeof(char));
+                    
+                    // Note(Leo): We do a length limited flatten since we dont want a \0
+                    Flatten(binding_text, (class_string + curr_attribute->Text.binding_position), binding_text->length);
+                }
+                
+                if(!class_string)
+                {
+                    class_string = (char*)Alloc(dom->frame_arena, class_string_length*sizeof(char));
+                }
+                
+                if(curr_attribute->Text.binding_position) // Indicates theres text to copy before the binding
+                {
+                    memcpy(class_string, curr_attribute->Text.static_value, curr_attribute->Text.binding_position*sizeof(char));
+                }
+                
+                if(curr_attribute->Text.value_length > curr_attribute->Text.binding_position) // Indicates theres text after the binding
+                {
+                    memcpy(class_string + (curr_attribute->Text.binding_position + class_binding_length), curr_attribute->Text.static_value + curr_attribute->Text.binding_position, (curr_attribute->Text.value_length - curr_attribute->Text.binding_position)*sizeof(char));
+                }
+                
+                break;
+            }
+            default:
+            {
+                break;
+            }
+        
+        }
+        
+        curr_attribute = curr_attribute->next_attribute; 
+    }
 }

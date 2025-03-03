@@ -201,7 +201,9 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                     printf("Expeced binding definition!");
                 }
                 
-                Tag* new_tag = push_tag();          
+                
+                
+                Tag* new_tag = push_tag();    
                 
                 if(has_ended) // Indicates text binding is a sibling
                 {
@@ -476,9 +478,9 @@ int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, i
     // Create the global name for the selector
     // get length the name wants
     int global_name_length = snprintf(NULL, 0, "%d-%s", global_prefix, name);
-    global_name_length++; // Add null terminator space
     
-    char* global_name = (char*)Alloc(target->selector_values, global_name_length*sizeof(char));
+    char* global_name = (char*)Alloc(target->selector_values, (global_name_length + 1)*sizeof(char)); // +1 to fit \0
+
     sprintf(global_name, "%d-%s", global_prefix, name);
 
     new_selector->name = global_name;
