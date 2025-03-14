@@ -225,13 +225,13 @@ void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 new_token = push_token();
                 new_token->type = TokenType::SEMI_COLON;
                 break;
-            case('\0'): // Skip whitespaces
+            case('\0'): 
                 break;
             case('\n'): // Put newline tokens in
                 new_token = push_token();
                 new_token->type = TokenType::NEW_LINE;
                 break;
-            case(' '):
+            case(' '): // Skip whitespaces
                 break;
             case('\t'):
                 break;

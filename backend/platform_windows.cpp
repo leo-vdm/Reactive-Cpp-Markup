@@ -1,6 +1,7 @@
-#include "platform.h"
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+#define INSTRUMENT_IMPLEMENTATION 1
+#include "platform.h"
 #include <windows.h>
 #include <cassert>
 
@@ -289,6 +290,7 @@ int main()
     PlatformWindow* curr_window = platform.first_window;
     while(true)
     {
+        BEGIN_TIMED_BLOCK(PLATFORM_LOOP);
         if(!curr_window)
         {
             curr_window = platform.first_window;
@@ -323,11 +325,14 @@ int main()
             continue;
         }
 
-        
+        RuntimeTickAndBuildRenderque(NULL, (DOM*)curr_window->window_dom);
         
         RenderplatformDrawWindow(curr_window);
         
         curr_window = curr_window->next_window;
+        END_TIMED_BLOCK(PLATFORM_LOOP);
+        
+        //DUMP_TIMINGS();
     }
     
     return 0;

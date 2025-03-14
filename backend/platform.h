@@ -15,6 +15,7 @@
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
 
+#define TIMER_INTRINSIC() __rdtsc()
 
 #define WINDOWS_WINDOW_CLASS_NAME "TemporaryMarkupWindowClass"
 
@@ -72,6 +73,9 @@ struct PlatformWindow
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle);
 
 #elif defined(__linux__) && !defined(_WIN32)
+
+#include "x86intrin.h"
+#define TIMER_INTRINSIC() __rdtsc()
 
 #include <X11/Xlib.h>
 
@@ -223,3 +227,69 @@ FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
+
+void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
+
+#define USING_INSTREMENTATION 1
+// Instrumentation related stuff
+#if !INDCLUDED_INSTREMENTATION && USING_INSTREMENTATION  
+#define INDCLUDED_INSTREMENTATION 1
+    enum 
+    {
+        TIMED_BLOCKS_PLATFORM_LOOP,
+        TIMED_BLOCKS_DRAW_WINDOW,
+        TIMED_BLOCKS_WAIT_FENCE,
+        TIMED_BLOCKS_RENDER_SUBMIT,
+        TIMED_BLOCKS_RENDER_PRESENT,
+        TIMED_BLOCKS_BLOCKS_MAX, // Note(Leo): Should be at the end of the enum
+    };
+    
+
+    struct timing_info 
+    {
+        uint64_t cycle_count;
+        uint64_t hits;
+    };
+    
+    extern timing_info INSTRUMENT_TIMINGS[TIMED_BLOCKS_BLOCKS_MAX];
+    
+    #define SetupInstrumentation() 
+    
+    #define BEGIN_TIMED_BLOCK(name) uint64_t START_CYCLE_##name = TIMER_INTRINSIC(); INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].hits++;
+    #define END_TIMED_BLOCK(name) INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].cycle_count += TIMER_INTRINSIC() - START_CYCLE_##name;
+
+    // Define once at the platform implementation like an STB style lib
+    #if INSTRUMENT_IMPLEMENTATION
+        timing_info INSTRUMENT_TIMINGS[TIMED_BLOCKS_BLOCKS_MAX] = {};
+        
+        const char* BLOCK_NAMES[] = 
+        {
+            "TIMED_BLOCKS_PLATFORM_LOOP",
+            "TIMED_BLOCKS_DRAW_WINDOW",
+            "TIMED_BLOCKS_WAIT_FENCE",
+            "TIMED_BLOCKS_RENDER_SUBMIT",
+            "TIMED_BLOCKS_RENDER_PRESENT",
+            "TIMED_BLOCKS_BLOCKS_MAX",
+        };
+
+        
+        void DUMP_TIMINGS()
+        {
+            printf("Timings:\n");
+            for(int i = 0; i < TIMED_BLOCKS_BLOCKS_MAX; i++)
+            {
+                if(INSTRUMENT_TIMINGS[i].hits)
+                {
+                    printf("\t%s: %ldcy, %ldhits, %ldcy/hit\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits);
+                    INSTRUMENT_TIMINGS[i] = {};
+                }
+            }
+        }
+    #endif
+    
+#else
+    #define BEGIN_TIMED_BLOCK() (void)0
+    #define END_TIMED_BLOCK() (void)0
+    #define SetupInstrumentation() (void)0
+    #define DUMP_TIMINGS (void)0
+#endif

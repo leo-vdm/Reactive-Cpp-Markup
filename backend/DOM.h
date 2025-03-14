@@ -38,10 +38,21 @@ struct LinkedPointer
     void* data;  
 };
 
-struct Component 
+struct ElementMaster 
 {
     int file_id;
 };
+
+struct Component : ElementMaster
+{
+
+};
+
+struct Page : ElementMaster
+{
+
+};
+
 
 struct DOM
 {
@@ -71,6 +82,7 @@ struct Runtime
     Arena* doms;
     Arena* styles;
     Arena* selectors;
+    Arena* strings;  
 
     Arena* loaded_files;
 
@@ -80,7 +92,6 @@ struct Runtime
     Arena* loaded_selectors;
     Arena* static_combined_values;
     Arena* bound_expressions;
-  
     
 };
 
@@ -94,10 +105,10 @@ struct Style
 struct Selector
 {
     int id;
-    int style_count;
-    
-    char* name; // \0 terminated
-    Style** styles; // All the styles selected by this selector
+    int style_ids[MAX_STYLES_PER_SELECTOR]; // IDS of all style that this selector selects
+    int style_count; // Number of styles in the style_ids array.
+    int name_length;
+    char* name;
 };
 
 enum class AttributeType
@@ -114,7 +125,7 @@ COLUMN,
 SRC, // For the VIDEO and IMG tags
 COMP_ID, // For custom components
 ON_CLICK,
-THIS
+THIS_ELEMENT, // For binding an element to a variable
 };
 
 struct attr_comp_id_body 
@@ -202,7 +213,7 @@ struct Element
 
 // Types of bound functions
 typedef void (*SubscribedStubVoid)(void*); 
-typedef ArenaString* (*SubscribedStubString)(void*); 
+typedef ArenaString* (*SubscribedStubString)(void*, Arena*); 
 
 enum class BoundExpressionType
 {
@@ -239,7 +250,7 @@ Element* CreateElement(DOM* dom, SavedTag* tag_template);
 
 void InitDOM(Arena* master_arena, DOM* target);
 
-void ConverSelectors(Compiler::Selector* selector);
+void ConvertSelectors(Compiler::Selector* selector);
 void ConvertStyles(Compiler::Style* style);
 
 void CalculateStyles(DOM* dom);

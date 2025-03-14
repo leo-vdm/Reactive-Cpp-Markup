@@ -1,12 +1,13 @@
+#if defined(__linux__) && !defined(_WIN32)
+#define INSTRUMENT_IMPLEMENTATION 1
 #include "platform.h"
 #include <stdio.h>
 #include <iostream>
 #include <cassert>
-
-#if defined(__linux__) && !defined(_WIN32)
 #include <X11/Xlib.h>
 #include <unistd.h>
 #include <libgen.h>
+
 
 Display* x_display = {};
 Visual* x_visual = {};
@@ -306,6 +307,7 @@ int main()
     PlatformWindow* curr_window = platform.first_window;
     while(true)
     {
+        BEGIN_TIMED_BLOCK(PLATFORM_LOOP);
         if(!curr_window)
         {
             curr_window = platform.first_window;
@@ -338,10 +340,16 @@ int main()
             continue;
         }
     
+        RuntimeTickAndBuildRenderque(NULL, (DOM*)curr_window->window_dom);
         
+        BEGIN_TIMED_BLOCK(DRAW_WINDOW);
         RenderplatformDrawWindow(platform.first_window);
+        END_TIMED_BLOCK(DRAW_WINDOW);
         
         curr_window = curr_window->next_window;
+        
+        END_TIMED_BLOCK(PLATFORM_LOOP);
+        //DUMP_TIMINGS();
     }
     
     printf("Exiting\n");

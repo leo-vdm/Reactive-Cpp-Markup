@@ -188,6 +188,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     handle.flags = header.flags;
     handle.root_tag = (Tag*)tags->next_address;
     handle.first_selector = (Selector*)selectors->next_address;
+    handle.first_style = (Style*)styles->next_address;
     handle.file_info = header;
     
 #if debug_load

@@ -105,6 +105,7 @@ struct LoadedFileHandle
     PageFileHeader file_info;
     Compiler::Tag* root_tag;
     Compiler::Selector* first_selector;
+    Compiler::Style* first_style;
 };
 
 // Filesystem Functions

@@ -12,8 +12,6 @@ void InitDOM(Arena* master_arena, DOM* target)
     target->pointer_arrays = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->elements = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->styles = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->selectors = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->changed_que = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->frame_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
     
@@ -24,8 +22,6 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*5000, sizeof(Element));
     *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));
-    *(target->styles) = CreateArena(sizeof(Style)*10000, sizeof(Style));
-    *(target->selectors) = CreateArena(sizeof(Selector)*1000, sizeof(Selector));
     *(target->changed_que) = CreateArena(sizeof(int*)*1000, sizeof(int*));
     *(target->frame_arena) = CreateArena(sizeof(char)*10000, sizeof(char));
 }
@@ -182,19 +178,10 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Element* target_
     return added;
 }
 
-void ConverSelectors(Compiler::Selector* selector)
-{
-    
-}
-
-void ConvertStyles(Compiler::Style* style)
-{
-    
-}
-
 void* InstancePage(DOM* target_dom, int id)
 {
-    #define get_pointer(old_base_ptr, new_base_ptr, target_ptr) (target_ptr ? (((uintptr_t)new_base_ptr) + ((uintptr_t)target_ptr - (uintptr_t)old_base_ptr)) : 0)
+    // Note(Leo): Get the difference between the old base and target in indexes and apply that to the new base and pointer type
+    #define get_pointer(old_base_ptr, new_base_ptr, target_ptr) (target_ptr ? ((new_base_ptr) + (uint64_t)((decltype(old_base_ptr))target_ptr - old_base_ptr)) : 0)
     
     LoadedFileHandle* page_bin =  GetFileFromId(id);
     
@@ -212,16 +199,16 @@ void* InstancePage(DOM* target_dom, int id)
     
     Element* added;
     
-    void* tag_base = (void*)page_bin->root_tag;
-    void* element_base = (void*)target_dom->elements->mapped_address;
+    Compiler::Tag* tag_base = (Compiler::Tag*)page_bin->root_tag;
+    Element* element_base = (Element*)target_dom->elements->mapped_address;
     
+    // Adding root element
     added = tag_to_element(target_dom, curr);
-    curr++;
-    
     added->parent = NULL;
     added->next_sibling = NULL;
     added->first_child = (Element*)get_pointer(tag_base, element_base, curr->first_child);
     added->master = created_page;
+    curr++;
     
     while(curr->tag_id)
     {

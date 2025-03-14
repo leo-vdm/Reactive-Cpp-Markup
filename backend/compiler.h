@@ -82,6 +82,7 @@ struct Token {
 #define MAX_TAG_NAME_LENGTH 4  // The length of the longest built in tag name
 
 enum class TagType {
+NONE,
 ROOT,
 TEXT,
 DIV,

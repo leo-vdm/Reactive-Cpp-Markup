@@ -2688,6 +2688,36 @@ uvec3 vk_pick_glyph_atlas_dimensions(int total_glyph_target, int glyph_width)
     uint32_t glyph_aligned_height = max_height - (max_height % glyph_width);
     
     uint32_t glyphs_per_layer = (glyph_aligned_width / glyph_width) *  (glyph_aligned_height / glyph_width);
+    
+    // Walk back the dimensions until we achieve an apporiximately minumum sized image
+    // Todo(Leo): This is garbage, replace this with something smarter
+    if(glyphs_per_layer > total_glyph_target)
+    {
+        while(glyphs_per_layer > total_glyph_target)
+        {
+            if(glyph_aligned_width == glyph_width || glyph_aligned_height == glyph_width)
+            {
+                break;
+            }
+            // Break when shrinking in either dimension would make the atlas too small (this tests shrinking both at once which isnt the same)
+            // but its less wastefull calculations
+            if((((glyph_aligned_width - glyph_width) / glyph_width) * ((glyph_aligned_height - glyph_width) / glyph_width)) < total_glyph_target)
+            {
+                break;
+            }
+            if(glyph_aligned_width > glyph_aligned_height)
+            {
+                glyph_aligned_width -= glyph_width;                      
+            }
+            else
+            {
+                glyph_aligned_height -= glyph_width;
+            }
+            glyphs_per_layer = (glyph_aligned_width / glyph_width) *  (glyph_aligned_height / glyph_width);
+        }
+        glyphs_per_layer = (glyph_aligned_width / glyph_width) *  (glyph_aligned_height / glyph_width);
+    }
+    
     // Round up desired glyph count so that we can get an ineger when finding the amount of layers needed
     uint32_t rounded_desired_glyphs = total_glyph_target + ( glyphs_per_layer - (total_glyph_target % glyphs_per_layer));
     
@@ -2743,17 +2773,24 @@ bool vk_initialize_font_atlas()
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
     image_info.flags = 0;
     
+    
     if(vkCreateImage(rendering_platform.vk_device, &image_info, 0, &(rendering_platform.vk_glyph_atlas_image)) != VK_SUCCESS)
     {
         assert(0);
         return false;
     }
     
-    VkMemoryRequirements memory_requirements;
+    VkMemoryRequirements memory_requirements = {};
     vkGetImageMemoryRequirements(rendering_platform.vk_device, rendering_platform.vk_glyph_atlas_image, &memory_requirements);
+    
+    // Note(Leo): AMD driver on the new card (RX 9070 XT) seems to be bugged and returns a much larger size than it should
+    //  here (900Mb instead of 50mb). There is nothing we can do about that accept wait for AMD to fix it :(. WSL virtual
+    //  display adapter and older AMD card both reported the size correctly so the code seems fine.
+    //printf("Font altas picked size %dx%dx%d with memory size %ld\n", rendering_platform.vk_glyph_atlas_dimensions.x, rendering_platform.vk_glyph_atlas_dimensions.y, rendering_platform.vk_glyph_atlas_dimensions.z, memory_requirements.size);
     
     VkMemoryAllocateInfo alloc_info = {};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    
     alloc_info.allocationSize = memory_requirements.size;
     alloc_info.memoryTypeIndex = vk_find_memory_type(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     
@@ -2863,6 +2900,7 @@ void RenderPlatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_heig
 
 void RenderplatformDrawWindow(PlatformWindow* window)
 {
+    BEGIN_TIMED_BLOCK(WAIT_FENCE);
     vkWaitForFences(rendering_platform.vk_device, 1, &(window->vk_in_flight_fence), VK_TRUE, UINT64_MAX);
     
     uint32_t image_index;
@@ -2876,6 +2914,9 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     
     vkResetFences(rendering_platform.vk_device, 1, &(window->vk_in_flight_fence));
     vkResetCommandBuffer(window->vk_command_buffer, 0);
+    
+    END_TIMED_BLOCK(WAIT_FENCE);
+    
     
     // Note(Leo): Temporary code, REMOVE!!
     static bool done = false;
@@ -2992,10 +3033,16 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
     
+    BEGIN_TIMED_BLOCK(RENDER_SUBMIT);
+    
     if(vkQueueSubmit(rendering_platform.vk_graphics_queue, 1, &submit_info, window->vk_in_flight_fence) != VK_SUCCESS)
     {
         printf("ERROR: Couldnt submit draw command buffer!\n");
     }
+
+    END_TIMED_BLOCK(RENDER_SUBMIT);
+    
+    BEGIN_TIMED_BLOCK(RENDER_PRESENT);
     
     VkSwapchainKHR swapchains[] = { window->vk_window_swapchain };
     
@@ -3009,6 +3056,9 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     present_info.pResults = nullptr;
     
     VkResult que_status = vkQueuePresentKHR(rendering_platform.vk_present_queue, &present_info);
+    
+    END_TIMED_BLOCK(RENDER_PRESENT);
+    
     if(que_status != VK_SUCCESS)
     {
         //vk_window_resized(window);

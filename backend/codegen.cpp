@@ -57,7 +57,7 @@ void reset_bound_vars();
 #define USECOMP_INCLUDE_TEMPLATE "#ifndef %s_MACRO\n#include \"%s.cpp\"\n#endif"
 
 // Args: stub name, comp/page class name, var/fn name
-#define BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void)\n{\nreturn make_string(((%s*)d_void)->%s);\n}\n"
+#define BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void, Arena* strings)\n{\nreturn make_string(((%s*)d_void)->%s, strings);\n}\n"
 #define BINDING_VOID_STUB_TEMPLATE "\nvoid %s(void* d_void)\n{\n((%s*)d_void)->%s;\n}\n"
 
 

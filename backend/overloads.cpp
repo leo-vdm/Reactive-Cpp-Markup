@@ -2,24 +2,25 @@
 #include <string>
 #include "arena_string.h"
 
-// TODO(Leo): Implement this!!!
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/////                           Overloads used by the dom to parse bound expressions to strings                   /////
+/////                     Overloads used by the dom to parse bound expressions to strings                         /////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define make_string_macro(type) inline ArenaString* make_string(type arg) { /*return std::to_string(arg);*/ return NULL; }
+#define make_string_macro(type) inline ArenaString* make_string(type arg, Arena* strings) { std::string temp = std::to_string(arg); ArenaString* created = CreateString(strings); Append(created, temp.c_str()); return created; }
 
 // Overload to allow char* to a c-str
-inline ArenaString* make_string(char* arg)
+inline ArenaString* make_string(char* arg, Arena* strings)
 {
-    std::string temp = arg;
-    return NULL;
+    ArenaString* created = CreateString(strings);
+    Append(created, arg);
+    return created;
 }
 
 // Overload to allow std::string
-inline ArenaString* make_string(std::string arg)
+inline ArenaString* make_string(std::string arg, Arena* strings)
 {
-    return NULL;
+    ArenaString* created = CreateString(strings);
+    Append(created, arg.c_str());
+    return created;
 }
 
 // Default supported cases from std::to_string
