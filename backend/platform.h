@@ -229,6 +229,7 @@ int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
 void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
+void ShapingPlatformShape(Element* root_element, Arena* shape_arena);
 
 #define USING_INSTREMENTATION 1
 // Instrumentation related stuff
@@ -241,6 +242,7 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
         TIMED_BLOCKS_WAIT_FENCE,
         TIMED_BLOCKS_RENDER_SUBMIT,
         TIMED_BLOCKS_RENDER_PRESENT,
+        TIMED_BLOCKS_TICK_AND_BUILD,
         TIMED_BLOCKS_BLOCKS_MAX, // Note(Leo): Should be at the end of the enum
     };
     
@@ -264,12 +266,13 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
         
         const char* BLOCK_NAMES[] = 
         {
-            "TIMED_BLOCKS_PLATFORM_LOOP",
-            "TIMED_BLOCKS_DRAW_WINDOW",
-            "TIMED_BLOCKS_WAIT_FENCE",
-            "TIMED_BLOCKS_RENDER_SUBMIT",
-            "TIMED_BLOCKS_RENDER_PRESENT",
-            "TIMED_BLOCKS_BLOCKS_MAX",
+            "PLATFORM_LOOP",
+            "DRAW_WINDOW",
+            "WAIT_FENCE",
+            "RENDER_SUBMIT",
+            "RENDER_PRESENT",
+            "TICK_AND_BUILD",
+            "BLOCKS_MAX",
         };
 
         

@@ -195,6 +195,10 @@ void* InstancePage(DOM* target_dom, int id)
     void* created_page;
     call_page_main(target_dom, page_bin->file_id, &created_page);
     
+    // Note(Leo): All pages should inherit the Page struct so that they have the file_id member
+    Page* page_obj = (Page*)created_page;
+    page_obj->file_id = page_bin->file_id;
+    
     Compiler::Tag* curr = page_bin->root_tag;
     
     Element* added;
@@ -219,6 +223,8 @@ void* InstancePage(DOM* target_dom, int id)
         
         added->master = created_page;
         
+        added->id = index_of(added, target_dom->elements->mapped_address, Element);
+                
         // If the element being added is a component, instance it
         if(curr->type == Compiler::TagType::CUSTOM)
         {
@@ -243,8 +249,7 @@ void* InstancePage(DOM* target_dom, int id)
 }
 
 void* InstanceComponent(DOM* target_dom, Element* parent, int id)
-{
-
+{   
     LoadedFileHandle* comp_bin =  GetFileFromId(id);
     
     if(!comp_bin)
@@ -257,27 +262,26 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     void* added_comp;
     call_comp_main(target_dom, comp_bin->file_id, &added_comp);
     
-    ((Component*)added_comp)->file_id = comp_bin->file_id;
-    
+    // Note(Leo): All components should inherit the Component struct so that they have the file_id member
+    Component* comp_obj = (Component*)added_comp;
+    comp_obj->file_id = comp_bin->file_id;
     
     // Allocate the element lookup array and align it so we can store pointers
     // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
     void* element_addresses_unaligned = AllocScratch((comp_bin->file_info.tag_count + 2) * sizeof(Element*), zero());
     void** element_addresses = (void**)align_ptr(element_addresses_unaligned);
     
-    // Note(Leo): We use element id to index into this array, since id's are local to the file we know that they are in the range 1 - num_tags + 1
+    // Note(Leo): We use element id to index into this array, since id's are local to the file we know that
+    //  they are in the range 1 - num_tags + 1
     
     Compiler::Tag* curr = comp_bin->root_tag;
     
+    // Adding root element
     Element* added = (Element*)Alloc(target_dom->elements, sizeof(Element), zero());
+    element_addresses[curr->tag_id] = (void*)added;
     tag_to_element(target_dom, curr, added);
     added->master = added_comp;
-    
-    // Pre allocate an address for the first child element
-    
-    element_addresses[curr->first_child->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
-    
-    element_addresses[curr->tag_id] = (void*)added;
+    added->id = index_of(added, target_dom->elements->mapped_address, Element);
     
     // Note(Leo): Parent is the Custom element type that calls this instance-ing and so it should have no existing children
     assert(!parent->first_child);
@@ -286,11 +290,18 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     added->parent = parent;
     added->next_sibling = NULL;
     
+    // Pre allocate an address for the first child element of root
+    element_addresses[curr->first_child->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
     if(curr->first_child)
     {
-    added->first_child = (Element*)(element_addresses[curr->first_child->tag_id]); 
+        added->first_child = (Element*)(element_addresses[curr->first_child->tag_id]); 
     }
+    
+    // Note(Leo): Move off of root since it has id == 0 which would break the loop 
     curr++;
+    
+    // Allocates an element for the given tag id and puts the pointer in element_addresses 
+    #define PushElement(tag_id) element_addresses[tag_id] = Alloc(target_dom->elements, sizeof(Element), zero())
     
     while(curr->tag_id)
     {
@@ -308,13 +319,24 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
         
         tag_to_element(target_dom, curr, added);
         added->parent = (Element*)element_addresses[curr->parent->tag_id];
+        added->id = index_of(added, target_dom->elements->mapped_address, Element);
         
         if(curr->next_sibling)
         {
+            // Note(Leo): Allocate the element in advance if it doenst exist
+            if(!element_addresses[curr->next_sibling->tag_id])
+            {
+                PushElement(curr->next_sibling->tag_id);
+            }
             added->next_sibling = (Element*)element_addresses[curr->next_sibling->tag_id];
         }
         if(curr->first_child)
         {
+            // Note(Leo): Allocate the element in advance if it doenst exist
+            if(!element_addresses[curr->first_child->tag_id])
+            {
+                PushElement(curr->first_child->tag_id);
+            }
             added->first_child = (Element*)element_addresses[curr->first_child->tag_id];
         }
         
@@ -340,5 +362,22 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
         curr++;
     }
     
+    DeAllocScratch(element_addresses_unaligned);
+    
     return added_comp;
+}
+
+// Merge the members of the secondary in-flight style into the main style
+void MergeStyles(InFlightStyle* main, InFlightStyle* secondary)
+{
+    if(secondary->width_p > main->width_p) { main->width = secondary->width; main->width_p = secondary->width_p; }   
+    if(secondary->height_p > main->height_p) { main->height = secondary->height; main->height_p = secondary->height_p; }
+}
+
+// Merge the members of style into the in-flight main style 
+void MergeStyles(InFlightStyle* main, Style* style)
+{
+    int s_p = style->priority;
+    if(s_p > main->width_p) { main->width = style->width; main->width_p = s_p; }   
+    if(s_p > main->height_p) { main->height = style->height; main->height_p = s_p; }   
 }

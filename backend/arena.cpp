@@ -11,12 +11,13 @@
 #include <windows.h>
 Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
 {
-    Arena newArena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
+    Arena new_arena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
     
     // Allocate the first page
-    VirtualAlloc((void*)(newArena.next_address & ~(page_size)), page_size, MEM_COMMIT, PAGE_READWRITE);
-
-    return newArena;
+    VirtualAlloc((void*)(new_arena.next_address & ~(page_size)), page_size, MEM_COMMIT, PAGE_READWRITE);
+    new_arena.furthest_committed = (new_arena.next_address & ~(page_size)) + page_size;
+    
+    return new_arena;
 }
 
 void* Alloc(Arena* arena, int size, uint64_t flags)
@@ -39,15 +40,20 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     }
     else
     {
-        // Check if we are allocating over a page boundry, if we are commit the new pages.
-        uintptr_t aligned_next_address = arena->next_address & ~(page_size);
+        // Check if we are allocating over the page boundry of memory weve commited, if we are commit the new pages.
+        //
         uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
         
-        if(aligned_next_address < aligned_new_next_address){
+        if(aligned_new_next_address > arena->furthest_committed){
+            uintptr_t aligned_next_address = arena->next_address & ~(page_size);
+            arena->furthest_committed = aligned_new_next_address + page_size;
             LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
         }
         arena->next_address += size;
     }
+    
+    // Overflow
+    assert(arena->next_address <= arena->mapped_address + arena->size);
     
     if(flags & no_zero())
     {
@@ -152,6 +158,9 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
         arena->next_address += size;
     }
     
+    // Overflow
+    assert(arena->next_address <= arena->mapped_address + arena->size);
+    
     if(flags & no_zero())
     {
         return allocatedAddress;
@@ -216,7 +225,18 @@ void FreeArena(Arena* arena)
 
 #endif
 
+void Pop(Arena* arena, int size)
+{
+    assert(size > 0);
+    assert(arena->next_address - size > arena->mapped_address);
+    
+    arena->next_address -= size;
+}
 
+void* Push(Arena* arena, int size, uint64_t flags)
+{
+    return Alloc(arena, size, flags);
+}
 
 // Get space from the scratch arena
 void* AllocScratch(int alloc_size, uint64_t flags)

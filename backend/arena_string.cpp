@@ -44,6 +44,9 @@ void FreeString(ArenaString* freed_string)
             prev_block = curr_block;
             curr_block = curr_block->next;
         }
+        
+        // Note(Leo): Dealloc remaining block 
+        DeAlloc(parent_arena, (void*)prev_block);
     }
 }
 

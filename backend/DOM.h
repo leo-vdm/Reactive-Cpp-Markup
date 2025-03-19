@@ -28,6 +28,8 @@
 // Ineger offset in bytes of a pointer from a 'base' pointer
 #define offset_of(ptr_offset, ptr_base) (((uintptr_t)ptr_offset) - ((uintptr_t)ptr_base))
 
+// Index of a pointer from a base pointer calculated using the size of type
+#define index_of(ptr_offset, ptr_base, type) ((((uintptr_t)ptr_offset) - ((uintptr_t)ptr_base)) / sizeof(type))
 // Element Flags //
 
 
@@ -95,11 +97,48 @@ struct Runtime
     
 };
 
+enum class MeasurementType
+{
+    NONE,
+    AUTO,
+    PIXELS,
+    PERCENT,
+};
+
+struct Measurement {
+    float size;
+    MeasurementType type;
+    
+    Measurement()
+    {
+        size = 0.0f;
+        type = MeasurementType::NONE;
+    }
+};
+
+enum class StyleDisplayType
+{
+    NORMAL, // Like css block
+    HIDDEN, // Neither element nor its children are not shown or taken into account at all. 
+    MANUAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
+};
+
 struct Style 
 {
     int id;
+    int priority;
     
+    StyleDisplayType display;
     
+    Measurement width, height;
+};
+
+// Note(Leo): Same struct as Style but with priority numbers for each member, allowing styles to be combined and the higher
+// priority style's non-null members to override the lower priority style's ones.
+struct InFlightStyle
+{
+    Measurement width, height;
+    int width_p, height_p;
 };
 
 struct Selector
@@ -150,6 +189,12 @@ struct attr_custom_body : attr_text_like_body
 // Marks an attribute as having been initialized (for attributes that need initialization in the runtime evaluator)
 #define AttributeInitilized (uint32_t)(1 << 0)
 
+struct class_attribute_cache 
+{
+    // Result of merging all the styles pointed too by each selector 
+    InFlightStyle* merged_style;
+};
+
 struct Attribute
 {
     Attribute* next_attribute;
@@ -181,7 +226,7 @@ struct Element
     void* master;
     
     int id;
-    int flags;
+    uint32_t flags;
     ElementType type;
     
     // Note(Leo): Attributes are not contiguous in memory
@@ -193,7 +238,7 @@ struct Element
     Element* first_child;
     
     // In Flight Vars
-    Style* working_style;
+    InFlightStyle working_style;
 
     Style* cached_final_sizing;
     
@@ -206,7 +251,15 @@ struct Element
         } Text;
         struct {
         
-        } Video ;
+        } Video;
+        struct {
+            // Note(Leo): row/columns measurements can be non-pixel values until final layout pass at which point they MUST
+            // all be baked down into pixel values.
+            // Note(Leo): temporal since theyre on the frame arena
+            Measurement* temporal_rows;
+            Measurement* temporal_columns;
+        
+        } Grid;
     };
 };
 
@@ -244,7 +297,9 @@ extern Runtime runtime;
 Attribute* GetAttribute(Element* element, AttributeType searched_type);
 
 // Note(Leo): Name should be NULL terminated
-Selector* GetSelectorFromName(DOM* dom, char* name);
+Selector* GetSelectorFromName(const char* name);
+
+Style* GetStyleFromID(int style_id);
 
 Element* CreateElement(DOM* dom, SavedTag* tag_template);
 
@@ -252,6 +307,12 @@ void InitDOM(Arena* master_arena, DOM* target);
 
 void ConvertSelectors(Compiler::Selector* selector);
 void ConvertStyles(Compiler::Style* style);
+
+// Merge the members of the secondary in-flight style into the main style
+void MergeStyles(InFlightStyle* main, InFlightStyle* secondary);
+
+// Merge the members of style into the in-flight main style 
+void MergeStyles(InFlightStyle* main, Style* style);
 
 void CalculateStyles(DOM* dom);
 void BuildRenderQue(DOM* dom);
@@ -278,3 +339,4 @@ LoadedFileHandle* GetFileFromId(int id);
 LoadedFileHandle* GetFileFromName(const char* name);
 
 BoundExpression* GetBoundExpression(int id);
+void RuntimeClearTemporal(DOM* target);

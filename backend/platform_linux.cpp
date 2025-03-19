@@ -305,6 +305,10 @@ int main()
     }
     
     PlatformWindow* curr_window = platform.first_window;
+    
+    Arena* temp_renderque = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    *temp_renderque = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    
     while(true)
     {
         BEGIN_TIMED_BLOCK(PLATFORM_LOOP);
@@ -340,11 +344,16 @@ int main()
             continue;
         }
     
-        RuntimeTickAndBuildRenderque(NULL, (DOM*)curr_window->window_dom);
+        BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
+        RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom);
+        ResetArena(temp_renderque);
+        END_TIMED_BLOCK(TICK_AND_BUILD);
         
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);
         RenderplatformDrawWindow(platform.first_window);
         END_TIMED_BLOCK(DRAW_WINDOW);
+        
+        RuntimeClearTemporal((DOM*)curr_window->window_dom);
         
         curr_window = curr_window->next_window;
         

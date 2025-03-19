@@ -80,6 +80,14 @@ void ConvertSelectors(Compiler::Selector* selector)
     DeAllocScratch(terminated_name);
 }
 
+Measurement convert_measurement(Compiler::Measurement measurement)
+{
+    Measurement created = {};
+    created.size = measurement.size;
+    created.type = (MeasurementType)((int)measurement.type);
+    return created;
+}
+
 // Note(Leo): Styles are indexed as an array by their global ID 
 void ConvertStyles(Compiler::Style* style)
 {
@@ -95,12 +103,14 @@ void ConvertStyles(Compiler::Style* style)
             int allocated_count = ((arena_base + curr_style->global_id) + 1) - (Style*)runtime.styles->next_address;
             Alloc(runtime.styles, sizeof(Style) * allocated_count, zero());
         }    
+
+        Style* added_style = arena_base + curr_style->global_id;
+        added_style->id = curr_style->global_id;
+        added_style->width = convert_measurement(curr_style->width);
+        added_style->height = convert_measurement(curr_style->height);
+        
         curr_style++;
     }
-    
-    Style* added_style = arena_base + curr_style->global_id;
-    added_style->id = curr_style->global_id;
-    
 }
 
 
@@ -209,6 +219,45 @@ void SwitchPage(DOM* dom, int id, int flags)
     InstancePage(dom, id);    
 }
 
+Selector* GetSelectorFromName(const char* name)
+{
+    auto search = selector_map.find(name);
+    if(search != selector_map.end())
+    {
+        return search->second;
+    }
+    
+    return NULL;
+}
+
+inline Style* GetStyleFromID(int style_id)
+{
+    assert(style_id >= 0);
+    return ((Style*)runtime.styles->mapped_address) + style_id;
+}
+
+InFlightStyle merge_selector_styles(Selector* selector)
+{
+    // Todo(Leo): If we decide that styles cant be altered at runtime then we could cache the resulting style here into the
+    // selector. This would obviously be usefull especially in cases where selector merge is called alot or is expensive 
+    // (e.g. where a class attribute has a binding and the selectors it spits out have alot of styles to merge) 
+    
+    
+    InFlightStyle merged_style = {};
+    // Note(Leo): Since styles can currently have priority 0, we must ensure that merged_style has -1 priority otherswise
+    // priority 0 styles will be ignored
+    
+    merged_style.width_p = -1;
+    merged_style.height_p = -1;
+    
+    for(int i = 0; i < selector->style_count; i++)
+    {
+        MergeStyles(&merged_style, GetStyleFromID(selector->style_ids[i]));
+    }
+    
+    return merged_style;
+}
+
 // Note(Leo): Called for every element every frame!!!!!!
 void runtime_evaluate_attributes(DOM* dom, Element* element)
 {
@@ -264,6 +313,7 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                     
                     // Note(Leo): We do a length limited flatten since we dont want a \0
                     Flatten(binding_text, (class_string + curr_attribute->Text.binding_position), binding_text->length);
+                    FreeString(binding_text);
                 }
                 
                 if(!class_string)
@@ -286,36 +336,54 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                     break;
                 }
                 
-                // Split selectors and mangle names to create global names
-                char* base_address = class_string; 
+                // Split selectors and mangle names to create global names and combine the styles from all the selectors
+                char* start_address = class_string; 
+                char* end_address = class_string; 
                 for(int i = 0; i < class_string_length; i++)
                 {
-                    if(class_string[i] == ' ')
+                    // Go until hitting a space or getting to the end of the string
+                    if(class_string[i] != ' ' && i != class_string_length - 1)
                     {
-                        int unmangled_name_length = base_address - (class_string + i);
-                        if(unmangled_name_length <= 0)
-                        {
-                            base_address = class_string + i;
-                            continue;
-                        }
-                        unmangled_name_length++; // +1 to fit \0
-                        char* unmangled_name = (char*)AllocScratch(sizeof(char)*unmangled_name_length);
-                        memcpy(unmangled_name, base_address, unmangled_name_length);
-                        unmangled_name[unmangled_name_length] = '\0';
-                        
-                        int name_length = snprintf(NULL, 0, "%d-%s", ((ElementMaster*)element->master)->file_id, unmangled_name); 
-                        name_length++; // +1 to fit \0
-                        char* name = (char*)AllocScratch(sizeof(char)*name_length);
-                        sprintf(name, "%d-%s", ((ElementMaster*)element->master)->file_id, unmangled_name);
-                        
-                        printf("Found selector name: %s", name);
-                        
-                        base_address = class_string + i;
+                        end_address++;
+                        continue;
                     }
-                    else if(i == class_string_length - 1) // Last iteration
+                    
+                    // Weve hit another space after just hitting one
+                    if(start_address == end_address)
                     {
-                        
+                        start_address++;
+                        end_address++;
+                        continue;
                     }
+                    
+                    // We are on the last iteration so include the remaining charachter
+                    if(i == class_string_length - 1)
+                    {
+                        end_address++;
+                    }
+                    
+                    // Weve succesfully found a selector
+                    int unmangled_name_length = end_address - start_address;
+                    //printf("Found selector: %.*s\n", unmangled_name_length, start_address);
+                    
+                    // Mangle the name
+                    int global_name_length = snprintf(NULL, 0, "%d-%.*s", ((ElementMaster*)element->master)->file_id, unmangled_name_length, start_address);
+                    global_name_length++; // +1 to fit \0
+                    char* global_name = (char*)AllocScratch(sizeof(char)*global_name_length);
+                    sprintf(global_name, "%d-%.*s", ((ElementMaster*)element->master)->file_id, unmangled_name_length, start_address);
+                    
+                    //printf("Mangled the name into: %s\n", global_name);
+                    Selector* found_selector = GetSelectorFromName(global_name);
+                    DeAllocScratch(global_name);
+                    if(found_selector)
+                    {
+                        InFlightStyle selector_style = merge_selector_styles(found_selector);
+                        MergeStyles(&element->working_style, &selector_style);
+                    }                 
+                    
+                    // Move over the ' '
+                    end_address++;
+                    start_address = end_address;
                     
                 }
                 
@@ -333,6 +401,11 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
     }
 }
 
+void RuntimeClearTemporal(DOM* target)
+{
+    ResetArena(target->frame_arena);
+}
+
 void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
 {
     // Note(Leo): Page root element is always at the first address of the dom
@@ -343,6 +416,7 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
     // Depth first walk
     while(curr_element)
     {
+    
         if(curr_element->first_child)
         {
             curr_element = curr_element->first_child;
@@ -369,4 +443,6 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
             curr_element = curr_element->parent;
         }
     }
+
+    ShapingPlatformShape(root_element, renderque);
 }

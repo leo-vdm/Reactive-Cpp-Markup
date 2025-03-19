@@ -14,6 +14,10 @@ struct Arena
     int alloc_size; // Size of objects in this arena
     int flags;
         
+#if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+    uintptr_t furthest_committed; // The end of the furthest page we have commited
+#endif 
+        
     // alloc_size must be larger than the size of freeblock! (>=8 bytes)    
     Arena(void* position, int size, int alloc_size, uint64_t flags){
         this->mapped_address = (uintptr_t)position;
@@ -54,6 +58,9 @@ void DeAllocScratch(void* address);
 //void* Alloc(Arena* arena); // Allocate based on the alloc_size
 void* Alloc(Arena* arena, int size, uint64_t flags = 0); // Allocate an arbitrary size
 void DeAlloc(Arena* arena, void* address);
+void* Push(Arena* arena, int size, uint64_t flags = 0);
+void Pop(Arena* arena, int size); // Deallocates off of the end of the arena
+
 
 void ResetArena(Arena* arena);
 
