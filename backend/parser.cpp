@@ -262,7 +262,8 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
 std::map<std::string, TagType> tag_map = 
 {
     {"text", TagType::TEXT },
-    {"div", TagType::DIV },
+    {"hdiv", TagType::HDIV },
+    {"vdiv", TagType::VDIV },
     //{"end", TagType::CUSTOM},
 };
 

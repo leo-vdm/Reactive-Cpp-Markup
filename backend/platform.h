@@ -2,7 +2,6 @@
 #include <vulkan/vulkan.h>
 #include "DOM.h"
 #include <cassert>
-
 #define MAX_WINDOW_COUNT 100
 #define MAX_TEXTURE_COUNT 30
 #define GLYPH_ATLAS_COUNT 200

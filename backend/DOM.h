@@ -97,12 +97,15 @@ struct Runtime
     
 };
 
+// Todo(Leo): Reflect these types in the compiler
 enum class MeasurementType
 {
     NONE,
-    AUTO,
+    GROW, // Grow to fill the parent sharing free space with other grow measurements.
+            // Size is the relative weight of this grow measurement.
+    FIT, // Not allowed for margin/padding. Fit the parent around its children
     PIXELS,
-    PERCENT,
+    PERCENT, // Relative to parent for margin/padding aswell as width/height 
 };
 
 struct Measurement {
@@ -116,29 +119,109 @@ struct Measurement {
     }
 };
 
-enum class StyleDisplayType
+struct Padding 
+{
+    Measurement left;
+    Measurement rigth;
+    Measurement top;
+    Measurement bottom;
+};
+
+struct Margin 
+{
+    Measurement left;
+    Measurement rigth;
+    Measurement top;
+    Measurement bottom;
+};
+
+// Corner radii in px
+struct Corners
+{
+    uint16_t top_left;
+    uint16_t top_right;
+    uint16_t bottom_left;
+    uint16_t bottom_right;
+};
+
+enum class DisplayType
 {
     NORMAL, // Like css block
-    HIDDEN, // Neither element nor its children are not shown or taken into account at all. 
+    HIDDEN, // Neither element nor its children are shown or taken into account at all. 
     MANUAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
+};
+
+// Note(Leo): To match vulkan, alpha of 0 is fully transparent and 1 is fully opaque
+// Note(Leo): All the color channels should be from 0 to 1
+struct StyleColor 
+{
+    float r, g, b, a;
+};
+
+enum class TextWrapping
+{
+    WORDS, // Text is wrapped but words are kept together 
+    CHARS, // Text is wrapped but in arbitrary positions
+    NONE, // Text will not wrap and will overflow
+};
+
+enum class ClipStyle
+{
+    HIDDEN, // Just hide clipped region. Clipped region can still be scrolled through internal means
+    SCROLL, // Hide clipped region and show a scroll bar
 };
 
 struct Style 
 {
     int id;
     int priority;
+
+    TextWrapping wrapping;
     
-    StyleDisplayType display;
+    ClipStyle horizontal_clipping;
+    ClipStyle vertical_clipping;
+    
+    StyleColor color; // Background color
+    StyleColor text_color; // The color of child text
+    
+    DisplayType display;
     
     Measurement width, height;
+    Margin margin;
+    Padding padding;
+    Corners corners;
+    
+    uint16_t font_id;
+    uint16_t font_size;     
 };
 
 // Note(Leo): Same struct as Style but with priority numbers for each member, allowing styles to be combined and the higher
 // priority style's non-null members to override the lower priority style's ones.
 struct InFlightStyle
 {
+    TextWrapping wrapping;
+    int wrapping_p;
+    
+    ClipStyle horizontal_clipping;
+    ClipStyle vertical_clipping;
+    int horizontal_clipping_p, vertical_clipping_p;
+
     Measurement width, height;
     int width_p, height_p;
+    StyleColor color, text_color;
+    int color_p, text_color_p;
+    
+    DisplayType display;
+    int display_p;
+    
+    Margin margin;
+    Padding padding;
+    Corners corners;
+    int margin_p, padding_p, corners_p;
+
+    uint16_t font_id;
+    uint16_t font_size;
+    int font_id_p, font_size_p;
 };
 
 struct Selector
@@ -214,7 +297,8 @@ enum class ElementType
     NONE,
     ROOT,
     TEXT,
-    DIV,
+    HDIV,
+    VDIV,
     CUSTOM,
     GRID,
     IMG,
@@ -239,8 +323,6 @@ struct Element
     
     // In Flight Vars
     InFlightStyle working_style;
-
-    Style* cached_final_sizing;
     
     union
     {

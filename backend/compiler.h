@@ -82,30 +82,31 @@ struct Token {
 #define MAX_TAG_NAME_LENGTH 4  // The length of the longest built in tag name
 
 enum class TagType {
-NONE,
-ROOT,
-TEXT,
-DIV,
-CUSTOM, // User defined component, the name given is set as an attribute
-GRID,
-IMG,
-VIDEO,
+    NONE,
+    ROOT,
+    TEXT,
+    HDIV,
+    VDIV,
+    CUSTOM,
+    GRID,
+    IMG,
+    VIDEO,
 };
 
 enum class AttributeType
 {
-NONE,
-CUSTOM, // For user defined args, name goes in value. Arg goes in Attribute binding
-TEXT,
-STYLE,
-CLASS,
-COLUMNS, // For grid element
-ROWS, // For grid element
-ROW, // For any element to specify which row/column of a parent grid it wants to be in
-COLUMN,
-SRC, // For the VIDEO and IMG tags
-COMP_ID, // For custom components
-ON_CLICK, // For click bindings
+    NONE,
+    CUSTOM, // For user defined args, name goes in value. Arg goes in Attribute binding
+    TEXT,
+    STYLE,
+    CLASS,
+    COLUMNS, // For grid element
+    ROWS, // For grid element
+    ROW, // For any element to specify which row/column of a parent grid it wants to be in
+    COLUMN,
+    SRC, // For the VIDEO and IMG tags
+    COMP_ID, // For custom components
+    ON_CLICK, // For click bindings
 };
 
 #define MAX_TAGS_PER_BINDING 20
@@ -183,18 +184,18 @@ struct Tag {
 #define MAX_STYLE_FIELD_NAME_LENGTH 9 // Length of longest field name for styles (prevents alocating arbitrarily large buffer)
 
 enum class StyleFieldType {
-NONE, 
-WIDTH,
-HEIGHT,
-MAX_WIDTH,
-MAX_HEIGHT,
+    NONE, 
+    WIDTH,
+    HEIGHT,
+    MAX_WIDTH,
+    MAX_HEIGHT,
 };
 
 enum class MeasurementType {
-NONE,
-AUTO,
-PIXELS,
-PERCENT,
+    NONE,
+    AUTO,
+    PIXELS,
+    PERCENT,
 };
 
 struct Measurement {

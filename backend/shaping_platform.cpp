@@ -2,63 +2,14 @@
 #include "platform.h"
 #include "DOM.h"
 
-enum class SizingType
-{
-    FIT, // Shrinks the element around its content size
-    GROW, // Expand to fill available space in the parent, sharing it with other grow elements proportionaltely to their 
-          // weight values.
-    PERCENT, // Expects a 0-1 range. Sizes based on the parent's size minus padding 
-    PIXELS,
-};
-
-enum class DisplayType
-{
-    NORMAL, // Parent controls where this element is placed
-    MANUAL, // Element manually places itself inide its parent, Element will no longer affect the size of its siblings or 
-            // parent
-    HIDDEN, // Element and all its children are currently not displayed.
-};
-
 struct size_axis 
 {
-    union {
-        struct
-        {
-            float min;
-            float max;
-        } min_max;
-        
-        float percent;
-        
-        float weight;
-    } size;
+    Measurement set_measurement;
+    Measurement min_measurement; // Must be in px or %
+    Measurement max_measurement; // Must be in px or %
     
-    SizingType type;
-};
-
-struct shape_padding 
-{
-    uint16_t left;
-    uint16_t rigth;
-    uint16_t top;
-    uint16_t bottom;
-};
-
-struct shape_margin 
-{
-    uint16_t left;
-    uint16_t rigth;
-    uint16_t top;
-    uint16_t bottom;
-};
-
-// Corner radii in px
-struct shape_corners
-{
-    uint16_t top_left;
-    uint16_t top_right;
-    uint16_t bottom_left;
-    uint16_t bottom_right;
+    // Calculated
+    int current;
 };
 
 struct shape_axis 
@@ -67,35 +18,24 @@ struct shape_axis
     size_axis height;
 };
 
-enum class TextWrapping
-{
-    WORDS, // Text is wrapped but words are kept together 
-    CHARS, // Text is wrapped but in arbitrary positions
-    NONE, // Text will not wrap and will overflow
-};
-
-enum class ClipStyle
-{
-    HIDDEN, // Just hide clipped region. Clipped region can still be scrolled through internal means
-    SCROLL, // Hide clipped region and show a scroll bar
-};
 
 struct shape_clipping
 {
-    ClipStyle vertical_clip;    
-    uint16_t top_scroll; // How far in pixels we have scrolled from the top of the clipped region
-    ClipStyle horizontal_clip;
+    ClipStyle horizontal;
     uint16_t left_scroll; // How far in pixels we have scrolled from the left of the clipped region
+    ClipStyle vertical;    
+    uint16_t top_scroll; // How far in pixels we have scrolled from the top of the clipped region
 };
 
 struct bounding_box 
 {
-    float x, y, width, height;   
+    float x, y, width, height;
 };
 
 // Controls how an element lays out its children
 enum class LayoutDirection
 {
+    NONE, // For elements that cant have chilren
     VERTICAL,
     HORIZONTAL,
     GRID,
@@ -108,13 +48,6 @@ enum class LayoutElementType
     TEXT,
     IMAGE,
     END,
-};
-
-struct LayoutStyle 
-{
-    shape_axis sizing;    
-    shape_padding padding;
-    shape_margin margin;
 };
 
 struct shape_color 
@@ -133,9 +66,11 @@ struct LayoutElement
     LayoutElementType type;
     LayoutDirection dir;
     DisplayType display;
-    LayoutStyle style;
-    bounding_box bounds;
+    shape_axis sizing;    
+    Padding padding;
+    Margin margin;
     
+    bounding_box bounds;
     LayoutElement* children;
     uint16_t child_count;
     
@@ -144,14 +79,14 @@ struct LayoutElement
         struct
         {
             shape_color color;
-            shape_corners corners;
+            Corners corners;
             shape_clipping clipping;
             TextWrapping wrapping; // Controls how child text should be wrapped
         } NORMAL;
         struct
         {
             shape_color_transparent color;
-            shape_corners corners;
+            Corners corners;
             shape_clipping clipping;
             TextWrapping wrapping; // Controls how child text should be wrapped
         } NORMAL_TRANSPARENT;
@@ -164,7 +99,7 @@ struct LayoutElement
         } TEXT;
         struct 
         {
-            shape_corners corners;
+            Corners corners;
             uint16_t image_id;
             uint16_t source_width;
             uint16_t source_height;
@@ -204,6 +139,69 @@ bool boxes_intersect(bounding_box* first, bounding_box* second, bounding_box* re
     return true;
 }
 
+void convert_element_style(InFlightStyle* in, LayoutElement* target)
+{
+    // Note(Leo): Bake in any pixel values while were here
+    memcpy(&target->sizing.width.set_measurement, &in->width, sizeof(Measurement));
+    if(in->width.type == MeasurementType::PIXELS)
+    {
+        target->sizing.width.current = in->width.size;
+    }
+    memcpy(&target->sizing.height.set_measurement, &in->height, sizeof(Measurement));
+    if(in->height.type == MeasurementType::PIXELS)
+    {
+        target->sizing.height.current = in->height.size;
+    }
+
+    memcpy(&target->margin, &in->margin, sizeof(Margin)); 
+    memcpy(&target->padding, &in->padding, sizeof(Padding));
+    
+    target->display = in->display;
+    
+    switch(target->type)
+    {
+        case(LayoutElementType::NORMAL):
+            {
+                memcpy(&target->NORMAL.corners, &in->corners, sizeof(Corners));
+                // Note(Leo): This relies on StyleColor and shape_color using same sized components and being in rgba order
+                //          (we are under-copying from the style's color since we dont want the alpha component)
+                static_assert(sizeof(shape_color) < sizeof(StyleColor));
+                memcpy(&target->NORMAL.color, &in->corners, sizeof(shape_color));
+                target->NORMAL.clipping.horizontal = in->horizontal_clipping;
+                target->NORMAL.clipping.vertical = in->vertical_clipping;
+                target->NORMAL.wrapping = in->wrapping;
+            }
+            break;
+        case(LayoutElementType::NORMAL_TRANSPARENT):
+            {
+                memcpy(&target->NORMAL_TRANSPARENT.corners, &in->corners, sizeof(Corners)); 
+                // Note(Leo): These two should be the same
+                static_assert(sizeof(shape_color_transparent) == sizeof(StyleColor));
+                memcpy(&target->NORMAL_TRANSPARENT.color, &in->color, sizeof(StyleColor)); 
+                target->NORMAL_TRANSPARENT.clipping.horizontal = in->horizontal_clipping;
+                target->NORMAL_TRANSPARENT.clipping.vertical = in->vertical_clipping;
+                target->NORMAL_TRANSPARENT.wrapping = in->wrapping;
+            }
+            break;
+        case(LayoutElementType::IMAGE):
+            {
+                memcpy(&target->IMAGE.corners, &in->corners, sizeof(Corners)); 
+            }
+            break;
+        case(LayoutElementType::TEXT):
+            {
+                // Note(Leo): Text cant have transparency.
+                static_assert(sizeof(shape_color) < sizeof(StyleColor));
+                memcpy(&target->TEXT.text_color, &in->text_color, sizeof(shape_color));
+                target->TEXT.font_id = in->font_id;
+                target->TEXT.font_size = in->font_size;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 // 'unpacks' the children of a parent element into a contiguous array of LayoutElements and puts the pointer to the
 // first child into first_child and the count of children into child_count.
 void unpack(shaping_context* context, Element* first_child, LayoutElement** first_unpacked_child, uint16_t* child_count)
@@ -218,10 +216,106 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
         count++;
         LayoutElement* converted = (LayoutElement*)Push(context->shape_arena, sizeof(LayoutElement));
         converted->element_id = curr->id;
+        
+        // Converting element type to layout element type
+        switch(curr->type)
+        {
+            case(ElementType::VDIV):
+            case(ElementType::HDIV):
+            case(ElementType::ROOT):
+            case(ElementType::GRID):
+                {
+                    if(curr->working_style.color.a >= 1.0f)
+                    {
+                        converted->type = LayoutElementType::NORMAL;
+                    }
+                    else
+                    {
+                        converted->type = LayoutElementType::NORMAL_TRANSPARENT;
+                    }
+                    
+                    if(curr->type == ElementType::VDIV || curr->type == ElementType::ROOT)
+                    {
+                        converted->dir = LayoutDirection::VERTICAL;
+                    }
+                    else if(curr->type == ElementType::HDIV)
+                    {
+                        converted->dir = LayoutDirection::HORIZONTAL;
+                    }
+                    else 
+                    {
+                        converted->dir = LayoutDirection::GRID;
+                    }
+                    convert_element_style(&curr->working_style, converted);
+                }
+                break;
+            case(ElementType::CUSTOM):
+                {
+                    // Note(Leo): Custom element is just a parent for the root of the component, we flatten it here by skipping it
+                    // and replacing it with its root
+                    Element* comp_root = curr->first_child;
+                    assert(comp_root->type == ElementType::ROOT);
+                    converted->element_id = comp_root->id;
+                    if(comp_root->working_style.color.a >= 1.0f)
+                    {
+                        converted->type = LayoutElementType::NORMAL;
+                    }
+                    else
+                    {
+                        converted->type = LayoutElementType::NORMAL_TRANSPARENT;
+                    }
+                    converted->dir = LayoutDirection::VERTICAL;
+                    convert_element_style(&comp_root->working_style, converted);
+                }
+                break;
+            case(ElementType::TEXT):
+                {
+                    converted->type = LayoutElementType::TEXT;
+                    converted->dir = LayoutDirection::NONE;
+                    convert_element_style(&curr->working_style, converted);
+                }
+                break;
+            case(ElementType::IMG):
+                {
+                    converted->type = LayoutElementType::IMAGE;
+                    converted->dir = LayoutDirection::NONE;
+                    convert_element_style(&curr->working_style, converted);
+                }
+                break;
+            default:
+                assert(0);
+                break;
+        }
+        
         curr = curr->next_sibling;
     }
     
     *child_count = count; 
+}
+
+// Note(Leo): Explanation for first pass
+// First pass walks up from the leafs in the tree.
+// We measure text using our font platform but dont do any wrapping yet.
+// Combine sibling text elements
+
+
+
+void shape_first_pass()
+{
+//    if(element->type == LayoutElementType::NORMAL, )
+//    bool has_horizontal_scroll  
+//    bool has_vertical_scroll
+    
+}
+
+void shape_second_pass(LayoutElement* element)
+{
+
+}
+
+void shape_final_pass(LayoutElement* element)
+{
+    
 }
 
 void ShapingPlatformShape(Element* root_element, Arena* shape_arena)
