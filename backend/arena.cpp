@@ -20,6 +20,13 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
     return new_arena;
 }
 
+Arena CreateArenaWith(void* memory_block, int memory_block_size, int alloc_size, uint64_t flags)
+{
+    Arena new_arena = Arena(memory_block, memory_block_size, alloc_size, flags);
+    new_arena.furthest_committed = new_arena.next_address + memory_block_size;
+    return new_arena;
+}
+
 void* Alloc(Arena* arena, int size, uint64_t flags)
 {
     #ifndef NDEBUG
@@ -133,6 +140,12 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
 {
     Arena newArena = Arena(mmap(NULL, reserved_size,  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, 0, 0), reserved_size, alloc_size, flags);
     return newArena;
+}
+
+Arena CreateArenaWith(void* memory_block, int memory_block_size, int alloc_size, uint64_t flags)
+{
+    Arena new_arena = Arena(memory_block, memory_block_size, alloc_size, flags);
+    return new_arena;
 }
 
 void* Alloc(Arena* arena, int size, uint64_t flags)

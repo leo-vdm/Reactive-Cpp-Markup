@@ -2,6 +2,7 @@
 #include <vulkan/vulkan.h>
 #include "DOM.h"
 #include <cassert>
+#pragma once
 #define MAX_WINDOW_COUNT 100
 #define MAX_TEXTURE_COUNT 30
 #define GLYPH_ATLAS_COUNT 200
@@ -10,7 +11,9 @@
 #define Megabytes(num_bytes) (num_bytes * 1000000 * sizeof(char))
 #define Gigabytes(num_bytes) (num_bytes * 1000000000 * sizeof(char))
 
-#pragma once
+#define MAX(x, y) ((x) >= (y) ? (x) : (y))
+#define MIN(x, y) ((x) <= (y) ? (x) : (y))
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
 
@@ -216,19 +219,28 @@ struct FontPlatformGlyph
     int height;
 };
 
-#define FontHandle int
+struct FontPlatformShapedText
+{
+    FontPlatformShapedGlyph* first_glyph;
+    uint32_t glyph_count;
+    
+    uint32_t required_width;
+    uint32_t required_height;
+};
+
+#define FontHandle uint16_t
 
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
-void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle font_handle, int font_size, int area_width, int area_height);
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, char** utf8_buffers, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
 FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
 void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
-void ShapingPlatformShape(Element* root_element, Arena* shape_arena);
+void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count);
 
 #define USING_INSTREMENTATION 1
 // Instrumentation related stuff

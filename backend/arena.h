@@ -48,6 +48,8 @@ extern Arena scratch_arena;
 
 Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags = 0);
 
+Arena CreateArenaWith(void* memory_block, int memory_block_size, int alloc_size, uint64_t flags = 0);
+
 // Get space from the scratch arena
 
 void* AllocScratch(int alloc_size, uint64_t flags = 0);

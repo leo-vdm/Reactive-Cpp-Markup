@@ -106,23 +106,18 @@ enum class MeasurementType
     FIT, // Not allowed for margin/padding. Fit the parent around its children
     PIXELS,
     PERCENT, // Relative to parent for margin/padding aswell as width/height 
+             // Should be normalized to 0-1 range
 };
 
 struct Measurement {
     float size;
     MeasurementType type;
-    
-    Measurement()
-    {
-        size = 0.0f;
-        type = MeasurementType::NONE;
-    }
 };
 
 struct Padding 
 {
     Measurement left;
-    Measurement rigth;
+    Measurement right;
     Measurement top;
     Measurement bottom;
 };
@@ -130,7 +125,7 @@ struct Padding
 struct Margin 
 {
     Measurement left;
-    Measurement rigth;
+    Measurement right;
     Measurement top;
     Measurement bottom;
 };
@@ -186,7 +181,8 @@ struct Style
     
     DisplayType display;
     
-    Measurement width, height;
+    Measurement width, min_width, max_width;
+    Measurement height, min_height, max_height;
     Margin margin;
     Padding padding;
     Corners corners;
@@ -206,8 +202,10 @@ struct InFlightStyle
     ClipStyle vertical_clipping;
     int horizontal_clipping_p, vertical_clipping_p;
 
-    Measurement width, height;
-    int width_p, height_p;
+    Measurement width, min_width, max_width;
+    Measurement height, min_height, max_height;
+    int width_p, min_width_p, max_width_p;
+    int height_p, min_height_p, max_height_p;
     StyleColor color, text_color;
     int color_p, text_color_p;
     

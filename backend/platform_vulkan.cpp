@@ -2924,7 +2924,7 @@ void RenderplatformDrawWindow(PlatformWindow* window)
     {
         FontHandle test_font = FontPlatformGetFont("platform_default_font.ttf");
         Arena temp = CreateArena(sizeof(FontPlatformShapedGlyph)*1000, sizeof(FontPlatformShapedGlyph));
-        FontPlatformShape(&temp, "Deez Nuts", test_font, 40, 500, 500);
+        //FontPlatformShape(&temp, "Deez Nuts", test_font, 40, 500, 500);
         done = true;
     }
     

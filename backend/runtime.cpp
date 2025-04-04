@@ -443,6 +443,9 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
             curr_element = curr_element->parent;
         }
     }
-
-    ShapingPlatformShape(root_element, renderque);
+    
+    // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
+    //            will never underestimate so its ok.
+    int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
+    ShapingPlatformShape(root_element, renderque, element_count);
 }

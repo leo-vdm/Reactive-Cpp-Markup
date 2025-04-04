@@ -224,95 +224,111 @@ inline FontPlatformGlyph* plaform_get_glyph_or_raster(FontHandle font_handle, ui
 
 const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UINT_MAX }, { HB_TAG('l', 'i', 'g', 'a'), 1, 0, UINT_MAX }, { HB_TAG('c', 'l', 'i', 'g'), 1, 0, UINT_MAX } };
 
+
 // Note(Leo): Area height and width are expected in pixels
-void FontPlatformShape(Arena* glyph_arena, const char* utf8_buffer, FontHandle font_handle, int font_size, int area_width, int area_height)
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, char** utf8_buffers, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height)
 {
     // Used to mark the end of our sequence of glyphs
     #define mark_end() Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), zero())
+    assert(result);
     assert(glyph_arena);
-    // Note(Leo): glyph_arena MUST be empty
-    assert(glyph_arena->mapped_address == glyph_arena->next_address);
     
-    hb_buffer_reset(font_platform.shaping_buffer);
-    hb_buffer_add_utf8(font_platform.shaping_buffer, utf8_buffer, -1, 0, -1);
-    hb_buffer_guess_segment_properties(font_platform.shaping_buffer);
-        
-    loaded_font_handle* used_font = platform_get_font(font_handle);
-    if(!used_font)
-    {
-        assert(used_font);
-        mark_end();
-        return;
-    }
-    
-    // Change font size to the desired size so that shaping will have the offsets already in the correct size
-    FT_Set_Pixel_Sizes(used_font->face, font_size, font_size);
-    hb_ft_font_changed(used_font->font);
+    // Note(Leo): glyph_arena may be unaligned (if other types have been getting allocated) 
+    //            so ensure its aligned to what we want.
+    glyph_arena->next_address = (uintptr_t)align_mem(glyph_arena->next_address, FontPlatformShapedGlyph);
 
-    hb_shape(used_font->font, font_platform.shaping_buffer, shaping_features, sizeof(shaping_features) / sizeof(hb_feature_t));
-    
-    unsigned int glyph_count;
-    hb_glyph_info_t* glyph_info = hb_buffer_get_glyph_infos(font_platform.shaping_buffer, &glyph_count);
-    hb_glyph_position_t* glyph_pos = hb_buffer_get_glyph_positions(font_platform.shaping_buffer, &glyph_count);
-    
-    FT_Set_Pixel_Sizes(used_font->face, font_platform.standard_glyph_size, font_platform.standard_glyph_size);
-    hb_ft_font_changed(used_font->font);
-    
-    if(!glyph_info || !glyph_pos)
-    {
-
-        mark_end();
-        return;
-    }
-    
-    FontPlatformShapedGlyph* added_glyph;
+    result->first_glyph = (FontPlatformShapedGlyph*)glyph_arena->next_address;
     
     int cursor_x = 0;
-    int cursor_y = 0;
+    int cursor_y = 0;    
+    result->required_width = 0;
+    result->required_height = 0;
+    result->glyph_count = 0;
     
-    for(int i = 0; i < glyph_count; i++)
+    for(int i = 0; i < text_block_count; i++)
     {
-        // Check linewrap
-        if(cursor_x + (glyph_pos[i].x_advance / 64) >= area_width)
+        char* utf8_buffer = utf8_buffers[i];
+        FontHandle font_handle = font_handles[i];
+        uint16_t font_size = font_sizes[i];
+        hb_buffer_reset(font_platform.shaping_buffer);
+        hb_buffer_add_utf8(font_platform.shaping_buffer, utf8_buffer, -1, 0, -1);
+        hb_buffer_guess_segment_properties(font_platform.shaping_buffer);
+            
+        loaded_font_handle* used_font = platform_get_font(font_handle);
+        if(!used_font)
         {
-            cursor_x = 0;
-            cursor_y += font_size;
+            assert(used_font);
+            mark_end();
+            return;
         }
+        
+        // Change font size to the desired size so that shaping will have the offsets already in the correct size
+        FT_Set_Pixel_Sizes(used_font->face, font_size, font_size);
+        hb_ft_font_changed(used_font->font);
     
-        added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
+        hb_shape(used_font->font, font_platform.shaping_buffer, shaping_features, sizeof(shaping_features) / sizeof(hb_feature_t));
         
-        FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, glyph_info[i].codepoint);
+        unsigned int glyph_count;
+        hb_glyph_info_t* glyph_info = hb_buffer_get_glyph_infos(font_platform.shaping_buffer, &glyph_count);
+        hb_glyph_position_t* glyph_pos = hb_buffer_get_glyph_positions(font_platform.shaping_buffer, &glyph_count);
         
-        added_glyph->gpu_glyph_slot = GlyphSlot(added_glyph_raster_info);
+        result->glyph_count += glyph_count;
         
-//        printf("Shaping char \"%d\"\n", glyph_info[i].codepoint);
+        FT_Set_Pixel_Sizes(used_font->face, font_platform.standard_glyph_size, font_platform.standard_glyph_size);
+        hb_ft_font_changed(used_font->font);
         
-        // Bearings are relative to the glyph's raster size which is different from the size of the font so scale it
-        float font_scale = (float)font_size / (float)font_platform.standard_glyph_size;
-        int scaled_bearing_x = (int)((float)added_glyph_raster_info->bearing_x * font_scale);
-        int scaled_bearing_y = (int)((float)added_glyph_raster_info->bearing_y * font_scale);
-        
-        // Note(Leo): The calculated coordinate is the top-left corner of the quad enclosing the char
-        // Note(Leo): Vulkan has the y-axis upside down compared to cartesian coordinates which freetype uses, so Y gets more positive as we go down
-        // Note(Leo): Divide by 64 to convert back to pixel measurements from harfbuzz
-        added_glyph->horizontal_offset = cursor_x + ((glyph_pos[i].x_offset / 64) + scaled_bearing_x);
-        added_glyph->vertical_offset = cursor_y - ((glyph_pos[i].y_offset / 64) + scaled_bearing_y);
-
-        added_glyph->width = (int)((float)added_glyph_raster_info->width * font_scale);
-        added_glyph->height = (int)((float)added_glyph_raster_info->height * font_scale);
-        
-        cursor_x += glyph_pos[i].x_advance / 64;
-        cursor_y += glyph_pos[i].y_advance / 64;
-        
-//        printf("Cursor at (%d, %d)\n", cursor_x, cursor_y);
-        
-        // Note(Leo): This assumes text is from side to side rather than top to bottom (like in some languages)
-        // Clip text once area is filled
-        if(cursor_y >= area_height)
+        if(!glyph_info || !glyph_pos)
         {
-            break;
+            mark_end();
+            return;
         }
+        
+        FontPlatformShapedGlyph* added_glyph = NULL;
+    
+        for(int i = 0; i < glyph_count; i++)
+        {
+            // Check linewrap
+            // Todo(Leo): Implement word wrapping as an option
+            if(wrapping_point && cursor_x + (glyph_pos[i].x_advance / 64) >= wrapping_point)
+            {
+                result->required_width = wrapping_point;
+                cursor_x = 0;
+                cursor_y += line_height;
+            }
+            
+            added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
+            
+            FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, glyph_info[i].codepoint);
+            
+            added_glyph->gpu_glyph_slot = GlyphSlot(added_glyph_raster_info);
+            
+    //        printf("Shaping char \"%d\"\n", glyph_info[i].codepoint);
+            
+            // Bearings are relative to the glyph's raster size which is different from the size of the font so scale it
+            float font_scale = (float)font_size / (float)font_platform.standard_glyph_size;
+            int scaled_bearing_x = (int)((float)added_glyph_raster_info->bearing_x * font_scale);
+            int scaled_bearing_y = (int)((float)added_glyph_raster_info->bearing_y * font_scale);
+            
+            // Note(Leo): The calculated coordinate is the top-left corner of the quad enclosing the char
+            // Note(Leo): Vulkan has the y-axis upside down compared to cartesian coordinates which freetype uses, so Y gets more positive as we go down
+            // Note(Leo): Divide by 64 to convert back to pixel measurements from harfbuzz
+            added_glyph->horizontal_offset = cursor_x + ((glyph_pos[i].x_offset / 64) + scaled_bearing_x);
+            added_glyph->vertical_offset = cursor_y - ((glyph_pos[i].y_offset / 64) + scaled_bearing_y);
+    
+            added_glyph->width = (int)((float)added_glyph_raster_info->width * font_scale);
+            added_glyph->height = (int)((float)added_glyph_raster_info->height * font_scale);
+            
+            cursor_x += glyph_pos[i].x_advance / 64;
+            cursor_y += glyph_pos[i].y_advance / 64;
+            
+            result->required_width = MAX(result->required_width, cursor_x);
+    //        printf("Cursor at (%d, %d)\n", cursor_x, cursor_y);
+        }
+        
+        // Note(Leo): + line_height to account for the first line
+        result->required_height = cursor_y + line_height;
     }
-    
+        
     mark_end();
+    return;
 }
