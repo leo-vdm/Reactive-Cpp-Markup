@@ -133,6 +133,7 @@ struct LayoutElement
             shape_color text_color;
             FontHandle font_id;
             uint16_t font_size;     
+            uint16_t text_length;
             char* text_content;
         } TEXT;
         struct
@@ -322,6 +323,7 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
                     converted->type = LayoutElementType::TEXT;
                     converted->dir = LayoutDirection::NONE;
                     converted->TEXT.text_content = curr->Text.temporal_text;
+                    converted->TEXT.text_length = curr->Text.temporal_text_length;
                     convert_element_style(&curr->working_style, converted);
                 }
                 break;
@@ -464,7 +466,7 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
         if(curr_child->type == LayoutElementType::TEXT)
         {
             // Note(Leo): There cant be more text children than total children in the parent so we wont underallocate here
-            char** text_contents = (char**)AllocScratch(parent->child_count*sizeof(char*));
+            StringView* text_views = ( StringView*)AllocScratch(parent->child_count*sizeof(StringView));
             FontHandle* text_fonts = (FontHandle*)AllocScratch(parent->child_count*sizeof(char*));
             uint16_t* font_sizes = (uint16_t*)AllocScratch(parent->child_count*sizeof(char*));
             
@@ -475,7 +477,7 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             int line_height = 0;
             while(curr_text < target && curr_child->type == LayoutElementType::TEXT)
             {
-                text_contents[text_sibling_count] = (curr_child + text_sibling_count)->TEXT.text_content;
+                text_views[text_sibling_count] = {(curr_child + text_sibling_count)->TEXT.text_content, (curr_child + text_sibling_count)->TEXT.text_length};
                 text_fonts[text_sibling_count] = (curr_child + text_sibling_count)->TEXT.font_id;
                 font_sizes[text_sibling_count] = (curr_child + text_sibling_count)->TEXT.font_size;
             
@@ -505,9 +507,8 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             }
             
             // Shape text
-            uint32_t required_width = 0;
             FontPlatformShapedText result = {};
-            FontPlatformShapeMixed(context->shape_arena, &result, text_contents, text_fonts, font_sizes, text_sibling_count, wrapping_point, line_height);
+            FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_sibling_count, wrapping_point, line_height);
             
             // Convert current TEXT element to a combined text
             curr_child->type = LayoutElementType::TEXT_COMBINED;
@@ -517,15 +518,15 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             curr_child->sizing.height.current = (float)result.required_height;
 
             // Note(Leo): These may be more convenient for some calculations that loop over children than .current
-            curr_child->sizing.width.desired.size = curr_child->sizing.width.current;
+            curr_child->sizing.width.desired.size = (float)result.required_width;
             curr_child->sizing.width.desired.type = MeasurementType::PIXELS;
             
-            curr_child->sizing.height.desired.size = curr_child->sizing.height.current;
+            curr_child->sizing.height.desired.size = (float)result.required_height;
             curr_child->sizing.height.desired.type = MeasurementType::PIXELS;
             
             DeAllocScratch(font_sizes);
             DeAllocScratch(text_fonts);
-            DeAllocScratch(text_contents);
+            DeAllocScratch(text_views);
             
             // Skip outer iteration over the other text siblings which have been combined into this one.
             curr_child = curr_child + text_sibling_count;
@@ -666,9 +667,13 @@ void size_parent_axis(LayoutElement* parent_element, bool is_vertical)
         // If the grow is already at its max size it cant grow further so we can change its type
         if(parent->max.type == MeasurementType::PIXELS && parent->max.size <= parent->current)
         {
-            parent->desired.size = parent->max.size; 
-            parent->desired.type = MeasurementType::PIXELS; 
-            parent->current = parent->desired.size;
+            // Note(Leo): max of 0 means no max
+            if(parent->max.size > 0.0f)
+            {
+                parent->desired.size = parent->max.size; 
+                parent->desired.type = MeasurementType::PIXELS; 
+                parent->current = parent->desired.size;
+            }
             parent->max.size = 0.0f;
         }
     }
@@ -815,7 +820,13 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     assert(parent->sizing.width.padding1.type == MeasurementType::PIXELS && parent->sizing.width.padding2.type == MeasurementType::PIXELS);
     assert(parent->sizing.height.desired.type == MeasurementType::PIXELS);
     assert(parent->sizing.height.padding1.type == MeasurementType::PIXELS && parent->sizing.height.padding2.type == MeasurementType::PIXELS);
-
+    
+    // Nothing to do
+    if(!parent->child_count)
+    {
+        return;
+    }
+    
     // Note(Leo): Children can only occupy width - padding pixels of space in the parent
     float p_width = parent->sizing.width.desired.size - (parent->sizing.width.padding1.size + parent->sizing.width.padding2.size);
     float p_width_accumulated = 0;
@@ -896,6 +907,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
                 
                 // width-grow space in a vertical layout is the remaining space either side of the element
                 float child_size = accumulate_child_axis(&children[i].sizing.width);
+                child_size += children[i].sizing.width.current;
                 float growth_space = (p_width - child_size) / grow_width_meaure_count;
                 growth_space = MAX(growth_space, 0.0f);
                 grow_width_meaure_count = 0; // Reset so other element can know how many growth measurements they have
@@ -929,8 +941,9 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             {
                 assert(dir == LayoutDirection::HORIZONTAL);
                 
-                // width-grow space in a vertical layout is the remaining space either side of the element
+                // height-grow space in a horizontal layout is the remaining space above/below the element
                 float child_size = accumulate_child_axis(&children[i].sizing.height);
+                child_size += children[i].sizing.height.current;
                 float growth_space = (p_height - child_size) / grow_height_meaure_count;
                 growth_space = MAX(growth_space, 0.0f);
                 grow_height_meaure_count = 0; // Reset so other element can know how many growth measurements they have
@@ -940,12 +953,13 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
         }
     }
     
-    // Note(Leo): Since the required min size of growth elements is included in the p_width_accumulated this is the 
-    //            extra leftover space. IF this is less than zero that indicates a overflow of the parent.
-    float growth_space = p_width - p_width_accumulated;
     
     if(grow_width_meaure_count)
     {
+        // Note(Leo): Since the required min size of growth elements is included in the p_width_accumulated this is the 
+        //            extra leftover space. IF this is less than zero that indicates a overflow of the parent.
+        float growth_space = p_width - p_width_accumulated;
+        
         // Divying up the extra space if there is any
         growth_space = MAX(growth_space / grow_width_meaure_count, 0.0f);
         
@@ -958,7 +972,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     {
         // Note(Leo): Since the required min size of growth elements is included in the p_height_accumulated this
         //            is the extra leftover space. IF this is less than zero that indicates a overflow of the parent.
-        growth_space = p_height - p_height_accumulated;
+        float growth_space = p_height - p_height_accumulated;
         
         // Divying up the extra space if there is any
         growth_space = MAX(growth_space / grow_height_meaure_count, 0.0f);
@@ -992,8 +1006,7 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
     context.shape_arena = shape_arena;
     context.layout_element_arena = &layout_element_arena;
 
-    // Note(Leo): Root has to have its sizes set as pixels before calling unpack on it since that also runs the first
-    //            shaping pass.
+    // Note(Leo): Root has to have its sizes set as pixels before going into the main loop
     root_element->working_style.width.type = MeasurementType::PIXELS;
     root_element->working_style.width.size = (float)window_width;
     
@@ -1046,27 +1059,30 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
     
     // Note(Leo): Leave space for alignment
     void* final_pass_memory = Alloc(context.shape_arena, (element_count + 1)*sizeof(LayoutElement*));
-    LayoutElement** final_pass_visit = align_mem(final_pass_memory, LayoutElement*);
+    Arena final_pass_visit = CreateArenaWith(align_mem(final_pass_memory, LayoutElement*), element_count*sizeof(LayoutElement*), sizeof(LayoutElement*));
     
     // Iterating forward from the root element in a depth first way.    
     // We shape all the elements of root then only push the ones inside of root's bounding box onto the stack of children.
     // Each time we visit a child we shape all of its elements and cull based on the bouding box of the child. 
     // This helps with not visiting elements that arent visible
-    final_pass_visit[0] = (LayoutElement*)context.layout_element_arena->mapped_address; // Grabbing the root element
+    LayoutElement** visit_elements = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
+    *visit_elements = (LayoutElement*)context.layout_element_arena->mapped_address; // Grabbing the root element
+    
+    curr_element = *visit_elements;
     uint32_t visit_count = 1;
     
     // Setup the bounds for the root
-    final_pass_visit[0]->bounds.x = 0;
-    final_pass_visit[0]->bounds.y = 0;
+    curr_element->bounds.x = 0;
+    curr_element->bounds.y = 0;
     
-    final_pass_visit[0]->bounds.width = final_pass_visit[0]->sizing.width.desired.size;
-    final_pass_visit[0]->bounds.height = final_pass_visit[0]->sizing.height.desired.size;
+    curr_element->bounds.width = curr_element->sizing.width.desired.size;
+    curr_element->bounds.height = curr_element->sizing.height.desired.size;
     
     
-    for(int visit_index = 0; visit_count > 0; visit_index++)
+    while(visit_count)
     {
         visit_count--;
-        curr_element = final_pass_visit[visit_index];
+        curr_element = *visit_elements;
         shape_final_pass(&context, curr_element);
         
         LayoutDirection dir = curr_element->dir;
@@ -1128,7 +1144,9 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
             // Only add elements to be visited if they will be visisble
             if(boxes_intersect(&inner_bounds, &curr_element->children[i].bounds, &curr_element->children[i].bounds))
             {
-                final_pass_visit[visit_count] = &curr_element->children[i];
+                // Note(Leo): +1 since we want to write to the 
+                LayoutElement** added_visit = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
+                *added_visit = &curr_element->children[i];
                 visit_count++;
             }
             
@@ -1153,5 +1171,7 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
                 cursor_x -= curr_element->children[i].sizing.width.margin1.size;
             }
         }
+        
+        visit_elements++;
     }
 }

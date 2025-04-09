@@ -226,7 +226,7 @@ const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UI
 
 
 // Note(Leo): Area height and width are expected in pixels
-void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, char** utf8_buffers, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height)
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height)
 {
     // Used to mark the end of our sequence of glyphs
     #define mark_end() Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), zero())
@@ -247,11 +247,13 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
     
     for(int i = 0; i < text_block_count; i++)
     {
-        char* utf8_buffer = utf8_buffers[i];
+        char* utf8_buffer = utf8_strings[i].value;
+        uint32_t buffer_length = utf8_strings[i].len;
         FontHandle font_handle = font_handles[i];
         uint16_t font_size = font_sizes[i];
+                
         hb_buffer_reset(font_platform.shaping_buffer);
-        hb_buffer_add_utf8(font_platform.shaping_buffer, utf8_buffer, -1, 0, -1);
+        hb_buffer_add_utf8(font_platform.shaping_buffer, utf8_buffer, buffer_length, 0, -1);
         hb_buffer_guess_segment_properties(font_platform.shaping_buffer);
             
         loaded_font_handle* used_font = platform_get_font(font_handle);

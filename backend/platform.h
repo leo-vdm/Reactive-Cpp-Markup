@@ -233,7 +233,7 @@ struct FontPlatformShapedText
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
-void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, char** utf8_buffers, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
 FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();
