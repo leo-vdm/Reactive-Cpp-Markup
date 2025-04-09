@@ -2,12 +2,12 @@
 #include <cstring>
 #include <map>
 
+#define STRING_VIEW_IMPLEMENTATION 1
 #include "compiler.h"
 using namespace Compiler;
 #include "file_system.h"
 #include "arena_string.h"
 
-void print_tokens(Arena* tokens, Arena* token_values);
 void print_binding(int binding_id, Arena* bindings_arena);
 void print_attribute(Attribute* attribute, Arena* bindings_arena);
 void print_ast(AST* ast);
@@ -197,7 +197,8 @@ int main(int argc, char* argv[])
         // Register the generated code-file to the DOM attatchment
         register_to_dom_attatchment(dom_attatchment, comp_name);
         
-        int comp_id = RegisterComponent(comp_name, name_len, &state);
+        StringView comp_name_view = {comp_name, (uint32_t)name_len};
+        int comp_id = RegisterComponent(&comp_name_view, &state);
         
         FILE* component_file = fopen(curr->file_path, "r");
         SplitFileNames component_sources = SeperateSource(component_file, &source_search_values, curr->file_name, build_dir);
@@ -416,16 +417,13 @@ int main(int argc, char* argv[])
 std::map<std::string, int> registered_component_map = {};
 std::map<std::string, int> registered_page_map = {};
 
-int RegisterComponent(char* name, int name_length, CompilerState* state)
+int RegisterComponent(StringView* name, CompilerState* state)
 {
-    std::string name_string;
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // +1 to fit \0
-    memcpy(terminated_name, name, name_length*sizeof(char));
-    terminated_name[name_length] = '\0';
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero()); // +1 to fit \0
+    memcpy(terminated_name, name->value, name->len*sizeof(char));
+    terminated_name[name->len] = '\0';
     
-    name_string = terminated_name;
-    
-    auto search = registered_component_map.find(name_string);
+    auto search = registered_component_map.find((const char*)terminated_name);
     
     // Component already registered, return its ID
     if(search != registered_component_map.end())
@@ -435,7 +433,8 @@ int RegisterComponent(char* name, int name_length, CompilerState* state)
     }
     
     // Register the new component
-    registered_component_map[name_string] = state->next_file_id;
+    //registered_component_map[name_string] = state->next_file_id;
+    registered_component_map.insert({(const char*)terminated_name, state->next_file_id});
     state->next_file_id++;
     DeAllocScratch(terminated_name);
     
@@ -450,139 +449,3 @@ void register_to_dom_attatchment(FILE* dom_attatchment, char* added_file_name)
     fprintf(dom_attatchment, DOM_ATTATCHMENT_CODE_INCLUDE, added_file_name, added_file_name);
     
 }
-
-void print_tokens(Arena* tokens, Arena* token_values)
-{   
-    const char* token_names[] = {  "OPEN_TAG", "CLOSE_TAG", "OPEN_BRACKET", "CLOSE_BRACKET", "EQUALS", "QUOTE", "SLASH", "TEXT", "TAG_START", "TAG_END", "TAG_ATTRIBUTE", "ATTRIBUTE_IDENTIFIER", "ATTRIBUTE_VALUE", "COLON", "SEMI_COLON", "COMMA", "OPEN PAREN", "CLOSE PAREN", "DIRECTIVE", "NEWLINE", "END"};
-    Token* curr_token = (Token*)(tokens->mapped_address);
-    while(curr_token->type != TokenType::END)
-    {
-        printf("Current token: %s\n", token_names[(int)curr_token->type]);
-        printf("Current token value:\n");
-        
-        if(curr_token->type == TokenType::TAG_ATTRIBUTE && token_values)
-        {
-            printf("Hit Attribute");
-            Token* base_attribute = TokenizeAttribute(tokens, token_values, curr_token);
-            while(base_attribute->type != TokenType::END)
-            {
-                printf("\nCurrent attribute token: %s\n", token_names[(int)base_attribute->type]);
-                printf("Current attribute token value:\n");
-                
-                char* value_base = (char*)base_attribute->token_value;
-                for(int i = 0; i < base_attribute->value_length; i++){
-                    putchar(*value_base);
-                    value_base++;
-                }
-                ;
-                base_attribute++;
-            }
-            printf("\nFinished attribute\n");
-        }
-        
-        char* value_base = (char*)curr_token->token_value;
-        for(int i = 0; i < curr_token->value_length; i++){
-            putchar(*value_base);
-            value_base++;
-        }
-        
-        printf("\n");
-        
-        curr_token++;
-    }
-
-}
-
-#if 0
-void print_attribute(Attribute* attribute, Arena* bindings_arena)
-{
-    const char* attribute_names[] = {"NONE", "CUSTOM", "TEXT", "STYLE", "CLASS"};
-    char* value_container = (char*)AllocScratch((attribute->value_length) + 1, no_zero());
-    memcpy(value_container, attribute->attribute_value, attribute->value_length);
-    value_container[attribute->Text.value_length] = '\0';
-    
-    printf("Type: %s, Value: \"%s\"\n", attribute_names[(int)attribute->type], value_container);
-    
-    if(attribute->binding_id != 0)
-    {
-        printf("Binding ID: %d Binding position: %d\n", attribute->binding_id, attribute->binding_position);
-        //print_binding(attribute->binding_id, bindings_arena);
-    }
-    
-    DeAllocScratch(value_container);
-}
-
-void print_ast(AST* ast)
-{   
-    const char* tag_names[] = { "ROOT", "TEXT", "DIV", "CUSTOM"};
-    Tag* curr_tag = ast->root_tag;
-    while(curr_tag)
-    {
-        
-        printf("Current tag: %s\n", tag_names[(int)curr_tag->type]);
-        printf("ID: %d\n", curr_tag->tag_id);
-        
-        if(curr_tag->num_attributes != 0)
-        {
-            for(int i = 0; i < curr_tag->num_attributes; i++)
-            print_attribute(curr_tag->first_attribute + i, ast->registered_bindings);
-        }
-        
-        
-        if(curr_tag->first_child)
-        {
-            printf("First child: %d\n", curr_tag->first_child->tag_id);
-            curr_tag = curr_tag->first_child;
-            continue;
-        }
-        if(!curr_tag->next_sibling){
-            while(!curr_tag->next_sibling)
-            {
-                // Got back to root
-                if(!curr_tag->parent)
-                {
-                    return;
-                }
-                curr_tag = curr_tag->parent;            
-            }
-            curr_tag = curr_tag->next_sibling;
-            continue;
-        }
-        curr_tag = curr_tag->next_sibling;
-        
-    }
-
-}
-
-void print_styles(LocalStyles* glob_styles)
-{
-    printf("\n\t--== Selectors ==--");
-    Selector* curr_selector = ((Selector*)glob_styles->selectors->mapped_address);
-    while(curr_selector->global_id != 0)
-    {
-        char* name = (char*)AllocScratch((curr_selector->name_length + 1)*sizeof(char), no_zero());
-        memcpy(name, curr_selector->name, curr_selector->name_length);
-        name[curr_selector->name_length] = '\0';
-        
-        printf("\n\t-INFO-\n");
-        printf("\tName: %s\n", name);
-        printf("\tID: %d\n", curr_selector->global_id);
-        printf("\t# of styles: %d\n", curr_selector->num_styles);
-        DeAllocScratch(name);
-        curr_selector++;
-    }
-    
-    printf("\n\t--== Styles ==--");
-    Style* curr_style = ((Style*)glob_styles->styles->mapped_address);
-    while(curr_style->global_id != 0)
-    {   
-        printf("\n\t-INFO-\n");
-        printf("\tID: %d\n", curr_style->global_id);
-        printf("\tWidth=%f/Height=%f\n", curr_style->width.size, curr_style->height.size);
-        printf("\t(Max)Width=%f/Height=%f\n", curr_style->max_width.size, curr_style->max_height.size);
-        
-        curr_style++;
-    }
-}
-
-#endif

@@ -11,7 +11,7 @@ int push_val_to_combined_arena(Arena* combined_values, char* value, int value_le
 void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name, int file_id, int flags)
 {
     //Note(Leo): we +1 every index so that index 0 can represent NULL ptrs, minus 1 off the index when loading to account
-    #define get_index(arena_ptr, pointer) ((uintptr_t)pointer ? ((((uintptr_t)pointer) -  arena_ptr->mapped_address)/sizeof(*pointer)) + 1 : 0)
+    #define get_index(arena_ptr, pointer) ((uintptr_t)pointer ? ((((uintptr_t)pointer) - arena_ptr->mapped_address)/sizeof(*pointer)) + 1 : 0)
 
     int current_index = 0; // Current index in bytes into the file, PageFileHeader is always at zero
     FILE* out_file = fopen(file_name, "wb+");
@@ -26,8 +26,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     // Note(Leo): index zero of the values arena should be a zero for any NULL values to point too
     Alloc(&combined_values_arena, sizeof(char)); 
     
-    PageFileHeader header = PageFileHeader();
-    memset(&header, 0, sizeof(PageFileHeader));
+    PageFileHeader header = {};
         
     fwrite(&header, sizeof(PageFileHeader), 1, out_file);
     current_index += sizeof(PageFileHeader);
@@ -99,19 +98,19 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     header.first_style_index = current_index;
     
     Style* curr_style = (Style*)saved_styles->styles->mapped_address;
-    SavedStyle added_style;
     
     while(curr_style->global_id != 0)
     {
-        added_style.global_id = curr_style->global_id;
-        added_style.width = curr_style->width;
-        added_style.max_width = curr_style->max_width;
-        added_style.height = curr_style->height;
-        added_style.width = curr_style->max_height;
+        StringView style_name = {};
+        // Grab the string view before writing to the font name members since they are all in a union
+        memcpy(&style_name, &curr_style->font_name, sizeof(StringView));
         
-        fwrite(&added_style, sizeof(SavedStyle), 1, out_file);
+        curr_style->saved_font_name.index = push_val_to_combined_arena(&combined_values_arena, style_name.value, style_name.len);
+        curr_style->saved_font_name.length = style_name.len;
+        
+        fwrite(curr_style, sizeof(Style), 1, out_file);
             
-        current_index += sizeof(SavedStyle);
+        current_index += sizeof(Style);
         header.style_count++;
         curr_style++;
     }
@@ -154,7 +153,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
 }
 
-#define debug_load 0
+#define debug_load 1
 // Note(Leo): We cannot acces values to print for debugging until the end of the FN since thats when the values get read in.
 LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
@@ -275,19 +274,20 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     printf("\n--== Styles ==--\n");
 #endif
     
-    SavedStyle read_style;
     Style* added_style;
     
     for(int i = 0; i < header.style_count; i++)
     {
-        fread(&read_style, sizeof(SavedStyle), 1, file);
         added_style = (Style*)Alloc(styles, sizeof(Style));
+        fread(added_style, sizeof(Style), 1, file);
         
-        added_style->global_id = read_style.global_id;
-        added_style->width = read_style.width;
-        added_style->max_width = read_style.max_width;
-        added_style->height = read_style.height;
-        added_style->max_height = read_style.max_height;
+        // Grabbing the length and pointer to the value for the font name before writing to the stringview since they
+        //      are in a union
+        int name_len = added_style->saved_font_name.length;
+        char* name_value = get_pointer(base_value, added_style->saved_font_name.index, char);
+        added_style->font_name.value = name_value;
+        added_style->font_name.len = name_len;
+        
 #if debug_load
         printf(" --Style--\n");
         printf("\tGlobal Id: %d\n", added_style->global_id);

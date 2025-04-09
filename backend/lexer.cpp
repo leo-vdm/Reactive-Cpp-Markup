@@ -86,16 +86,16 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
 
     Token* last_token = push_token();
     last_token->type = TokenType::END; // Mark the EOF with a token.
-    last_token->token_value = NULL;
+    last_token->body.value = NULL;
 }
 
 Token* TokenizeAttribute(Arena* tokens_arena, Arena* token_values_arena, Token* attribute_token)
 {
     #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
     
-    char* current_char = (char*)attribute_token->token_value;
+    char* current_char = (char*)attribute_token->body.value;
 
-    char* boundary = current_char + (attribute_token->value_length);
+    char* boundary = current_char + (attribute_token->body.len);
     
     Token* new_token;
     Token* first_token = (Token*)tokens_arena->next_address;
@@ -147,7 +147,7 @@ Token* TokenizeAttribute(Arena* tokens_arena, Arena* token_values_arena, Token* 
     // Mark the end of this attribute with a token
     new_token = push_token();
     new_token->type = TokenType::END;
-    new_token->token_value = NULL;
+    new_token->body.value = NULL;
     
     return first_token;
 }
@@ -235,12 +235,16 @@ void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 break;
             case('\t'):
                 break;
+            case(','):
+                new_token = push_token();
+                new_token->type = TokenType::COMMA;
+                break;
             default: // Loose text.
                 new_token = push_token();
                 new_token->type = TokenType::TEXT;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token, "{}\":;", 5);
+                aggregate_text(src, token_values_arena, new_token, "{}\":;,", 6);
                 break;
                 
         }
@@ -249,7 +253,7 @@ void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
 
     Token* last_token = push_token();
     last_token->type = TokenType::END; // Mark the EOF with a token.
-    last_token->token_value = NULL;
+    last_token->body.value = NULL;
 }
 
 void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
@@ -326,7 +330,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
     
     Token* last_token = push_token();
     last_token->type = TokenType::END; // Mark the EOF with a token.
-    last_token->token_value = NULL;
+    last_token->body.value = NULL;
 }
 
 Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char* src, int src_length)
@@ -383,7 +387,7 @@ Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char*
     
     Token* last_token = push_token();
     last_token->type = TokenType::END; // Mark the EOF with a token.
-    last_token->token_value = NULL;
+    last_token->body.value = NULL;
     
     return first_token;
 }
@@ -392,9 +396,9 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
 {
     #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
     
-    char* current_char = (char*)directive_token->token_value;
+    char* current_char = (char*)directive_token->body.value;
 
-    char* boundary = current_char + (directive_token->value_length);
+    char* boundary = current_char + (directive_token->body.len);
     
     Token* new_token;
     Token* first_token = (Token*)tokens_arena->next_address;
@@ -442,7 +446,7 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
     // Mark the end of this directive with a token
     new_token = push_token();
     new_token->type = TokenType::END;
-    new_token->token_value = NULL;
+    new_token->body.value = NULL;
     
     return first_token;
 }
@@ -453,7 +457,7 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
 int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length)
 {
     int value_length = 0;
-    void* value_start = (void*)values_arena->next_address; // Assume we will get the next address
+    char* value_start = (char*)values_arena->next_address; // Assume we will get the next address
     
     char* current_char = start_char;
     while(current_char < max_char)
@@ -464,8 +468,8 @@ int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token*
         {
             if(*current_char == stop_chars[i])
             {   
-                concerned_token->value_length = value_length;
-                concerned_token->token_value = value_start;
+                concerned_token->body.len = value_length;
+                concerned_token->body.value = value_start;
                 
                 return value_length;
             }        
@@ -477,8 +481,8 @@ int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token*
     }
     
     // Got to end without stopping
-    concerned_token->value_length = value_length;
-    concerned_token->token_value = value_start;
+    concerned_token->body.len = value_length;
+    concerned_token->body.value = value_start;
     return value_length;
 }
 
@@ -486,7 +490,7 @@ int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token*
 int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length)
 {
     int value_length = 0;
-    void* value_start = (void*)values_arena->next_address; // Cheat and assume the address we will get is the next
+    char* value_start = (char*)values_arena->next_address; // Cheat and assume the address we will get is the next
     
     int next_char;
     while((next_char = fgetc(src)) != EOF)
@@ -497,8 +501,8 @@ int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char*
         {
             if(next_char == stop_chars[i])
             {   
-                concerned_token->value_length = value_length;
-                concerned_token->token_value = value_start;
+                concerned_token->body.len = value_length;
+                concerned_token->body.value = value_start;
                 ungetc(next_char, src); // Put the char back
                 
                 return value_length;
@@ -510,8 +514,8 @@ int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char*
     }
     
     // Got to end without stopping
-    concerned_token->value_length = value_length;
-    concerned_token->token_value = value_start;
+    concerned_token->body.len = value_length;
+    concerned_token->body.value = value_start;
     return value_length;
 }
 

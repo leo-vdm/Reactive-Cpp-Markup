@@ -28,16 +28,6 @@ struct SavedSelector
     int num_styles;
 };
 
-
-struct SavedStyle
-{
-    int global_id;
-    
-    Compiler::Measurement width, height;
-    Compiler::Measurement max_width, max_height;
-};
-
-
 struct SavedTag
 {
     Compiler::TagType type;

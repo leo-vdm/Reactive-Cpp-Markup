@@ -329,7 +329,7 @@ int main()
         }
 
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom);
+        RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, curr_window->width, curr_window->height);
         ResetArena(temp_renderque);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         

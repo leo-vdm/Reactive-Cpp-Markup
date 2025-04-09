@@ -12,8 +12,8 @@ int curr_tag_id;
 static bool expect_eat(TokenType expected_type);
 Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindings_arena, Arena* values_arena, Tag* parent_tag, Token* attribute_start_token, CompilerState* state);
 void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, CompilerState* state);
-StyleFieldType parse_field_name(char* name, int name_length);
-Measurement parse_size_field(char* field_value, int field_value_length);
+StyleFieldType parse_field_name(StringView* name);
+Measurement parse_size_field(StringView* expression);
 void parse_style_expr(Style* target);
 void clear_registered_bindings();
 
@@ -75,14 +75,14 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 } 
                 
                 // Find the tag's type
-                curr_tag->type = GetTagFromName((char*)curr_token->token_value, curr_token->value_length);
+                curr_tag->type = GetTagFromName(&curr_token->body);
                 
                 // Zero indicates this tag is not a component
                 int custom_component_id = 0;
                 
                 if(curr_tag->type == TagType::CUSTOM)
                 {
-                    custom_component_id = RegisterComponent((char*)curr_token->token_value, curr_token->value_length, state);
+                    custom_component_id = RegisterComponent(&curr_token->body, state);
                 }
                 
                 curr_tag->tag_id = curr_tag_id++;
@@ -121,8 +121,6 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 {
                     printf("Expected tag closure, got %s instead!\n", token_names[(int)curr_token->type]);
                 }
-                
-                
             
                 break;
                 }
@@ -130,7 +128,8 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 {
                 TagType expected_type; 
                 
-                if(has_ended){ // Indicates ending the parent element
+                if(has_ended)
+                {   // Indicates ending the parent element
                     //Note(Leo): Since we are ending the parent element, the type of the closing tag should match the parent
                     expected_type = curr_tag->parent->type;
                     
@@ -146,14 +145,10 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                     expected_type = curr_tag->type;
                 }
                 
-                if(curr_tag->type != TagType::TEXT && expected_type != GetTagFromName((char*)curr_token->token_value, curr_token->value_length))
+                if(curr_tag->type != TagType::TEXT && expected_type != GetTagFromName(&curr_token->body))
                 {
-                    char* temp = (char*)AllocScratch(curr_token->value_length + 1, no_zero());
-                    memcpy(temp, curr_token->token_value, curr_token->value_length);
-                    temp[curr_token->value_length] = '\0';
                     printf("Unexpected tag end!\n");
-                    printf("Expected \"%s\" but got \"%s\"\n", tag_type_names[(int)curr_tag->type], temp);
-                    DeAllocScratch(temp);
+                    printf("Expected \"%s\" but got \"%.*s\"\n", tag_type_names[(int)curr_tag->type], curr_token->body.len, curr_token->body.value);
                 }
                 
                 break;
@@ -186,10 +181,10 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 
                 Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute), zero());
                 text_content->type = AttributeType::TEXT;
-                text_content->Text.value = (char*)Alloc(target->values, curr_token->value_length*sizeof(char));
-                text_content->Text.value_length = curr_token->value_length;
+                text_content->Text.value = (char*)Alloc(target->values, curr_token->body.len*sizeof(char));
+                text_content->Text.value_length = curr_token->body.len;
                  
-                memcpy((void*)text_content->Text.value, curr_token->token_value, curr_token->value_length*sizeof(char));
+                memcpy((void*)text_content->Text.value, curr_token->body.value, curr_token->body.len*sizeof(char));
                 
                 curr_tag->first_attribute = text_content;
                 break;
@@ -234,7 +229,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 text_content->Text.value_length = 0;
                 text_content->Text.binding_position = 0;
                 
-                text_content->Text.binding_id = RegisterBindingByName(target->registered_bindings, target->values, (char*)curr_token->token_value, curr_token->value_length, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                text_content->Text.binding_id = RegisterBindingByName(target->registered_bindings, target->values, &curr_token->body, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                                 
                 curr_tag->first_attribute = text_content;
                 
@@ -277,25 +272,16 @@ std::map<std::string, AttributeType> attribute_map =
 
 std::map<std::string, int> registered_binding_map = {};
 
-TagType GetTagFromName(const char* value, int value_length)
-{
-    if(value_length > MAX_TAG_NAME_LENGTH){
-        return TagType::CUSTOM; 
-    }
+TagType GetTagFromName(StringView* name)
+{   
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero());
+    memcpy(terminated_name, name->value, name->len*sizeof(char));
     
-    char* name = (char*)AllocScratch((MAX_TAG_NAME_LENGTH + 1)*sizeof(char), no_zero());
-    memcpy(name, value, value_length*sizeof(char));
+    terminated_name[name->len] = '\0';
+        
+    auto search = tag_map.find((const char*)terminated_name);
     
-    name[value_length] = '\0';
-    std::string name_string;
-    name_string = name; // Convert name into a string
-    
-    //printf("Searching for tag: %s\nLength:%d\n", name, value_length);
-    //std::cout << name_string << std::endl;
-    
-    auto search = tag_map.find(name_string);
-    
-    DeAllocScratch(name);
+    DeAllocScratch(terminated_name);
     
     if(search != tag_map.end()){
         return search->second;
@@ -303,26 +289,16 @@ TagType GetTagFromName(const char* value, int value_length)
     return TagType::CUSTOM;
 }
 
-AttributeType GetAttributeFromName(char* value, int value_length)
-{
-    if(value_length > MAX_ATTRIBUTE_NAME_LENGTH){
-        return AttributeType::CUSTOM; 
-    }
+AttributeType GetAttributeFromName(StringView* name)
+{   
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero());
+    memcpy(terminated_name, name->value, name->len*sizeof(char));
     
-    //char name[MAX_ATTRIBUTE_NAME_LENGTH + 1]; // extra charachter to fit the NULL terminator
-    char* name = (char*)AllocScratch((MAX_ATTRIBUTE_NAME_LENGTH + 1)*sizeof(char), no_zero());
-    memcpy(name, value, value_length*sizeof(char));
+    terminated_name[name->len] = '\0';
+        
+    auto search = attribute_map.find((const char*)terminated_name);
     
-    name[value_length] = '\0';
-    std::string name_string;
-    name_string = name; // Convert name into a string
-
-//    printf("Searching for attribute: %s\nLength:%d\nSTD representation: ", name, value_length);
-//    std::cout << name_string << std::endl;
-    
-    auto search = attribute_map.find(name_string);
-    
-    DeAllocScratch(name);
+    DeAllocScratch(terminated_name);
     
     if(search != attribute_map.end()){
         return search->second;
@@ -330,16 +306,14 @@ AttributeType GetAttributeFromName(char* value, int value_length)
     return AttributeType::CUSTOM;
 }
 
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* value, int value_length, int tag_id, RegisteredBindingType type, CompilerState* state)
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, RegisteredBindingType type, CompilerState* state)
 {
-    char* name = (char*)AllocScratch((value_length + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
-    memcpy(name, value, value_length*sizeof(char)); 
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, name->value, name->len*sizeof(char)); 
     
-    name[value_length] = '\0';
-    std::string name_string;
-    name_string = name; // Convert name into a string
-        
-    auto search = registered_binding_map.find(name_string);
+    terminated_name[name->len] = '\0';
+     
+    auto search = registered_binding_map.find((const char*)terminated_name);
     
     // If the binding is already registered, return its ID
     if(search != registered_binding_map.end()){
@@ -351,32 +325,32 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* valu
         existing_binding->num_registered = (existing_binding->num_registered + 1) % MAX_TAGS_PER_BINDING;
         if(existing_binding->num_registered == 0) // Indicates that the index passed over modulo
         {
-            printf("Be careful, binding with name %s has gone over its registered tag limit!", name);
+            printf("Be careful, binding with name %s has gone over its registered tag limit!", terminated_name);
         }
         existing_binding->registered_tag_ids[existing_binding->num_registered] = tag_id;
         
         DeAllocScratch(name);
         return search->second;
     }
+    
     // Register the binding since it doesnt exist
     RegisteredBinding* new_binding = (RegisteredBinding*)Alloc(bindings_arena, sizeof(RegisteredBinding));
     new_binding->binding_id = state->next_bound_expr_id;
     state->next_bound_expr_id++;
     
-    char* saved_name = (char*)Alloc(values_arena, value_length*sizeof(char));
-    memcpy(saved_name, value, value_length*sizeof(char));
-    
-    
+    char* saved_name = (char*)Alloc(values_arena, name->len*sizeof(char));
+    memcpy(saved_name, name->value, name->len*sizeof(char));
+
     new_binding->binding_name = saved_name;
-    new_binding->name_length = value_length;
+    new_binding->name_length = name->len;
     
     new_binding->num_registered = 1;
     new_binding->registered_tag_ids[0] = tag_id;
     
     new_binding->type = type;
     
-    registered_binding_map[name_string] = new_binding->binding_id;
-    DeAllocScratch(name);
+    registered_binding_map.insert({(const char*)terminated_name, new_binding->binding_id});
+    DeAllocScratch(terminated_name);
     return new_binding->binding_id;
 }
 
@@ -441,17 +415,13 @@ char* ParseStyleStub()
     return NULL;
 }
 
-int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, int style_id, int global_prefix, CompilerState* state)
+int RegisterSelectorByName(Compiler::LocalStyles* target, StringView* name, int style_id, int global_prefix, Compiler::CompilerState* state)
 {
-    char* name = (char*)AllocScratch((value_length + 1) * sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
-    memcpy(name, value, value_length*sizeof(char)); 
-
+    char* terminated_name = (char*)AllocScratch((name->len + 1) * sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, name->value, name->len*sizeof(char)); 
+    terminated_name[name->len] = '\0';
     
-    name[value_length] = '\0';
-    std::string name_string;
-    name_string = name; // Convert name into a string
-    
-    auto search = registered_selector_map.find(name_string);
+    auto search = registered_selector_map.find((const char*)terminated_name);
     
     // If the binding is already registered, return its ID
     if(search != registered_selector_map.end()){
@@ -463,10 +433,10 @@ int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, i
         found_selector->num_styles = (found_selector->num_styles + 1) % MAX_STYLES_PER_SELECTOR;
         if(found_selector->num_styles == 0) // Indicates that the index passed over modulo
         {
-            printf("Be careful, selector with name %s has gone over its registered style limit!", name);
+            printf("Be careful, selector with name %s has gone over its registered style limit!", terminated_name);
         }
         found_selector->style_ids[found_selector->num_styles] = style_id;
-        DeAllocScratch(name);
+        DeAllocScratch(terminated_name);
         
         return search->second;
     }
@@ -478,11 +448,11 @@ int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, i
     
     // Create the global name for the selector
     // get length the name wants
-    int global_name_length = snprintf(NULL, 0, "%d-%s", global_prefix, name);
+    int global_name_length = snprintf(NULL, 0, "%d-%s", global_prefix, terminated_name);
     
     char* global_name = (char*)Alloc(target->selector_values, (global_name_length + 1)*sizeof(char)); // +1 to fit \0
 
-    sprintf(global_name, "%d-%s", global_prefix, name);
+    sprintf(global_name, "%d-%s", global_prefix, terminated_name);
 
     new_selector->name = global_name;
     new_selector->name_length = global_name_length;
@@ -491,8 +461,8 @@ int RegisterSelectorByName(LocalStyles* target, char* value, int value_length, i
     new_selector->style_ids[0] = style_id;
     
     // Set the local selector
-    registered_selector_map[name_string] = new_selector->global_id;
-    DeAllocScratch(name);
+    registered_selector_map.insert({(const char*)terminated_name, new_selector->global_id});
+    DeAllocScratch(terminated_name);
     return new_selector->global_id;
 }
 
@@ -527,13 +497,13 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         }
         Attribute* new_attribute = push_attribute();
         // Determine the attribute type
-        new_attribute->type = GetAttributeFromName((char*)curr_token->token_value, curr_token->value_length);
+        new_attribute->type = GetAttributeFromName(&curr_token->body);
         
         if(new_attribute->type == AttributeType::CUSTOM)
         {
-            new_attribute->Custom.name_length = curr_token->value_length;
+            new_attribute->Custom.name_length = curr_token->body.len;
             new_attribute->Custom.name = (char*)Alloc(values_arena, new_attribute->Custom.name_length*sizeof(char));
-            memcpy(new_attribute->Custom.name, curr_token->token_value, new_attribute->Custom.name_length);
+            memcpy(new_attribute->Custom.name, curr_token->body.value, new_attribute->Custom.name_length);
         }
         
         if(!expect_eat(TokenType::EQUALS))
@@ -564,8 +534,8 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         // If text is first, handle that. Either text or a binding can be first.
         if(curr_token->type == TokenType::TEXT)
         {
-            front_length = curr_token->value_length;
-            front_value = (char*)curr_token->token_value;
+            front_length = curr_token->body.len;
+            front_value = curr_token->body.value;
             eat();
         }
         // If binding was first or after text handle it
@@ -580,12 +550,12 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             switch(new_attribute->type)
             {
             case(AttributeType::ON_CLICK):
-                new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
+                new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
                 break;
             default: // All the attribtues that just use a text like body
                 //new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 new_attribute->Text.binding_position = front_length;
-                new_attribute->Text.binding_id =  RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                new_attribute->Text.binding_id =  RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 break;
             }
             
@@ -598,8 +568,8 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         //if there is text after the binding handle it
         if(curr_token->type == TokenType::TEXT)
         {
-            back_length = curr_token->value_length;
-            back_value = (char*)curr_token->token_value;
+            back_length = curr_token->body.len;
+            back_value = curr_token->body.value;
             eat();
         }
         
@@ -653,11 +623,14 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
         switch(curr_token->type)
         {
             case(TokenType::TEXT):
-                RegisterSelectorByName(target, (char*)curr_token->token_value, curr_token->value_length, style_id, global_prefix, state);
+                {
+                StringView stripped_name = StripOuterWhitespace(&curr_token->body);
+                RegisterSelectorByName(target, &stripped_name, style_id, global_prefix, state);
                 eat();
                 if(curr_token->type == TokenType::COMMA) // Inidcates that there is another 
                 {
                     eat();
+                }
                 }
                 break;
             case(TokenType::OPEN_BRACKET):
@@ -670,49 +643,415 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
     }
 }
 
+std::map<std::string, TextWrapping> text_wrapping_map = 
+{
+    {"words", TextWrapping::WORDS},
+    {"break_words", TextWrapping::CHARS},
+    {"none", TextWrapping::NO},
+};
+
+TextWrapping parse_wrapping_expr(StringView* expression)
+{
+    char* terminated_name = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, expression->value, expression->len*sizeof(char));
+    
+    terminated_name[expression->len] = '\0';
+    auto search = text_wrapping_map.find((const char*)terminated_name);
+    
+    DeAllocScratch(terminated_name);
+    
+    if(search != text_wrapping_map.end())
+    {
+        return search->second;
+    }
+    return TextWrapping::NONE;
+}
+
+std::map<std::string, ClipStyle> clipping_name_map = 
+{
+    {"hidden", ClipStyle::HIDDEN},
+    {"scroll", ClipStyle::SCROLL},
+};
+
+ClipStyle parse_clipping_expr(StringView* expression)
+{
+    char* terminated_name = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, expression->value, expression->len*sizeof(char));
+    
+    terminated_name[expression->len] = '\0';
+    auto search = clipping_name_map.find((const char*)terminated_name);
+    
+    DeAllocScratch(terminated_name);
+    
+    if(search != clipping_name_map.end())
+    {
+        return search->second;
+    }
+    return ClipStyle::NONE;
+}
+
+float parse_color_channel(StringView* expression)
+{
+    char* terminated_expression = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero());
+    memcpy(terminated_expression, expression->value, expression->len);
+    terminated_expression[expression->len] = '\0';
+
+    float size = 0.0f;
+    
+    int result = sscanf(terminated_expression, "%f", &size);
+    if(result != 1)
+    {
+        return 0.0f;
+    }
+    
+    // Note(Leo): Color value should be given in the standard 0-255 rgb range which we convert here
+    return size / 255;
+}
+
+std::map<std::string, DisplayType> display_type_map = 
+{
+    {"normal", DisplayType::NORMAL},
+    {"hidden", DisplayType::HIDDEN},
+    {"manual", DisplayType::MANUAL},
+};
+
+DisplayType parse_display_type(StringView* expression)
+{
+    char* terminated_name = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, expression->value, expression->len*sizeof(char));
+    
+    terminated_name[expression->len] = '\0';
+    auto search = display_type_map.find((const char*)terminated_name);
+    
+    DeAllocScratch(terminated_name);
+    
+    if(search != display_type_map.end())
+    {
+        return search->second;
+    }
+    return DisplayType::NONE;
+}
+
 std::map<std::string, StyleFieldType> style_field_map = 
 {
+    {"text_wrapping", StyleFieldType::WRAPPING },
+    {"horizontal_clipping", StyleFieldType:: HORIZONTAL_CLIPPING},
+    {"vertical_clipping", StyleFieldType::VERTICAL_CLIPPING },
+    {"color", StyleFieldType::COLOR },
+    {"text_color", StyleFieldType::TEXT_COLOR },
+    {"display", StyleFieldType::DISPLAY },
     {"width", StyleFieldType::WIDTH },
     {"height", StyleFieldType::HEIGHT },
-    {"maxWidth", StyleFieldType::MAX_WIDTH },
-    {"maxWidth", StyleFieldType::MAX_WIDTH },
-    {"maxHeight", StyleFieldType::MAX_HEIGHT }
+    {"min_width", StyleFieldType::MIN_WIDTH },
+    {"min_height", StyleFieldType::MIN_HEIGHT },
+    {"max_width", StyleFieldType::MAX_WIDTH },
+    {"max_height", StyleFieldType::MAX_HEIGHT },
+    {"margin", StyleFieldType::MARGIN },
+    {"padding", StyleFieldType::PADDING },
+    {"corners", StyleFieldType::CORNERS },
+    {"font_size", StyleFieldType::FONT_SIZE },
+    {"font", StyleFieldType::FONT_NAME },
 };
 
 
 // Parses the style entry at the current token into the given style
 void parse_style_expr(Style* target)
 {
-    StyleFieldType expr_type = parse_field_name((char*)curr_token->token_value, curr_token->value_length);
+    StringView stripped_field = StripOuterWhitespace(&curr_token->body);
+    StyleFieldType expr_type = parse_field_name(&stripped_field);
     // After the field name should be a colon the the value
     if(!expect_eat(TokenType::COLON))
     {
         printf("Expected a : while parsing style!");
     }
-    // Expect the value decleration.
-    if(!expect_eat(TokenType::TEXT)){
-        printf("Expected a value decleration while parsing style!");
-    }
+
     switch(expr_type)
     {
         case(StyleFieldType::WIDTH):
         {
-            target->width = parse_size_field((char*)curr_token->token_value, curr_token->value_length);
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->width = parse_size_field(&curr_token->body);
             break;
         }
         case(StyleFieldType::HEIGHT):
         {
-            target->height = parse_size_field((char*)curr_token->token_value, curr_token->value_length);
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->height = parse_size_field(&curr_token->body);
+            break;
+        }
+        case(StyleFieldType::MIN_WIDTH):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->min_width = parse_size_field(&curr_token->body);
+            break;
+        }
+        case(StyleFieldType::MIN_HEIGHT):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->min_height = parse_size_field(&curr_token->body);
             break;
         }
         case(StyleFieldType::MAX_WIDTH):
         {
-            target->max_width = parse_size_field((char*)curr_token->token_value, curr_token->value_length);
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->max_width = parse_size_field(&curr_token->body);
             break;
         }
         case(StyleFieldType::MAX_HEIGHT):
         {
-            target->max_height = parse_size_field((char*)curr_token->token_value, curr_token->value_length);
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->max_height = parse_size_field(&curr_token->body);
+            break;
+        }
+        case(StyleFieldType::WRAPPING):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            StringView stripped = StripOuterWhitespace(&curr_token->body);
+            target->wrapping = parse_wrapping_expr(&stripped);
+            break;
+        }
+        case(StyleFieldType::HORIZONTAL_CLIPPING):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            StringView stripped = StripOuterWhitespace(&curr_token->body);
+            target->horizontal_clipping = parse_clipping_expr(&stripped);
+            break;
+        }
+        case(StyleFieldType::VERTICAL_CLIPPING):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            StringView stripped = StripOuterWhitespace(&curr_token->body);
+            target->vertical_clipping = parse_clipping_expr(&stripped);
+            break;
+        }
+        case(StyleFieldType::FONT_SIZE):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            StringView stripped = StripOuterWhitespace(&curr_token->body);
+            
+            Measurement parsed = parse_size_field(&stripped);
+            // Note(Leo): Font size should always be in pixels.
+            if(parsed.type != MeasurementType::PIXELS)
+            {
+                printf("Non-pixel measurement type given for font size!\n");
+                break;
+            }
+            
+            target->font_size = (uint16_t)parsed.size;
+            
+            //printf("Parsed a font-size: %dpx\n", target->font_size);
+            break;
+        }
+        case(StyleFieldType::FONT_NAME):
+        {
+            if(!expect_eat(TokenType::QUOTE)){ printf("Expected an opening quote while parsing style!\n"); }
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value while parsing font name!\n"); }
+            memcpy(&target->font_name, &curr_token->body, sizeof(StringView));
+            if(!expect_eat(TokenType::QUOTE)){ printf("Expected a closing quote while parsing style!\n"); }
+            
+            //printf("Parsed a font name: '%.*s'\n", target->font_name.len, target->font_name.value);
+            break;
+        }
+        case(StyleFieldType::COLOR):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->color.r = 0.0f;
+            target->color.g = 0.0f;
+            target->color.b = 0.0f;
+            target->color.a = 1.0f;
+            
+            for(int i = 0; i < 4; i++)
+            {
+                StringView stripped = StripOuterWhitespace(&curr_token->body);
+                target->color.c[i] = parse_color_channel(&stripped);
+                if(!expect_eat(TokenType::COMMA))
+                {
+                    // We mustve come to the end of the color decleration and hit a semicolon.
+                    curr_token--;
+                    break;
+                }
+                // If we there is another comma on the last iteration that means that the user has entered a fith value (which is wrong) 
+                if(i == 3)
+                {
+                    printf("Too many arguments while parsing color!\n");
+                    break;
+                }
+                if(!expect_eat(TokenType::TEXT))
+                {
+                    // Error since there was a comma but no further decleration.
+                    printf("Expected a value decleration after a , while parsing color\n");
+                    break;
+                }
+            }
+            
+            //printf("Parsed a color: rgba(%f, %f, %f, %f)\n", target->color.r, target->color.g, target->color.b, target->color.a);
+
+            break;
+        }
+        case(StyleFieldType::TEXT_COLOR):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->color.r = 0.0f;
+            target->color.g = 0.0f;
+            target->color.b = 0.0f;
+            target->color.a = 1.0f;
+            
+            // Note(Leo): Text cant have transparency so we only read 3 channels
+            for(int i = 0; i < 3; i++)
+            {
+                StringView stripped = StripOuterWhitespace(&curr_token->body);
+                target->color.c[i] = parse_color_channel(&stripped);
+                if(!expect_eat(TokenType::COMMA))
+                {
+                    // We mustve come to the end of the color decleration and hit a semicolon.
+                    curr_token--;
+                    break;
+                }
+                // If we there is another comma on the last iteration that means that the user has entered a fourth value (which is wrong) 
+                if(i == 2)
+                {
+                    printf("Too many arguments while parsing text color!\n");
+                    break;
+                }
+                if(!expect_eat(TokenType::TEXT))
+                {
+                    // Error since there was a comma but no further decleration.
+                    printf("Expected a value decleration after a , while parsing color\n");
+                    break;
+                }
+            }
+
+            //printf("Parsed a text color: rgb(%f, %f, %f)\n", target->color.r, target->color.g, target->color.b);
+            break;
+        }
+        case(StyleFieldType::DISPLAY):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            StringView stripped = StripOuterWhitespace(&curr_token->body);
+            target->display = parse_display_type(&stripped);
+            break;
+        }
+        case(StyleFieldType::MARGIN):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+        
+            target->margin.m[0].type = MeasurementType::PIXELS;
+            target->margin.m[1].type = MeasurementType::PIXELS;
+            target->margin.m[2].type = MeasurementType::PIXELS;
+            target->margin.m[3].type = MeasurementType::PIXELS;
+        
+            for(int i = 0; i < 4; i++)
+            {
+                StringView stripped = StripOuterWhitespace(&curr_token->body);
+                target->margin.m[i] = parse_size_field(&stripped);
+                if(target->margin.m[i].type == MeasurementType::NONE)
+                {
+                    printf("Invalid measurement while parsing margin!\n");
+                }
+                if(!expect_eat(TokenType::COMMA))
+                {
+                    // We mustve come to the end of the padding decleration and hit a semicolon.
+                    curr_token--;
+                    break;
+                }
+                // If we there is another comma on the last iteration that means that the user has entered a fith value (which is wrong) 
+                if(i == 3)
+                {
+                    printf("Too many arguments while parsing margin!\n");
+                    break;
+                }
+                if(!expect_eat(TokenType::TEXT))
+                {
+                    // Error since there was a comma but no further decleration.
+                    printf("Expected a value decleration after a , while parsing margin\n");
+                    break;
+                }
+            }
+
+            //printf("Parsed a margin: sizes(%f, %f, %f, %f)\n", target->margin.left.size, target->margin.right.size, target->margin.top.size, target->margin.bottom.size);
+            break;
+        }
+        case(StyleFieldType::PADDING):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            
+            target->padding.m[0].type = MeasurementType::PIXELS;
+            target->padding.m[1].type = MeasurementType::PIXELS;
+            target->padding.m[2].type = MeasurementType::PIXELS;
+            target->padding.m[3].type = MeasurementType::PIXELS;
+
+            for(int i = 0; i < 4; i++)
+            {
+                StringView stripped = StripOuterWhitespace(&curr_token->body);
+                target->padding.m[i] = parse_size_field(&stripped);
+                if(target->padding.m[i].type == MeasurementType::NONE)
+                {
+                    printf("Invalid measurement while parsing padding!\n");
+                }
+                if(!expect_eat(TokenType::COMMA))
+                {
+                    // We mustve come to the end of the padding decleration and hit a semicolon.
+                    curr_token--;
+                    break;
+                }
+                // If we there is another comma on the last iteration that means that the user has entered a fith value (which is wrong) 
+                if(i == 3)
+                {
+                    printf("Too many arguments while parsing padding!\n");
+                    break;
+                }
+                if(!expect_eat(TokenType::TEXT))
+                {
+                    // Error since there was a comma but no further decleration.
+                    printf("Expected a value decleration after a , while parsing padding\n");
+                    break;
+                }
+            }
+
+            //printf("Parsed a padding: sizes(%f, %f, %f, %f)\n", target->padding.left.size, target->padding.right.size, target->padding.top.size, target->padding.bottom.size);
+            
+            break;
+        }
+        case(StyleFieldType::CORNERS):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+
+            for(int i = 0; i < 4; i++)
+            {
+                StringView stripped = StripOuterWhitespace(&curr_token->body);
+                
+                // Note(Leo): Corner radii are always in pixels
+                Measurement parsed = parse_size_field(&stripped);
+                if(parsed.type != MeasurementType::PIXELS)
+                {
+                    printf("Non-pixel unit found while parsing style corners!");
+                    break;
+                }
+                
+                target->corners.c[i] = parsed.size;
+                
+                if(!expect_eat(TokenType::COMMA))
+                {
+                    // We mustve come to the end of the padding decleration and hit a semicolon.
+                    curr_token--;
+                    break;
+                }
+                // If we there is another comma on the last iteration that means that the user has entered a fith value (which is wrong) 
+                if(i == 3)
+                {
+                    printf("Too many arguments while parsing corners!\n");
+                    break;
+                }
+                if(!expect_eat(TokenType::TEXT))
+                {
+                    // Error since there was a comma but no further decleration.
+                    printf("Expected a value decleration after a , while parsing padding\n");
+                    break;
+                }
+            }
+
+            //printf("Parsed a corners: sizes(%f, %f, %f, %f)\n", target->corners.c[0], target->corners.c[1], target->corners.c[2], target->corners.c[3]);
+            
             break;
         }
         default:
@@ -726,22 +1065,15 @@ void parse_style_expr(Style* target)
     
 }
 
-StyleFieldType parse_field_name(char* name, int name_length)
+StyleFieldType parse_field_name(StringView* name)
 {
 
-    if(name_length > MAX_STYLE_FIELD_NAME_LENGTH)
-    {
-        return StyleFieldType::NONE; // Cannot be a correct one 
-    }
-
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
-    memcpy(terminated_name, name, name_length*sizeof(char));
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
+    memcpy(terminated_name, name->value, name->len*sizeof(char));
     
-    terminated_name[name_length] = '\0';
-    std::string name_string;
-    name_string = terminated_name; // Convert name into a string
+    terminated_name[name->len] = '\0';
         
-    auto search = style_field_map.find(name_string);
+    auto search = style_field_map.find((const char*)terminated_name);
     
     DeAllocScratch(terminated_name);
     
@@ -753,29 +1085,30 @@ StyleFieldType parse_field_name(char* name, int name_length)
 
 std::map<std::string, MeasurementType> measurement_unit_map = 
 {
-    { "auto", MeasurementType::AUTO },
+    { "fit", MeasurementType::FIT },
+    { "grow", MeasurementType::GROW },
     { "px", MeasurementType::PIXELS },
     { "%", MeasurementType::PERCENT },
 };
 
-Measurement parse_size_field(char* field_value, int field_value_length)
+Measurement parse_size_field(StringView* expression)
 {
     #define free_scratches() DeAllocScratch(terminated_field); DeAllocScratch(field_unit)
 
-    char* terminated_field = (char*)AllocScratch((field_value_length + 1)*sizeof(char), no_zero());
-    memcpy(terminated_field, field_value, field_value_length);
-    terminated_field[field_value_length] = '\0'; // Adding null terminator
-    char* field_unit = (char*)AllocScratch((field_value_length + 1)*sizeof(char), no_zero()); // At max sscanf will put the whole thing in the unit
+    char* terminated_field = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero());
+    memcpy(terminated_field, expression->value, expression->len);
+    terminated_field[expression->len] = '\0'; // Adding null terminator
+    
+    char* field_unit = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero()); // At max sscanf will put the whole thing in the unit
     float size = 0.0f;
     // Get unit in form (size)(unit) - eg 10px
     int result = sscanf(terminated_field, "%f%s", &size, field_unit);
     
-    Measurement parsed_measurement = Measurement();
+    Measurement parsed_measurement = {};
     
     if(result == 2) // Indicates sscanf was a success (there is a size and a unit)
     {
-        std::string unit_string = field_unit;
-        auto search = measurement_unit_map.find(unit_string);
+        auto search = measurement_unit_map.find((const char*)field_unit);
     
         if(search != measurement_unit_map.end()){
             parsed_measurement.type = search->second;
@@ -789,9 +1122,8 @@ Measurement parse_size_field(char* field_value, int field_value_length)
         return parsed_measurement;
     }
     
-    // Auto has only a unit and no size so check for that
-    std::string unit_string = terminated_field;
-    auto search = measurement_unit_map.find(unit_string);
+    // Fit and grow only have a unit and no quantity so check for that
+    auto search = measurement_unit_map.find((const char*)terminated_field);
     
     if(search != measurement_unit_map.end()){
         parsed_measurement.type = search->second;

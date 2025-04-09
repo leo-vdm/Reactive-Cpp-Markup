@@ -239,8 +239,8 @@ FontHandle FontPlatformGetFont(const char* font_name);
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
-void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom);
-void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count);
+void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height);
+void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height);
 
 #define USING_INSTREMENTATION 1
 // Instrumentation related stuff

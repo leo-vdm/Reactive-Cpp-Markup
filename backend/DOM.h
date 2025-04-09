@@ -97,99 +97,20 @@ struct Runtime
     
 };
 
-// Todo(Leo): Reflect these types in the compiler
-enum class MeasurementType
-{
-    NONE,
-    GROW, // Grow to fill the parent sharing free space with other grow measurements.
-            // Size is the relative weight of this grow measurement.
-    FIT, // Not allowed for margin/padding. Fit the parent around its children
-    PIXELS,
-    PERCENT, // Relative to parent for margin/padding aswell as width/height 
-             // Should be normalized to 0-1 range
-};
+typedef Compiler::MeasurementType MeasurementType;
+typedef Compiler::Measurement Measurement;
 
-struct Measurement {
-    float size;
-    MeasurementType type;
-};
+typedef Compiler::Padding Padding;
+typedef Compiler::Margin Margin;
+typedef Compiler::Corners Corners;
 
-struct Padding 
-{
-    Measurement left;
-    Measurement right;
-    Measurement top;
-    Measurement bottom;
-};
+typedef Compiler::Color StyleColor;
+typedef Compiler::TextWrapping TextWrapping;
+typedef Compiler::ClipStyle ClipStyle;
+typedef Compiler::DisplayType DisplayType;
 
-struct Margin 
-{
-    Measurement left;
-    Measurement right;
-    Measurement top;
-    Measurement bottom;
-};
+typedef Compiler::Style Style;
 
-// Corner radii in px
-struct Corners
-{
-    uint16_t top_left;
-    uint16_t top_right;
-    uint16_t bottom_left;
-    uint16_t bottom_right;
-};
-
-enum class DisplayType
-{
-    NORMAL, // Like css block
-    HIDDEN, // Neither element nor its children are shown or taken into account at all. 
-    MANUAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
-};
-
-// Note(Leo): To match vulkan, alpha of 0 is fully transparent and 1 is fully opaque
-// Note(Leo): All the color channels should be from 0 to 1
-struct StyleColor 
-{
-    float r, g, b, a;
-};
-
-enum class TextWrapping
-{
-    WORDS, // Text is wrapped but words are kept together 
-    CHARS, // Text is wrapped but in arbitrary positions
-    NONE, // Text will not wrap and will overflow
-};
-
-enum class ClipStyle
-{
-    HIDDEN, // Just hide clipped region. Clipped region can still be scrolled through internal means
-    SCROLL, // Hide clipped region and show a scroll bar
-};
-
-struct Style 
-{
-    int id;
-    int priority;
-
-    TextWrapping wrapping;
-    
-    ClipStyle horizontal_clipping;
-    ClipStyle vertical_clipping;
-    
-    StyleColor color; // Background color
-    StyleColor text_color; // The color of child text
-    
-    DisplayType display;
-    
-    Measurement width, min_width, max_width;
-    Measurement height, min_height, max_height;
-    Margin margin;
-    Padding padding;
-    Corners corners;
-    
-    uint16_t font_id;
-    uint16_t font_size;     
-};
 
 // Note(Leo): Same struct as Style but with priority numbers for each member, allowing styles to be combined and the higher
 // priority style's non-null members to override the lower priority style's ones.
@@ -393,6 +314,9 @@ void MergeStyles(InFlightStyle* main, InFlightStyle* secondary);
 
 // Merge the members of style into the in-flight main style 
 void MergeStyles(InFlightStyle* main, Style* style);
+
+// Set the members of this style to the defaults.
+void DefaultStyle(InFlightStyle* target);
 
 void CalculateStyles(DOM* dom);
 void BuildRenderQue(DOM* dom);

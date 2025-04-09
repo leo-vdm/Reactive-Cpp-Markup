@@ -64,6 +64,11 @@ struct bounding_box
     float x, y, width, height;
 };
 
+struct screen_position
+{
+    float x, y;
+};
+
 // Controls how an element lays out its children
 enum class LayoutDirection
 {
@@ -102,6 +107,8 @@ struct LayoutElement
     shape_axis sizing;
     
     bounding_box bounds;
+    screen_position position; // Position of the elment's top left corner. different from its bounding box since 
+    //                           bounding box is the visisble parts of the element and this is the actual position.
     LayoutElement* children;
     uint16_t child_count;
     
@@ -147,7 +154,6 @@ struct shaping_context
 {
     Arena* shape_arena;
     Arena* layout_element_arena;
-    bounding_box curr_bounding;
 };
 
 // Returns true if two bounding boxes intersect and optionally returns the intersection region
@@ -965,9 +971,11 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     
     DeAllocScratch(revisit_width_elements);
     DeAllocScratch(revisit_height_elements);
+    
 }
 
-void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count)
+// Note(Leo): The root element should have the screen size as its width/height and the measures should be pixels
+void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height)
 {
     shaping_context context = {};
     
@@ -979,14 +987,22 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
     void* memory_block = Alloc(shape_arena, element_count*sizeof(LayoutElement));
     
     // Note(Leo): Give layout elements their own arena so that when we shape text inbetween unpacks the two things arent mixed
-    Arena layout_element_arena = CreateArenaWith(memory_block, element_count*sizeof(LayoutElement), sizeof(sizeof(LayoutElement)));
+    Arena layout_element_arena = CreateArenaWith(memory_block, element_count*sizeof(LayoutElement), sizeof(LayoutElement));
     
     context.shape_arena = shape_arena;
     context.layout_element_arena = &layout_element_arena;
+
+    // Note(Leo): Root has to have its sizes set as pixels before calling unpack on it since that also runs the first
+    //            shaping pass.
+    root_element->working_style.width.type = MeasurementType::PIXELS;
+    root_element->working_style.width.size = (float)window_width;
+    
+    root_element->working_style.height.type = MeasurementType::PIXELS;
+    root_element->working_style.height.size = (float)window_height;
     
     LayoutElement* converted_root;
     uint16_t unpacked_count; // The amount of elements remaining that have been unpacked as children but have
-    // not unpacked their children
+                             // not unpacked their children
     unpack(&context, root_element, &converted_root, &unpacked_count);
     assert(unpacked_count == 1); // Root shouldnt have any siblings
     
@@ -1028,12 +1044,114 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
         curr_element--;
     }
     
-    // Iterating forward which is close enough to a breadth first walk
-    // A parent element will always be visited before all its children
-    curr_element = (LayoutElement*)context.layout_element_arena->mapped_address;
-    while((uintptr_t)curr_element < context.layout_element_arena->next_address)
+    // Note(Leo): Leave space for alignment
+    void* final_pass_memory = Alloc(context.shape_arena, (element_count + 1)*sizeof(LayoutElement*));
+    LayoutElement** final_pass_visit = align_mem(final_pass_memory, LayoutElement*);
+    
+    // Iterating forward from the root element in a depth first way.    
+    // We shape all the elements of root then only push the ones inside of root's bounding box onto the stack of children.
+    // Each time we visit a child we shape all of its elements and cull based on the bouding box of the child. 
+    // This helps with not visiting elements that arent visible
+    final_pass_visit[0] = (LayoutElement*)context.layout_element_arena->mapped_address; // Grabbing the root element
+    uint32_t visit_count = 1;
+    
+    // Setup the bounds for the root
+    final_pass_visit[0]->bounds.x = 0;
+    final_pass_visit[0]->bounds.y = 0;
+    
+    final_pass_visit[0]->bounds.width = final_pass_visit[0]->sizing.width.desired.size;
+    final_pass_visit[0]->bounds.height = final_pass_visit[0]->sizing.height.desired.size;
+    
+    
+    for(int visit_index = 0; visit_count > 0; visit_index++)
     {
+        visit_count--;
+        curr_element = final_pass_visit[visit_index];
         shape_final_pass(&context, curr_element);
-        curr_element++;
+        
+        LayoutDirection dir = curr_element->dir;
+        
+        float inner_width = curr_element->sizing.width.desired.size;
+        float inner_height = curr_element->sizing.height.desired.size;
+
+        inner_width -= curr_element->sizing.width.padding1.size;
+        inner_width -= curr_element->sizing.width.padding2.size;
+
+        inner_height -= curr_element->sizing.height.padding1.size;
+        inner_height -= curr_element->sizing.height.padding2.size;
+        
+        bounding_box inner_bounds = {};
+        
+        inner_bounds.x = curr_element->position.x + curr_element->sizing.width.padding1.size;
+        inner_bounds.y = curr_element->position.y + curr_element->sizing.height.padding1.size;        
+        
+        inner_bounds.width = inner_width;
+        inner_bounds.height = inner_height;
+        
+        float cursor_x = inner_bounds.x;
+        float cursor_y = inner_bounds.y;
+        
+        // Note(Leo): bounds of the parent element is the section of it which was visible inside of its parent.
+        //            inner bounds is the inner capsule of the parent (parent size minus padding) some of which may 
+        //            not be visible. The area of overlap between the bounds and inner bounds is the actual visible area
+        //            of the parent where children can be (children cant be inside padding). 
+        boxes_intersect(&curr_element->bounds, &inner_bounds, &inner_bounds);
+        
+        // Transforming the children from parent-space to screenspace
+        if(curr_element->type == LayoutElementType::NORMAL)
+        {
+            cursor_x -= curr_element->NORMAL.clipping.left_scroll;
+            cursor_y -= curr_element->NORMAL.clipping.top_scroll;
+        }
+        if(curr_element->type == LayoutElementType::NORMAL_TRANSPARENT)
+        {
+            cursor_x -= curr_element->NORMAL_TRANSPARENT.clipping.left_scroll;
+            cursor_y -= curr_element->NORMAL_TRANSPARENT.clipping.top_scroll;
+        }
+        
+        
+        for(int i = 0; i < curr_element->child_count; i++)
+        {
+            cursor_x += curr_element->children[i].sizing.width.margin1.size;
+            cursor_y += curr_element->children[i].sizing.height.margin1.size;
+ 
+            curr_element->children[i].position.x = cursor_x;
+            curr_element->children[i].position.y = cursor_y;
+            
+            curr_element->children[i].bounds.x = cursor_x;
+            curr_element->children[i].bounds.y = cursor_y;
+            
+            curr_element->children[i].bounds.width = curr_element->children[i].sizing.width.desired.size;
+            curr_element->children[i].bounds.height = curr_element->children[i].sizing.height.desired.size;
+            
+            // Note(Leo): boxes_intersect puts the intersection region as the new bounding box of the child
+            // Only add elements to be visited if they will be visisble
+            if(boxes_intersect(&inner_bounds, &curr_element->children[i].bounds, &curr_element->children[i].bounds))
+            {
+                final_pass_visit[visit_count] = &curr_element->children[i];
+                visit_count++;
+            }
+            
+            if(dir == LayoutDirection::HORIZONTAL)
+            {
+                // Need to move x over for the next element
+                cursor_x += curr_element->children[i].sizing.width.desired.size;
+                cursor_x += curr_element->children[i].sizing.width.margin2.size;
+                
+                // Need to reset the y back to what it was before
+                cursor_y -= curr_element->children[i].sizing.height.margin1.size;
+            }
+            else
+            {
+                assert(dir == LayoutDirection::VERTICAL);
+                
+                // Need to move y over for the next element
+                cursor_y += curr_element->children[i].sizing.height.desired.size;
+                cursor_y += curr_element->children[i].sizing.height.margin2.size;
+                
+                // Need to reset the x back to what it was before
+                cursor_x -= curr_element->children[i].sizing.width.margin1.size;
+            }
+        }
     }
 }

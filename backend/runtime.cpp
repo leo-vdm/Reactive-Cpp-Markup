@@ -57,35 +57,26 @@ void ConvertSelectors(Compiler::Selector* selector)
             int allocated_count = ((arena_base + curr_selector->global_id) + 1) - (Selector*)runtime.selectors->next_address;
             Alloc(runtime.selectors, sizeof(Selector) * allocated_count, zero());
         }    
+        
+        Selector* added_selector = arena_base + curr_selector->global_id;
+        added_selector->id = curr_selector->global_id;
+        
+        added_selector->style_count = curr_selector->num_styles;
+        memcpy(added_selector->style_ids, curr_selector->style_ids, curr_selector->num_styles*sizeof(int));
+        added_selector->name_length = curr_selector->name_length;
+        added_selector->name = curr_selector->name;
+        
+        // TODO(Leo): The compiler seems to add null terminators after selector names but it is not clear where that is happening
+        // so this code doesnt rely on names coming in null terminated. Figure out why its happening. 
+        
+        char* terminated_name = (char*)AllocScratch((curr_selector->name_length + 1)*sizeof(char)); // +1 to fit \0
+        memcpy(terminated_name, curr_selector->name, curr_selector->name_length*sizeof(char));
+        terminated_name[curr_selector->name_length] = '\0';
+        
+        selector_map.insert({(const char*)terminated_name, added_selector});
+        DeAllocScratch(terminated_name);
         curr_selector++;
     }
-    
-    Selector* added_selector = arena_base + curr_selector->global_id;
-    added_selector->id = curr_selector->global_id;
-    
-    added_selector->style_count = curr_selector->num_styles;
-    memcpy(added_selector->style_ids, curr_selector->style_ids, curr_selector->num_styles*sizeof(int));
-    added_selector->name_length = curr_selector->name_length;
-    added_selector->name = curr_selector->name;
-    
-    // TODO(Leo): The compiler seems to add null terminators after selector names but it is not clear where that is happening
-    // so this code doesnt rely on names coming in null terminated. Figure out why its happening. 
-    
-    char* terminated_name = (char*)AllocScratch((curr_selector->name_length + 1)*sizeof(char)); // +1 to fit \0
-    terminated_name[curr_selector->name_length] = '\0';
-    
-    std::string name_string = terminated_name;
-    
-    selector_map.insert({name_string, added_selector});
-    DeAllocScratch(terminated_name);
-}
-
-Measurement convert_measurement(Compiler::Measurement measurement)
-{
-    Measurement created = {};
-    created.size = measurement.size;
-    created.type = (MeasurementType)((int)measurement.type);
-    return created;
 }
 
 // Note(Leo): Styles are indexed as an array by their global ID 
@@ -105,9 +96,27 @@ void ConvertStyles(Compiler::Style* style)
         }    
 
         Style* added_style = arena_base + curr_style->global_id;
-        added_style->id = curr_style->global_id;
-        added_style->width = convert_measurement(curr_style->width);
-        added_style->height = convert_measurement(curr_style->height);
+        memcpy(added_style, curr_style, sizeof(Style));
+
+        // Indicates the style has a font to use
+        if(curr_style->font_name.len > 0)
+        {
+            char* terminated_name = (char*)AllocScratch((curr_style->font_name.len + 1)*sizeof(char));
+            memcpy(terminated_name, curr_style->font_name.value, curr_style->font_name.len*sizeof(char));
+            terminated_name[curr_style->font_name.len] = '\0';
+            
+            added_style->font_id = FontPlatformGetFont(terminated_name);
+            if(!added_style->font_id)
+            {
+                printf("Error while loading font '%s'\n", terminated_name);
+                added_style->font_id = 1; // Use the default font instead
+            }
+            DeAllocScratch(terminated_name);
+        }
+        else // Use the default font
+        {
+            added_style->font_id = 1;
+        }
         
         curr_style++;
     }
@@ -243,12 +252,11 @@ InFlightStyle merge_selector_styles(Selector* selector)
     // (e.g. where a class attribute has a binding and the selectors it spits out have alot of styles to merge) 
     
     
-    InFlightStyle merged_style = {};
-    // Note(Leo): Since styles can currently have priority 0, we must ensure that merged_style has -1 priority otherswise
+    InFlightStyle merged_style;
+    // Note(Leo): Since styles can currently have priority 0, we must ensure that default style has -1 priority otherswise
     // priority 0 styles will be ignored
     
-    merged_style.width_p = -1;
-    merged_style.height_p = -1;
+    DefaultStyle(&merged_style);
     
     for(int i = 0; i < selector->style_count; i++)
     {
@@ -269,6 +277,11 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
             case(AttributeType::TEXT):
             {
                 assert(element->type == ElementType::TEXT);
+                
+                // Text font and size comes from parent
+                element->working_style.font_id = element->parent->working_style.font_id;
+                element->working_style.font_size = element->parent->working_style.font_size;
+                
                 if(!curr_attribute->Text.binding_id) // Text is known
                 {
                     element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*curr_attribute->Text.value_length);
@@ -406,7 +419,7 @@ void RuntimeClearTemporal(DOM* target)
     ResetArena(target->frame_arena);
 }
 
-void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
+void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height)
 {
     // Note(Leo): Page root element is always at the first address of the dom
     Element* root_element = (Element*)dom->elements->mapped_address;
@@ -447,5 +460,5 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom)
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
     //            will never underestimate so its ok.
     int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
-    ShapingPlatformShape(root_element, renderque, element_count);
+    ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
 }

@@ -117,6 +117,71 @@ void* AllocComponent(DOM* dom, int size, int file_id)
     return allocated;
 }
 
+
+void DefaultStyle(InFlightStyle* target)
+{
+    #define DEFAULT_PRIORITY -1
+    target->wrapping = TextWrapping::WORDS;
+    target->wrapping_p = DEFAULT_PRIORITY;
+
+    target->horizontal_clipping = ClipStyle::HIDDEN;
+    target->horizontal_clipping_p = DEFAULT_PRIORITY;
+    target->vertical_clipping = ClipStyle::HIDDEN;
+    target->vertical_clipping_p = DEFAULT_PRIORITY;
+    
+    target->color = { 1.0f, 1.0f, 1.0f, 1.0f };
+    target->color_p = DEFAULT_PRIORITY;
+    
+    target->text_color = { 0.0f, 0.0f, 0.0f, 1.0f };
+    target->text_color_p = DEFAULT_PRIORITY;
+    
+    target->display = DisplayType::NORMAL;
+    target->display_p = DEFAULT_PRIORITY;
+    
+    target->width.type = MeasurementType::GROW;
+    target->width_p = DEFAULT_PRIORITY;
+    
+    target->min_width.type = MeasurementType::PIXELS;
+    target->min_width.size = 0.0f;
+    target->min_width_p = DEFAULT_PRIORITY;
+    
+    target->max_width.type = MeasurementType::PIXELS;
+    target->max_width.size = 0.0f;
+    target->max_width_p = DEFAULT_PRIORITY;
+    
+    target->height.type = MeasurementType::GROW;
+    target->height_p = DEFAULT_PRIORITY;
+
+    target->min_height.type = MeasurementType::PIXELS;
+    target->min_height.size = 0.0f;
+    target->min_height_p = DEFAULT_PRIORITY;
+    
+    target->max_height.type = MeasurementType::PIXELS;
+    target->max_height.size = 0.0f;
+    target->max_height_p = DEFAULT_PRIORITY;
+    
+    target->margin.m[0] = {0.0f, MeasurementType::PIXELS};
+    target->margin.m[1] = {0.0f, MeasurementType::PIXELS};
+    target->margin.m[2] = {0.0f, MeasurementType::PIXELS};
+    target->margin.m[3] = {0.0f, MeasurementType::PIXELS};
+    target->margin_p = DEFAULT_PRIORITY;
+
+    target->padding.m[0] = {0.0f, MeasurementType::PIXELS};
+    target->padding.m[1] = {0.0f, MeasurementType::PIXELS};
+    target->padding.m[2] = {0.0f, MeasurementType::PIXELS};
+    target->padding.m[3] = {0.0f, MeasurementType::PIXELS};
+    target->padding_p = DEFAULT_PRIORITY;
+    
+    target->corners = {0.0f, 0.0f, 0.0f, 0.0f};
+    target->corners_p = DEFAULT_PRIORITY;
+    
+    target->font_size = 90;
+    target->font_size_p = DEFAULT_PRIORITY;
+    
+    target->font_id = 1;
+    target->font_id_p = DEFAULT_PRIORITY;
+}
+
 Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attribute)
 {
     Attribute* added = (Attribute*)Alloc(dom->attributes, sizeof(Attribute), zero());
@@ -155,6 +220,11 @@ Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Element* target_
     
     added->num_attributes = converted_tag->num_attributes;
     added->type = (ElementType)((int)converted_tag->type);
+    
+    // Setting default style attributes. 
+    // Note(Leo): We could probably just setup a const/global instance which gets memcpy'd instead of creating the default 
+    //            style for every element but it might not be much faster anyway...
+    DefaultStyle(&added->working_style);
     
     Attribute* prev_added_attribute = NULL;
     Attribute* curr_added_attribute; 
@@ -370,14 +440,59 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
 // Merge the members of the secondary in-flight style into the main style
 void MergeStyles(InFlightStyle* main, InFlightStyle* secondary)
 {
+    if(secondary->wrapping_p > main->wrapping_p) { main->wrapping = secondary->wrapping; main->wrapping_p = secondary->wrapping_p; }   
+    
+    if(secondary->horizontal_clipping_p > main->horizontal_clipping_p) { main->horizontal_clipping = secondary->horizontal_clipping; main->horizontal_clipping_p = secondary->horizontal_clipping_p; }   
+    if(secondary->vertical_clipping_p > main->vertical_clipping_p) { main->vertical_clipping = secondary->vertical_clipping; main->vertical_clipping_p = secondary->vertical_clipping_p; } 
+
     if(secondary->width_p > main->width_p) { main->width = secondary->width; main->width_p = secondary->width_p; }   
+    if(secondary->min_width_p > main->min_width_p) { main->min_width = secondary->min_width; main->min_width_p = secondary->min_width_p; }   
+    if(secondary->max_width_p > main->max_width_p) { main->max_width = secondary->max_width; main->max_width_p = secondary->max_width_p; }   
+
     if(secondary->height_p > main->height_p) { main->height = secondary->height; main->height_p = secondary->height_p; }
+    if(secondary->min_height_p > main->min_height_p) { main->min_height = secondary->min_height; main->min_height_p = secondary->min_height_p; }
+    if(secondary->max_height_p > main->max_height_p) { main->max_height = secondary->max_height; main->max_height_p = secondary->max_height_p; }
+
+    if(secondary->color_p > main->color_p) { main->color = secondary->color; main->color_p = secondary->color_p; }
+    if(secondary->text_color_p > main->text_color_p) { main->text_color = secondary->text_color; main->text_color_p = secondary->text_color_p; }
+    
+    if(secondary->display_p > main->display_p) { main->display = secondary->display; main->display_p = secondary->display_p; }
+    
+    if(secondary->margin_p > main->margin_p) { main->margin = secondary->margin; main->margin_p = secondary->margin_p; }
+    if(secondary->padding_p > main->padding_p) { main->padding = secondary->padding; main->padding_p = secondary->padding_p; }
+    if(secondary->corners_p > main->corners_p) { main->corners = secondary->corners; main->corners_p = secondary->corners_p; }
+    
+    if(secondary->font_id_p > main->font_id_p) { main->font_id = secondary->font_id; main->font_id_p = secondary->font_id_p; }
+    if(secondary->font_size_p > main->font_size_p) { main->font_size = secondary->font_size; main->font_size_p = secondary->font_size_p; }
+
 }
 
 // Merge the members of style into the in-flight main style 
 void MergeStyles(InFlightStyle* main, Style* style)
 {
     int s_p = style->priority;
+    if(s_p > main->wrapping_p) { main->wrapping = style->wrapping; main->wrapping_p = s_p; }   
+    
+    if(s_p > main->horizontal_clipping_p) { main->horizontal_clipping = style->horizontal_clipping; main->horizontal_clipping_p = s_p; }   
+    if(s_p > main->vertical_clipping_p) { main->vertical_clipping = style->vertical_clipping; main->vertical_clipping_p = s_p; } 
+
     if(s_p > main->width_p) { main->width = style->width; main->width_p = s_p; }   
-    if(s_p > main->height_p) { main->height = style->height; main->height_p = s_p; }   
+    if(s_p > main->min_width_p) { main->min_width = style->min_width; main->min_width_p = s_p; }   
+    if(s_p > main->max_width_p) { main->max_width = style->max_width; main->max_width_p = s_p; }   
+
+    if(s_p > main->height_p) { main->height = style->height; main->height_p = s_p; }
+    if(s_p > main->min_height_p) { main->min_height = style->min_height; main->min_height_p = s_p; }
+    if(s_p > main->max_height_p) { main->max_height = style->max_height; main->max_height_p = s_p; }
+
+    if(s_p > main->color_p) { main->color = style->color; main->color_p = s_p; }
+    if(s_p > main->text_color_p) { main->text_color = style->text_color; main->text_color_p = s_p; }
+    
+    if(s_p > main->display_p) { main->display = style->display; main->display_p = s_p; }
+    
+    if(s_p > main->margin_p) { main->margin = style->margin; main->margin_p = s_p; }
+    if(s_p > main->padding_p) { main->padding = style->padding; main->padding_p = s_p; }
+    if(s_p > main->corners_p) { main->corners = style->corners; main->corners_p = s_p; }
+    
+    if(s_p > main->font_id_p) { main->font_id = style->font_id; main->font_id_p = s_p; }
+    if(s_p > main->font_size_p) { main->font_size = style->font_size; main->font_size_p = s_p; }   
 }

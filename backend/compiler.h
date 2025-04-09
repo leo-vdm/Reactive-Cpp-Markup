@@ -4,6 +4,8 @@
 #include "arena.h"
 
 #pragma once
+#include "string_view.h"
+
 // Compilation Types //
 namespace Compiler {
 
@@ -72,8 +74,7 @@ enum class TokenType
 struct Token {
     TokenType type;
     
-    int value_length = 0; // Length in chars, not bytes (same for all other lengths)
-    void* token_value; // The contents of the token (if any)
+    StringView body;
 };
 
 
@@ -185,35 +186,162 @@ struct Tag {
 
 enum class StyleFieldType {
     NONE, 
+    WRAPPING,
+    HORIZONTAL_CLIPPING,
+    VERTICAL_CLIPPING,
+    COLOR,
+    TEXT_COLOR,
+    DISPLAY,
     WIDTH,
     HEIGHT,
+    MIN_WIDTH,
+    MIN_HEIGHT,
     MAX_WIDTH,
     MAX_HEIGHT,
+    MARGIN,
+    PADDING,
+    CORNERS,
+    FONT_SIZE,
+    FONT_NAME,
 };
 
-enum class MeasurementType {
+// Todo(Leo): Reflect these types in the compiler
+enum class MeasurementType
+{
     NONE,
-    AUTO,
+    GROW, // Grow to fill the parent sharing free space with other grow measurements.
+    FIT, // Not allowed for margin/padding. Fit the parent around its children
     PIXELS,
-    PERCENT,
+    PERCENT, // Relative to parent for margin/padding aswell as width/height 
+             // Should be normalized to 0-1 range
 };
 
 struct Measurement {
     float size;
     MeasurementType type;
-    
-    Measurement()
-    {
-        size = 0.0f;
-        type = MeasurementType::NONE;
-    }
 };
 
-struct Style {
-    int global_id;
+struct Padding 
+{
+    union
+    {
+        struct
+        {
+            Measurement left;
+            Measurement right;
+            Measurement top;
+            Measurement bottom;
+        };
+        Measurement m[4];
+    };
+};
+
+struct Margin 
+{
+    union
+    {
+        struct
+        {
+            Measurement left;
+            Measurement right;
+            Measurement top;
+            Measurement bottom;
+        };
+        Measurement m[4];
+    };
+};
+
+// Corner radii in px
+struct Corners
+{
+    union
+    {
+        struct
+        {
+            float top_left;
+            float top_right;
+            float bottom_left;
+            float bottom_right;
+        };
+        float c[4];
+    };
+};
+
+// Note(Leo): To match vulkan, alpha of 0 is fully transparent and 1 is fully opaque
+// Note(Leo): All the color channels should be from 0 to 1
+struct Color 
+{
+    union
+    {
+        struct
+        {
+            float r, g, b, a;
+        };
+        float c[4];
+    };
+};
+
+enum class TextWrapping
+{
+    NONE, // Invalid/use default
+    WORDS, // Text is wrapped but words are kept together 
+    CHARS, // Text is wrapped but in arbitrary positions
+    NO, // Text will not wrap and will overflow
+};
+
+enum class ClipStyle
+{
+    NONE,
+    HIDDEN, // Just hide clipped region. Clipped region can still be scrolled through internal means
+    SCROLL, // Hide clipped region and show a scroll bar
+};
+
+
+enum class DisplayType
+{
+    NONE,
+    NORMAL, // Like css block
+    HIDDEN, // Neither element nor its children are shown or taken into account at all. 
+    MANUAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
+};
+
+struct Style 
+{
+    union 
+    {
+        int id;
+        int global_id;
+    };
+    int priority;
+
+    TextWrapping wrapping;
     
-    Measurement width, height;
-    Measurement max_width, max_height;
+    ClipStyle horizontal_clipping;
+    ClipStyle vertical_clipping;
+    
+    Color color; // Background color
+    Color text_color; // The color of child text
+    
+    DisplayType display;
+    
+    Measurement width, min_width, max_width;
+    Measurement height, min_height, max_height;
+    Margin margin;
+    Padding padding;
+    Corners corners;
+    
+    uint16_t font_size;     
+    union
+    {
+        uint16_t font_id; // For the runtime
+        StringView font_name; // For the compiler
+        
+        struct // For the filesystem
+        {
+            int index;
+            int length;
+        } saved_font_name;
+    };
 };
 
 #define MAX_STYLES_PER_SELECTOR 20
@@ -352,7 +480,7 @@ struct CompileTarget
 
 
 // Compilation Functions //
-int RegisterComponent(char* name, int name_length, Compiler::CompilerState* state);
+int RegisterComponent(StringView* name, Compiler::CompilerState* state);
 
 // Prepass functions
 
@@ -378,17 +506,17 @@ Compiler::Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_aren
 Compiler::Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char* src, int src_length);
 
 // Parser Functions
-Compiler::TagType GetTagFromName(const char* value, int value_length);
-Compiler::AttributeType GetAttributeFromName(char* value, int value_length);
+Compiler::TagType GetTagFromName(StringView* name);
+Compiler::AttributeType GetAttributeFromName(StringView* name);
 
 // Register a binding if it doesnt exist or return its id if it does
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, char* value, int value_length, int tag_id, Compiler::RegisteredBindingType type, Compiler::CompilerState* state); // Returns the id of the binding.
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, Compiler::RegisteredBindingType type, Compiler::CompilerState* state); // Returns the id of the binding.
 
 // Wants the target to already have initialized arenas in it.
 void ProduceAST(Compiler::AST* target, Arena* tokens, Arena* token_values, Compiler::CompilerState* state);
 
 // Register a style selector if it doesnt exist and return its ID.
-int RegisterSelectorByName(Compiler::LocalStyles* target, char* value, int value_length, int style_id, int global_prefix, Compiler::CompilerState* state);
+int RegisterSelectorByName(Compiler::LocalStyles* target, StringView* name, int style_id, int global_prefix, Compiler::CompilerState* state);
 void ClearRegisteredSelectors();
 
 // NOTE: file_prefix_string should be NULL terminated!!

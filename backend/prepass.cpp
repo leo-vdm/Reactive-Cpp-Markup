@@ -7,7 +7,7 @@
 using namespace Compiler;
 
 // Expect that source_file_name is null terminated
-void copy_between_tag_hit(FILE* destination, FILE* source, char* open_tag, char* close_tag);
+void copy_between_tag_hit(FILE* destination, FILE* source, const char* open_tag, const char* close_tag);
 
 SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* source_file_name, char* output_dir)
 {
@@ -98,10 +98,10 @@ SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* s
 
 
 // NOTE: FOR this to work the source MUST have the tag exactly as in the tag string
-void copy_between_tag_hit(FILE* destination, FILE* source, char* open_tag, char* close_tag)
+void copy_between_tag_hit(FILE* destination, FILE* source, const char* open_tag, const char* close_tag)
 {
     int next_char;
-    char* checked_tag = open_tag; 
+    char* checked_tag = (char*) open_tag; 
     while((next_char = fgetc(source)) != EOF)
     {
         // potential match, need to save the chars we pop incase it isnt a real match
@@ -137,7 +137,7 @@ void copy_between_tag_hit(FILE* destination, FILE* source, char* open_tag, char*
                 return;
                 }
                 else{ // found the start tag
-                checked_tag = close_tag;                
+                checked_tag = (char*)close_tag;                
                 }
 
             }

@@ -4,9 +4,9 @@ using namespace Compiler;
 #include <cstring>
 
 DirectiveType get_directive_from_name(char* name);
-DirectiveType get_directive_from_name(char* name, int name_length);
+DirectiveType get_directive_from_name(StringView* name);
 void write_token_value(FILE* target, Token* source);
-char* get_component_name(char* component_file_name, int name_length);
+StringView get_component_name(StringView* name);
 static bool expect_eat(TokenType expected_type);
 void reset_bound_vars();
 
@@ -54,7 +54,7 @@ void reset_bound_vars();
 
 // Args are comp name * 2
 #define DEFINE_SELF_TEMPLATE "#define %s_MACRO 1"
-#define USECOMP_INCLUDE_TEMPLATE "#ifndef %s_MACRO\n#include \"%s.cpp\"\n#endif"
+#define USECOMP_INCLUDE_TEMPLATE "#ifndef %.*s_MACRO\n#include \"%.*s.cpp\"\n#endif"
 
 // Args: stub name, comp/page class name, var/fn name
 #define BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void, Arena* strings)\n{\nreturn make_string(((%s*)d_void)->%s, strings);\n}\n"
@@ -121,7 +121,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                     break;
                 }
                 
-                DirectiveType type = get_directive_from_name((char*)curr_token->token_value, curr_token->value_length);
+                DirectiveType type = get_directive_from_name(&curr_token->body);
                 
                 // Cant be one of our directives
                 if(type == DirectiveType::NONE)
@@ -143,10 +143,9 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
                             return;
                         }
                         
-                        char* component_name = get_component_name((char*)curr_token->token_value, curr_token->value_length);
-                        fprintf(target->code, USECOMP_INCLUDE_TEMPLATE, component_name, component_name);
-                        DeAllocScratch(component_name);
-                        
+                        StringView component_name = get_component_name(&curr_token->body);
+                        fprintf(target->code, USECOMP_INCLUDE_TEMPLATE, component_name.len, component_name.value, component_name.len, component_name.value);
+                             
                         curr_token = directive_token;
                         break;
                     }
@@ -274,12 +273,12 @@ std::map<std::string, DirectiveType> directive_map =
 };
 
 
-DirectiveType get_directive_from_name(char* name, int name_length)
+DirectiveType get_directive_from_name(StringView* name)
 {
-    char* terminated_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero()); // + 1 to fit null terminator
-    memcpy(terminated_name, name, name_length*sizeof(char));
+    char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero()); // + 1 to fit null terminator
+    memcpy(terminated_name, name->value, name->len*sizeof(char));
     
-    terminated_name[name_length] = '\0';
+    terminated_name[name->len] = '\0';
     DirectiveType result = get_directive_from_name(terminated_name);
     DeAllocScratch(terminated_name);
     return result;
@@ -301,10 +300,13 @@ DirectiveType get_directive_from_name(char* name)
 
 void write_token_value(FILE* target, Token* source)
 {
+    fwrite(source->body.value, source->body.len, 1, target);
+/*
     for(int i = 0; i < source->value_length; i++)
     {
         putc(((char*)source->token_value)[i], target);
     }
+*/
 }
 
 
@@ -326,27 +328,27 @@ void reset_bound_vars()
     bound_variables.clear();
 }
 
-char* get_component_name(char* component_file_name, int name_length)
+StringView get_component_name(StringView* name)
 {
-    char* new_name = (char*)AllocScratch((name_length + 1)*sizeof(char), no_zero());
-    char* curr_char = component_file_name;
-    for(int i = 0; i < name_length; i++)
+    StringView comp_name = {};
+    comp_name.value = name->value;
+    // Go until finding the . in the file name which indicates the end of the component name
+    // skip qoutes 
+    for(int i = 0; i < name->len; i++)
     {   
-        if(*curr_char == '"')
+        if(name->value[i] == '"')
         {
-            curr_char++;
+            comp_name.value++;
+            continue;
         }
-        if(*curr_char == '.')
+        if(name->value[i] == '.')
         {
-            new_name[i] = '\0';
-            return new_name;
+            return comp_name;
             break;
         }
-        new_name[i] = *curr_char;
-        curr_char++;
+        comp_name.len++;
     }
-    
-    new_name[name_length] = '\0';
-    return new_name;
+
+    return comp_name;
 
 }
