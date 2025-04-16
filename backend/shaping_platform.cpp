@@ -988,6 +988,8 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     
 }
 
+
+
 // Note(Leo): The root element should have the screen size as its width/height and the measures should be pixels
 void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height)
 {

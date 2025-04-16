@@ -7,12 +7,49 @@
 #define MAX_TEXTURE_COUNT 30
 #define GLYPH_ATLAS_COUNT 200
 
+
 #define Kilobytes(num_bytes) (num_bytes * 1000 * sizeof(char)) 
 #define Megabytes(num_bytes) (num_bytes * 1000000 * sizeof(char))
 #define Gigabytes(num_bytes) (num_bytes * 1000000000 * sizeof(char))
 
 #define MAX(x, y) ((x) >= (y) ? (x) : (y))
 #define MIN(x, y) ((x) <= (y) ? (x) : (y))
+
+struct vk_swapchain_image
+{
+    vk_swapchain_image* next;
+    VkImageView image_view;
+    VkImage image;
+};
+
+struct shared_window 
+{
+    void* window_dom;
+
+    VkCommandBuffer vk_command_buffer;
+    VkSurfaceKHR vk_window_surface;
+    VkSwapchainKHR vk_window_swapchain;
+    vk_swapchain_image* vk_first_image;
+    
+    VkSemaphore vk_image_available_semaphore;
+    VkSemaphore vk_render_finished_semaphore;
+    VkFence vk_in_flight_fence;
+    
+    void* vk_staging_mapped_address;
+    int vk_staging_buffer_size;
+    VkBuffer vk_staging_buffer;
+    VkDeviceMemory vk_staging_memory;
+    
+    int vk_input_buffer_size;
+    VkBuffer vk_input_buffer;
+    VkDeviceMemory vk_input_memory;
+
+    VkDescriptorSet vk_combined_descriptor;
+
+    int width;
+    int height;
+    int flags;
+};
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
@@ -25,51 +62,10 @@ extern HMODULE windows_module_handle;
 
 extern ATOM window_class_atom;
 
-struct PlatformWindow
+struct PlatformWindow : shared_window
 {
     PlatformWindow* next_window;
-    void* window_dom;
-
     HWND window_handle;
-    VkCommandBuffer vk_command_buffer;
-    VkSurfaceKHR vk_window_surface;
-    VkSwapchainKHR vk_window_swapchain;
-    LinkedPointer* vk_first_image_view;
-    LinkedPointer* vk_first_framebuffer;
-    
-    VkImage vk_window_depth_image;
-    VkDeviceMemory vk_depth_image_memory;
-    VkImageView vk_depth_image_view;
-
-    VkImage vk_window_msaa_image;
-    VkDeviceMemory vk_msaa_image_memory;
-    VkImageView vk_msaa_image_view;
-        
-    VkSemaphore vk_image_available_semaphore;
-    VkSemaphore vk_render_finished_semaphore;
-    VkFence vk_in_flight_fence;
-    
-    void* vk_staging_mapped_address;
-
-    int vk_vertex_staging_buffer_size;
-    VkBuffer vk_window_staging_buffer;
-    VkDeviceMemory vk_staging_memory;
-
-    VkBuffer vk_window_vertex_buffer;
-    VkDeviceMemory vk_vertex_memory;
-    
-    int vk_index_staging_buffer_size;
-    VkBuffer vk_window_index_buffer;
-    VkDeviceMemory vk_index_memory;
-    
-    VkDescriptorSet vk_uniform_descriptor;
-    VkBuffer vk_window_uniform_buffer;
-    VkDeviceMemory vk_uniform_memory;
-    void* vk_uniform_mapped_address;
-    
-    int width;
-    int height;
-    int flags;
 };
 
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle);
@@ -93,52 +89,11 @@ struct XDefaultValues
 
 extern XDefaultValues x_defaults;
 
-struct PlatformWindow
+struct PlatformWindow : shared_window
 {
     PlatformWindow* next_window;
-    void* window_dom;
-
     Window window_handle;
-    VkSurfaceKHR vk_window_surface;
-    VkSwapchainKHR vk_window_swapchain;
-    LinkedPointer* vk_first_image_view;
-    LinkedPointer* vk_first_framebuffer;
-    VkCommandBuffer vk_command_buffer;
     GC window_gc;
-    
-    VkImage vk_window_depth_image;
-    VkDeviceMemory vk_depth_image_memory;
-    VkImageView vk_depth_image_view;
-    
-    VkImage vk_window_msaa_image;
-    VkDeviceMemory vk_msaa_image_memory;
-    VkImageView vk_msaa_image_view;    
-    
-    VkSemaphore vk_image_available_semaphore;
-    VkSemaphore vk_render_finished_semaphore;
-    VkFence vk_in_flight_fence;
-    
-    void* vk_staging_mapped_address;
-
-    int vk_vertex_staging_buffer_size;
-    VkBuffer vk_window_staging_buffer;
-    VkDeviceMemory vk_staging_memory;
-
-    VkBuffer vk_window_vertex_buffer;
-    VkDeviceMemory vk_vertex_memory;
-    
-    int vk_index_staging_buffer_size;
-    VkBuffer vk_window_index_buffer;
-    VkDeviceMemory vk_index_memory;
-    
-    VkDescriptorSet vk_uniform_descriptor;
-    VkBuffer vk_window_uniform_buffer;
-    VkDeviceMemory vk_uniform_memory;
-    void* vk_uniform_mapped_address;
-    
-    int width;
-    int height;
-    int flags;
 };
 
 void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display);
@@ -181,13 +136,13 @@ struct VulkanSupportedExtensions
 
 PlatformWindow* PlatformCreateWindow(Arena* windows_arena, const char* window_name);
 
-void RenderplatformDrawWindow(PlatformWindow* window);
+void RenderplatformDrawWindow(PlatformWindow* window, Arena* renderque);
 
 bool RenderplatformSafeToDelete(PlatformWindow* window);
 
 void RenderplatformLoadImage(FILE* image_file, const char* name);
 
-void RenderPlatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot);
+void RenderplatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot);
 
 //void InitializePlatform(Arena* master_arena);
 
@@ -195,7 +150,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary);
 
 bool RuntimeInstanceMainPage();
 
-int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* opaque_vert_shader, FILE* opaque_frag_shader, FILE* transparent_vert_shader, FILE* transparent_frag_shader, FILE* text_vert_shader, FILE* text_frag_shader, int image_buffer_size);
+int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* combined_shader);
 void PlatformRegisterDom(void* dom);
 
 struct FontPlatformShapedGlyph

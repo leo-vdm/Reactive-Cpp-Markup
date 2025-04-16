@@ -1,0 +1,31 @@
+#version 450
+
+layout (local_size_x_id = 0, local_size_y_id = 0) in;
+layout (binding = 0, r8) uniform readonly image2D glyph_atlas;
+layout (binding = 0, rgba8) uniform readonly image2D image_atlas;
+
+layout (binding = 1, rgba8) uniform image2D render_target;
+
+struct combined_instance 
+{
+    vec4 bounds;
+    vec2 shape_position;
+    vec2 shape_size;
+    vec4 corners;
+    
+    // Note(Leo): sample position/size is packed overtop the RGBA color of the element background allowing them to be discrimated by type
+    vec3 sample_position; // RGB
+    vec2 sample_size;     // A
+    int type;
+};
+
+layout( push_constant ) uniform constants
+{
+	vec2 screen_size;
+	int shape_count;
+} PushConstants;
+
+void main()
+{
+    ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
+}

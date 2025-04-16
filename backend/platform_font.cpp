@@ -191,7 +191,7 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     // Dont upload glyphs with no size
     if(added_glyph->width && added_glyph->height)
     {
-        RenderPlatformUploadGlyph(glyph_bitmap.buffer, glyph_bitmap.width, glyph_bitmap.rows, GlyphSlot(added_glyph));    
+        RenderplatformUploadGlyph(glyph_bitmap.buffer, glyph_bitmap.width, glyph_bitmap.rows, GlyphSlot(added_glyph));    
     }
     
     #if 0

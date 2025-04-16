@@ -173,99 +173,27 @@ struct bvec3
     };
 };
 
-struct mat2
-{
-    union
-    {
-    float m[2][2];
-    float e[4];
-    };
-};
-
-struct mat3
-{
-    union
-    {
-    float m[3][3];
-    float e[9];
-    };
-};
-
-struct mat4
-{
-    union
-    {
-    float m[4][4];
-    float e[16];
-    };
-};
-
-struct vertex
-{
-    vec2 position;
-    vec2 texture_coord;
-};
-
-//struct opaque_vertex
-//{
-//    vec2 position;
-//    vec2 texture_coord;
-//};
-//
-//struct transparent_vertex
-//{
-//    vec2 position;
-//    vec2 texture_coord;
-//};
-
-struct opaque_instance
-{
-    vec3 offsets;
-    vec3 color;
-    vec2 scale;
-    vec4 corners;
-};
-
-struct transparent_instance
-{
-    vec3 offsets;
-    vec4 color;
-    vec2 scale;
-    vec4 corners;
-    int32_t image_index;
-};
-
-struct text_instance
-{
-    vec3 offsets;
-    vec3 color;
-    vec2 scale;
-    vec3 instance_glyph_offset;
-    vec2 instance_glyph_size;
-};
-
-struct UniformBufferObject
-{
-    mat4 model;
-    mat4 view;
-    mat4 projection;
-};
 
 struct PushConstants
 {
     vec2 screen_size;
-    vec2 atlas_size;
+    int32_t shape_count;
 };
 
-VkVertexInputBindingDescription vk_get_binding_description(vertex input);
-VkVertexInputBindingDescription vk_get_binding_description(opaque_instance input); 
-VkVertexInputBindingDescription vk_get_binding_description(transparent_instance input); 
-VkVertexInputBindingDescription vk_get_binding_description(text_instance input);
+struct SpecializationData 
+{
+    int32_t render_tile_size;
+};
 
-VkVertexInputAttributeDescription* vk_get_attribute_descriptions(opaque_instance input, int* len = NULL);
-VkVertexInputAttributeDescription* vk_get_attribute_descriptions(transparent_instance input, int* len = NULL);
-VkVertexInputAttributeDescription* vk_get_attribute_descriptions(text_instance input, int* len);
-
-void Identity(mat2* matrix);
-void Identity(mat3* matrix);
-void Identity(mat4* matrix);
+struct combined_instance 
+{
+    vec4 bounds;
+    vec2 shape_position;
+    vec2 shape_size;
+    vec4 corners;
+    
+    // Note(Leo): sample position/size is packed overtop the RGBA color of the element background allowing them to be discrimated by type
+    vec3 sample_position; // RGB
+    vec2 sample_size;     // A
+    int32_t type;
+};

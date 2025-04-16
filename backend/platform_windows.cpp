@@ -221,31 +221,18 @@ int main()
     FontPlatformLoadFace("platform_default_font.ttf", default_font);
     fclose(default_font);    
     
-    FILE* opaque_vert_shader = win32_open_relative_file_path("compiled_shaders/opaque_vert.spv", "rb");    
-    FILE* opaque_frag_shader = win32_open_relative_file_path("compiled_shaders/opaque_frag.spv", "rb");
+    FILE* combined_shader = win32_open_relative_file_path("compiled_shaders/combined_shader.spv", "rb");
     
-    FILE* transparent_vert_shader = win32_open_relative_file_path("compiled_shaders/transparent_vert.spv", "rb");    
-    FILE* transparent_frag_shader = win32_open_relative_file_path("compiled_shaders/transparent_frag.spv", "rb");    
-    
-    FILE* text_vert_shader = win32_open_relative_file_path("compiled_shaders/text_vert.spv", "rb");    
-    FILE* text_frag_shader = win32_open_relative_file_path("compiled_shaders/text_frag.spv", "rb");
-    
-    
-    if(!opaque_vert_shader || !opaque_frag_shader || !transparent_vert_shader || !transparent_frag_shader || !text_vert_shader || !text_frag_shader)
+    if(!combined_shader)
     {
         printf("Error: Shaders could not be loaded!\n");
         return 1;
     }
     
     int required_extension_count = sizeof(win32_required_vk_extensions) / sizeof(char**);
-    InitializeVulkan(&(platform.master_arena), win32_required_vk_extensions, required_extension_count, opaque_vert_shader, opaque_frag_shader, transparent_vert_shader, transparent_frag_shader, text_vert_shader, text_frag_shader, 100000000);
+    InitializeVulkan(&(platform.master_arena), win32_required_vk_extensions, required_extension_count, combined_shader);
     
-    fclose(opaque_vert_shader);
-    fclose(opaque_frag_shader);
-    fclose(transparent_vert_shader);
-    fclose(transparent_frag_shader);
-    fclose(text_vert_shader);
-    fclose(text_frag_shader);
+    fclose(combined_shader);
     
     if(!window_class_atom)
     {
@@ -333,7 +320,7 @@ int main()
         ResetArena(temp_renderque);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
-        RenderplatformDrawWindow(curr_window);
+        RenderplatformDrawWindow(curr_window, temp_renderque);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);
         
