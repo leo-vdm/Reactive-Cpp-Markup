@@ -1,62 +1,77 @@
 <code>
 #usecomp "test_component.cmc"
 
-int mycolor;
+char* test = "Hello my string";
 
-#bind
-int count;
-
-#bind
-int my_var;
-
-void PageMain(DOM* dom){
-    printf("%d\n", count);
-    count = 100;
-}
-
-#subto count
-void on_count_changed(){
-    printf("Changed");
-    count = 10;
-}
+class MainPage
+{    
+public:
+    int mycolor;
+    int count;
+    const char* my_var;
+    
+    void PageMain(DOM* dom){
+        printf("Hello from page main!\n");
+        count = 1234;
+	my_var = test;
+	printf("%d\n", count);
+        
+    }
+    
+    void on_count_changed(){
+        printf("Changed");
+        count = 10;
+    }
+};
 
 </code>
 <root>
-<div>
-	<div something="herro" style="color: {mycolor};">
-		Hello	
-	</div>
-
-    <div>
-        <div style="color: red;">
-            hello my friend
-        </div>
-        
-        Hello my friend!
-    </div>
-
-	<div>
-		<div class="orange" class="another" class="mein">
-			Hello {my_var}
-		</div>
-	</div>
-	
-	<test_component>
-
-	</test_component>		
-
-
-</div>
-
+<hdiv class="fill">
+	<vdiv class="half">
+		Hello ive got half the screen!
+		<vdiv class="transparent">
+			<vdiv class="first">
+				First
+			</vdiv>
+			<vdiv class="second">
+				Second	
+			</vdiv>
+		</vdiv>
+	</vdiv>
+	<vdiv class="blue">
+		Ive got the other half	
+	</vdiv>
+<hdiv>
 </root>
 
 <style>
-div {
-width: 100px;
-height: 100px;
+
+half, blue {
+	width: 50.5%;
+	height: 100%;
+	padding: 30px, 30px, 30px, 30px;
+	color: 100, 100, 0;
 }
 
-myclass {
-maxWidth: 100%;
+first, second {
+	width: 100%;
+	height: 50%;
+	corners: 30px, 30px, 30px, 30px;
+	color: 100, 20, 0;
+}
+
+blue {
+	priority: 2;
+	color: 0, 0, 255;
+	text_color: 255, 255, 255;
+}
+
+fill {
+	height: 100%;
+	width: 100%;
+}
+
+transparent {
+	color: 0, 0, 0, 0;
 }
 </style>

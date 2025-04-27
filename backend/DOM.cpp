@@ -467,32 +467,67 @@ void MergeStyles(InFlightStyle* main, InFlightStyle* secondary)
 
 }
 
+
+// Converts a style to an inflight style and only initializes the priorities of non-null members
+void convert_style(Style* input, InFlightStyle* target)
+{
+    int s_p = input->priority;
+    
+    if(input->wrapping != TextWrapping::NONE){ target->wrapping = input->wrapping; target->wrapping_p = s_p; }
+   
+    if(input->horizontal_clipping != ClipStyle::NONE) { target->horizontal_clipping = input->horizontal_clipping; target->horizontal_clipping_p = s_p; }   
+    if(input->vertical_clipping != ClipStyle::NONE) { target->vertical_clipping = input->vertical_clipping; target->vertical_clipping_p = s_p; }   
+   
+    if(input->width.type != MeasurementType::NONE) { target->width = input->width; target->width_p = s_p; }    
+    if(input->max_width.type != MeasurementType::NONE) { target->max_width = input->max_width; target->max_width_p = s_p; }    
+    if(input->min_width.type != MeasurementType::NONE) { target->min_width = input->min_width; target->min_width_p = s_p; }    
+
+    if(input->height.type != MeasurementType::NONE) { target->height = input->height; target->height_p = s_p; }    
+    if(input->max_height.type != MeasurementType::NONE) { target->max_height = input->max_height; target->max_height_p = s_p; }    
+    if(input->min_height.type != MeasurementType::NONE) { target->min_height = input->min_height; target->min_height_p = s_p; }    
+
+    // Note(Leo): We can really tell if colors are uninitialized or not.
+    target->color = input->color;
+    target->color_p = s_p;
+    target->text_color = input->text_color;
+    target->text_color_p = s_p;
+    
+    if(input->display != DisplayType::NONE) { target->display = input->display; target->display_p = s_p; }
+    
+    for(int i = 0; i < 4; i++)
+    {
+        if(input->margin.m[i].type == MeasurementType::NONE)
+        {
+            input->margin.m[i].type = MeasurementType::PIXELS;
+        }
+    }
+    target->margin = input->margin;
+    target->margin_p = s_p;
+    
+    for(int i = 0; i < 4; i++)
+    {
+        if(input->padding.m[i].type == MeasurementType::NONE)
+        {
+            input->padding.m[i].type = MeasurementType::PIXELS;
+        }
+    }
+    target->padding = input->padding;
+    target->padding_p = s_p;
+    
+    target->corners = input->corners;
+    target->corners_p = s_p;
+    
+    if(input->font_id != 0) { target->font_id = input->font_id; target->font_id_p = s_p; }
+    if(input->font_size != 0) { target->font_size = input->font_size; target->font_size_p = s_p; }   
+}
+
 // Merge the members of style into the in-flight main style 
 void MergeStyles(InFlightStyle* main, Style* style)
 {
-    int s_p = style->priority;
-    if(s_p > main->wrapping_p) { main->wrapping = style->wrapping; main->wrapping_p = s_p; }   
+    InFlightStyle temp;
     
-    if(s_p > main->horizontal_clipping_p) { main->horizontal_clipping = style->horizontal_clipping; main->horizontal_clipping_p = s_p; }   
-    if(s_p > main->vertical_clipping_p) { main->vertical_clipping = style->vertical_clipping; main->vertical_clipping_p = s_p; } 
-
-    if(s_p > main->width_p) { main->width = style->width; main->width_p = s_p; }   
-    if(s_p > main->min_width_p) { main->min_width = style->min_width; main->min_width_p = s_p; }   
-    if(s_p > main->max_width_p) { main->max_width = style->max_width; main->max_width_p = s_p; }   
-
-    if(s_p > main->height_p) { main->height = style->height; main->height_p = s_p; }
-    if(s_p > main->min_height_p) { main->min_height = style->min_height; main->min_height_p = s_p; }
-    if(s_p > main->max_height_p) { main->max_height = style->max_height; main->max_height_p = s_p; }
-
-    if(s_p > main->color_p) { main->color = style->color; main->color_p = s_p; }
-    if(s_p > main->text_color_p) { main->text_color = style->text_color; main->text_color_p = s_p; }
-    
-    if(s_p > main->display_p) { main->display = style->display; main->display_p = s_p; }
-    
-    if(s_p > main->margin_p) { main->margin = style->margin; main->margin_p = s_p; }
-    if(s_p > main->padding_p) { main->padding = style->padding; main->padding_p = s_p; }
-    if(s_p > main->corners_p) { main->corners = style->corners; main->corners_p = s_p; }
-    
-    if(s_p > main->font_id_p) { main->font_id = style->font_id; main->font_id_p = s_p; }
-    if(s_p > main->font_size_p) { main->font_size = style->font_size; main->font_size_p = s_p; }   
+    DefaultStyle(&temp);
+    convert_style(style, &temp);
+        
+    MergeStyles(main, &temp);
 }

@@ -332,12 +332,12 @@ int main()
         }
     
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, curr_window->width, curr_window->height);
-        ResetArena(temp_renderque);
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, curr_window->width, curr_window->height);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);
-        RenderplatformDrawWindow(platform.first_window, temp_renderque);
+        RenderplatformDrawWindow(platform.first_window, final_renderque);
+        ResetArena(temp_renderque);
         END_TIMED_BLOCK(DRAW_WINDOW);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);

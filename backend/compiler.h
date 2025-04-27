@@ -39,7 +39,6 @@ struct CompilerState
 struct SplitFileNames
 {
     char* code_file_name;
-    char* header_file_name;
     char* style_file_name;
     char* markup_file_name;
 };
@@ -203,6 +202,7 @@ enum class StyleFieldType {
     CORNERS,
     FONT_SIZE,
     FONT_NAME,
+    PRIORITY,
 };
 
 // Todo(Leo): Reflect these types in the compiler

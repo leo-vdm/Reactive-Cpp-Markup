@@ -1,8 +1,8 @@
 #version 450
-
+// https://www.khronos.org/opengl/wiki/Layout_Qualifier_(GLSL)
 layout (local_size_x_id = 0, local_size_y_id = 0) in;
-layout (binding = 0, r8) uniform readonly image2D glyph_atlas;
-layout (binding = 0, rgba8) uniform readonly image2D image_atlas;
+layout (set = 1, binding = 0, r8ui) uniform readonly uimage3D glyph_atlas;
+layout (set = 2, binding = 0, rgba8) uniform readonly image3D image_atlas;
 
 layout (binding = 1, rgba8) uniform image2D render_target;
 
@@ -19,13 +19,102 @@ struct combined_instance
     int type;
 };
 
+layout(std140, binding = 0) readonly buffer InstanceBuffer
+{
+    combined_instance instances[];  
+};
+
 layout( push_constant ) uniform constants
 {
 	vec2 screen_size;
 	int shape_count;
 } PushConstants;
 
+float individual_corner_box_aa(vec2 centre_position, vec2 measurements, vec4 radii)
+{
+    radii.xy = (centre_position.x > 0.0) ? radii.xy : radii.zw;
+    radii.x  = (centre_position.y > 0.0) ? radii.x  : radii.y;
+    vec2 q = abs(centre_position) - measurements + radii.x;
+    float distance = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radii.x;
+    return max(1.0f-smoothstep(0.0f, 2.0f, distance), 0.0f);
+}
+
+float sample_font_aa(ivec3 position)
+{
+    float d = float(imageLoad(glyph_atlas, position).r) - 128.0f;
+    float dr = float(imageLoad(glyph_atlas, position + ivec3(1, 0, 0)).r) - 128.0f;
+    float dd = float(imageLoad(glyph_atlas, position + ivec3(0, 1, 0)).r) - 128.0f;
+    
+    float dfdx = dr - d;
+    float dfdy = dd - d;
+    
+    float aaf = abs(dfdx) + abs(dfdy);
+    return smoothstep(0.5f - aaf, 0.5f + aaf, d);
+}
+
+bool point_inside_bounds(vec4 box, vec2 point)
+{
+    return point.x >= box.x && point.x <= box.z && point.y >= box.y && point.y <= box.w;
+}
+
+
 void main()
 {
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
+    
+    if(float(pixel_coord.x) > PushConstants.screen_size.x || float(pixel_coord.y) > PushConstants.screen_size.y)
+    {
+        return;
+    }
+    
+    vec4 pixel_color = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+    #pragma unroll 1
+    for(int i = 0; i < PushConstants.shape_count; i++)
+    {
+        combined_instance curr = instances[i];
+        
+        if(!point_inside_bounds(curr.bounds, gl_GlobalInvocationID.xy))
+        {
+            continue;
+        }
+        
+        vec3 sampled_coord = vec3((gl_GlobalInvocationID.xy - curr.shape_position) / curr.shape_size, 0.0f);
+        sampled_coord *= vec3(curr.sample_size, 0.0f);
+        sampled_coord += curr.sample_position;
+        
+        float smoothed_alpha = 0.0f;
+        vec4 shape_color = vec4(0.0f);
+        if(curr.type == 1)
+        {
+            smoothed_alpha = sample_font_aa(ivec3(sampled_coord));
+            
+            // Note(Leo): Text is not currently allowed to have transparency
+            shape_color = vec4(curr.corners.rgb, 1.0f);
+        }
+        else
+        {
+            vec2 coordT = gl_GlobalInvocationID.xy - (PushConstants.screen_size / 2.0f);
+            vec2 shapeT = curr.shape_position - (PushConstants.screen_size / 2.0f); 
+            
+            vec2 sidesT = curr.shape_size / 2.0f;
+            vec2 shapeC = shapeT + sidesT;
+            
+            vec2 delta = coordT - shapeC;
+            smoothed_alpha = individual_corner_box_aa(delta, sidesT, curr.corners);
+            shape_color = vec4(curr.sample_position, curr.sample_size.x);
+        }
+        
+        if(curr.type == 2)
+        {
+            shape_color = imageLoad(image_atlas, ivec3(sampled_coord));
+        }
+        
+        shape_color *= vec4(1.0f, 1.0f, 1.0f, smoothed_alpha);
+        
+        pixel_color = mix(pixel_color, vec4(shape_color.rgb, 1.0f), shape_color.a);
+       
+    }
+    
+    imageStore(render_target, pixel_coord, pixel_color);
 }

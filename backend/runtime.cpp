@@ -135,7 +135,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
     while(curr->file_path)
     {
         printf("Found binary \"%s\"\n", curr->file_name);
-        FILE* bin_file = fopen(curr->file_path, "r");
+        FILE* bin_file = fopen(curr->file_path, "rb");
         
         LoadedFileHandle* loaded_bin = (LoadedFileHandle*)Alloc(runtime.loaded_files, sizeof(LoadedFileHandle));
         *loaded_bin = LoadPage(bin_file, runtime.loaded_tags, runtime.loaded_attributes, runtime.loaded_styles, runtime.loaded_selectors, runtime.static_combined_values);
@@ -281,6 +281,7 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                 // Text font and size comes from parent
                 element->working_style.font_id = element->parent->working_style.font_id;
                 element->working_style.font_size = element->parent->working_style.font_size;
+                element->working_style.text_color = element->parent->working_style.text_color;
                 
                 if(!curr_attribute->Text.binding_id) // Text is known
                 {
@@ -297,10 +298,10 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                 
                 element->Text.temporal_text_length = binding_text->length;
                 
-                // Note(Leo): We do a length limited flatten since we dont want a \0
-                element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*binding_text->length);
-                Flatten(binding_text, element->Text.temporal_text, sizeof(char)*binding_text->length);
-                
+                // Note(Leo): +1 to fit \0 which is automatically apended
+                element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*(binding_text->length + 1));
+                Flatten(binding_text, element->Text.temporal_text);
+            
                 FreeString(binding_text);
                 
                 break;
@@ -392,14 +393,17 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                     {
                         InFlightStyle selector_style = merge_selector_styles(found_selector);
                         MergeStyles(&element->working_style, &selector_style);
-                    }                 
+                    }
+                    else
+                    {
+                        printf("Unknown selector name: %s\n", global_name);
+                    }
                     
                     // Move over the ' '
                     end_address++;
                     start_address = end_address;
                     
                 }
-                
                 
                 break;
             }
@@ -419,7 +423,7 @@ void RuntimeClearTemporal(DOM* target)
     ResetArena(target->frame_arena);
 }
 
-void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height)
+Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height)
 {
     // Note(Leo): Page root element is always at the first address of the dom
     Element* root_element = (Element*)dom->elements->mapped_address;
@@ -460,5 +464,5 @@ void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, 
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
     //            will never underestimate so its ok.
     int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
-    ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
+    return ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
 }

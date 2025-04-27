@@ -224,6 +224,8 @@ enum class ElementType
     VIDEO,
 };
 
+struct LoadedImageHandle;
+
 struct Element 
 {
     void* master;
@@ -250,6 +252,10 @@ struct Element
             char* temporal_text;
             int temporal_text_length;
         } Text;
+        struct 
+        {
+            LoadedImageHandle* handle;
+        } Image;
         struct {
         
         } Video;

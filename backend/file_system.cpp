@@ -109,6 +109,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         curr_style->saved_font_name.length = style_name.len;
         
         fwrite(curr_style, sizeof(Style), 1, out_file);
+        
             
         current_index += sizeof(Style);
         header.style_count++;
@@ -124,7 +125,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         added_selector.global_id = curr_selector->global_id;
         added_selector.name_index = push_val_to_combined_arena(&combined_values_arena, curr_selector->name, curr_selector->name_length);
         added_selector.name_length = curr_selector->name_length;
-        
+            
         added_selector.num_styles = curr_selector->num_styles;
         
         for(int i = 0; i < curr_selector->num_styles; i++)
@@ -291,6 +292,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
 #if debug_load
         printf(" --Style--\n");
         printf("\tGlobal Id: %d\n", added_style->global_id);
+        printf("\tPriority: %d\n", added_style->priority);
 #endif
     }
     

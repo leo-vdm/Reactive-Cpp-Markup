@@ -40,26 +40,6 @@ struct vk_shader
     int shader_length;
 };
 
-struct image_tile
-{
-    image_tile* next;
-    uint32_t content_width;
-    uint32_t content_height;
-    uvec2 image_offsets; // Offset of this tile in the original image
-    uvec3 atlas_offsets; // Offset of this tile's contetn inside the atlas
-};
-
-struct LoadedImageHandle
-{
-    uint32_t image_width;
-    uint32_t image_height;
-    
-    uint32_t tiled_width; // The # of tiles that this image is wide
-    uint32_t tiled_height;// # of tiles high this image is.
-    
-    image_tile* first_tile;
-};
-
 struct vk_atlas_texture 
 {
     VkDescriptorSetLayout descriptor_layout;
@@ -764,7 +744,7 @@ bool vk_create_combined_pipeline(void* compute_shader_bin, int compute_bin_lengt
     compute_shader_stage_info.pName = "main";
     compute_shader_stage_info.pSpecializationInfo = &specialization_info;
     
-    VkDescriptorSetLayout set_layouts[] = { rendering_platform.vk_combined_descriptor_layout, rendering_platform.vk_image_atlas.descriptor_layout, rendering_platform.vk_glyph_atlas.descriptor_layout }; 
+    VkDescriptorSetLayout set_layouts[] = { rendering_platform.vk_combined_descriptor_layout, rendering_platform.vk_glyph_atlas.descriptor_layout, rendering_platform.vk_image_atlas.descriptor_layout }; 
     
     VkPushConstantRange constants = {};
     constants.offset = 0;
@@ -1226,7 +1206,7 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     *(rendering_platform.vk_binary_data) = CreateArena(10000000*sizeof(char), sizeof(char));
     
     rendering_platform.image_atlas_tiles = (Arena*)Alloc(rendering_platform.vk_master_arena, sizeof(Arena), zero());
-    *(rendering_platform.image_atlas_tiles) = CreateArena(1000*sizeof(image_tile), sizeof(LoadedImageHandle));
+    *(rendering_platform.image_atlas_tiles) = CreateArena(1000*sizeof(RenderPlatformImageTile), sizeof(RenderPlatformImageTile));
     
     rendering_platform.image_handles = (Arena*)Alloc(rendering_platform.vk_master_arena, sizeof(Arena), zero());
     *(rendering_platform.image_handles) = CreateArena(1000*sizeof(LoadedImageHandle), sizeof(LoadedImageHandle));
@@ -1635,7 +1615,13 @@ uvec3 vk_get_tile_coordinate(vk_atlas_texture* atlas, uint32_t tile_size, int ti
     return {x_tile * tile_size, y_tile * tile_size, depth};
 }
 
-#define ImageTileSlot(tile_ptr) (((uintptr_t)tile_ptr - rendering_platform.image_atlas_tiles->mapped_address) / sizeof(image_tile)) 
+vec3 RenderPlatformGetGlyphPosition(int glyph_slot)
+{
+    uvec3 position = vk_get_tile_coordinate(&rendering_platform.vk_glyph_atlas, FontPlatformGetGlyphSize(), glyph_slot);
+    return { (float)position.x, (float)position.y, (float)position.z };
+}
+
+#define ImageTileSlot(tile_ptr) (((uintptr_t)tile_ptr - rendering_platform.image_atlas_tiles->mapped_address) / sizeof(RenderPlatformImageTile)) 
 
 void RenderplatformLoadImage(FILE* image_file, const char* name)
 {
@@ -1662,8 +1648,8 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     created_handle->tiled_width = (image_width / IMAGE_TILE_SIZE) + (image_width % IMAGE_TILE_SIZE > 0 ? 1 : 0);
     created_handle->tiled_height = (image_height / IMAGE_TILE_SIZE) + (image_height % IMAGE_TILE_SIZE > 0 ? 1 : 0);
     
-    // Note(Leo): The slot of an image_tile in the gpu atlas is the index of the image_tile in the tiles arena
-    image_tile* curr_tile = (image_tile*)Alloc(rendering_platform.image_atlas_tiles, sizeof(curr_tile));
+    // Note(Leo): The slot of an RenderPlatformImageTile in the gpu atlas is the index of the RenderPlatformImageTile in the tiles arena
+    RenderPlatformImageTile* curr_tile = (RenderPlatformImageTile*)Alloc(rendering_platform.image_atlas_tiles, sizeof(RenderPlatformImageTile));
     created_handle->first_tile = curr_tile;
     
     //Note(Leo): 4 bytes per pixel for RGBA
@@ -1677,6 +1663,7 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     {
         for(int column = 0; column < created_handle->tiled_width; column++)
         {
+            uint32_t slot = ImageTileSlot(curr_tile);
             curr_tile->atlas_offsets = vk_get_tile_coordinate(&rendering_platform.vk_image_atlas, (uint32_t)IMAGE_TILE_SIZE, ImageTileSlot(curr_tile));
             curr_tile->image_offsets.x = cursor_x; 
             curr_tile->image_offsets.y = cursor_y;
@@ -1693,16 +1680,16 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
                 curr_tile->content_height = created_handle->image_height - cursor_y;
             }
         
-            uintptr_t image_copy_offset = cursor_x + (cursor_y * created_handle->image_width);
+            uintptr_t image_copy_offset = (uintptr_t)(cursor_x + (cursor_y * created_handle->image_width));
             
             // 4 bytes per pixel
             image_copy_offset *= 4;
             
-            for(int copy_row = 0; copy_row < IMAGE_TILE_SIZE; copy_row++)
+            for(int copy_row = 0; copy_row < curr_tile->content_height; copy_row++)
             {
                 void* target_row = Alloc(&working_tile, IMAGE_TILE_SIZE * 4, zero());
-                memcpy(target_row, (void*)((uintptr_t)image_pixels + image_copy_offset), IMAGE_TILE_SIZE * 4);
-                image_copy_offset += created_handle->image_width * 4;
+                memcpy(target_row, (void*)((uintptr_t)image_pixels + image_copy_offset), curr_tile->content_width * 4);
+                image_copy_offset += (uintptr_t)(created_handle->image_width * 4);
             }
             
             if(!vk_transition_image_layout(rendering_platform.vk_image_atlas.image, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
@@ -1741,10 +1728,18 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
             vkFreeMemory(rendering_platform.vk_device, temp_stage_memory, 0);
                         
             ResetArena(&working_tile);
+            // Note(Leo): This isnt neccesary but by not sanitizing this arena totally the renderdoc view of the atlas becomes 
+            //            polluted and difficult to judge whether it is working correctly.
+            memset((void*)working_tile.mapped_address, 0, IMAGE_TILE_SIZE * IMAGE_TILE_SIZE * 4);
+                        
+            RenderPlatformImageTile* last_tile = curr_tile;
             
-            image_tile* last_tile = curr_tile;
-            curr_tile = (image_tile*)Alloc(rendering_platform.image_atlas_tiles, sizeof(curr_tile));
-            last_tile->next = curr_tile;
+            // Dont alloc on very last iteration
+            if(!(row == created_handle->tiled_height - 1 && column == created_handle->tiled_width - 1))
+            {
+                curr_tile = (RenderPlatformImageTile*)Alloc(rendering_platform.image_atlas_tiles, sizeof(RenderPlatformImageTile));
+                last_tile->next = curr_tile;
+            }
             
             cursor_x += IMAGE_TILE_SIZE;
         }
@@ -1754,6 +1749,8 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     
     DeAllocScratch(working_tile_mem);
 }
+
+
 
 bool vk_initialize_atlas(vk_atlas_texture* atlas, VkFormat image_format)
 {

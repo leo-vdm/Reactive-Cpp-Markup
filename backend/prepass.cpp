@@ -72,14 +72,6 @@ SplitFileNames SeperateSource(FILE* source_file, Arena* file_name_arena, char* s
     
     FILE* code_file = fopen(output_name_buffer, "w");
     
-    // Header file name
-    final_length = sprintf(output_name_buffer, "%s/%s.h", output_dir, real_name) + 1;
-    result.header_file_name = (char*)Alloc(file_name_arena, final_length*sizeof(char));
-    memcpy(result.header_file_name, output_name_buffer, final_length);
-    printf("Removing: %s\n", output_name_buffer);
-    
-    remove(output_name_buffer);
-    
     // Break out cpp code
     copy_between_tag_hit(code_file, source_file, "<code>", "</code>");
     

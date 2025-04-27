@@ -1,5 +1,5 @@
 #include <vulkan/vulkan.h>
-
+#pragma once
 
 struct vec2 
 {
@@ -185,15 +185,24 @@ struct SpecializationData
     int32_t render_tile_size;
 };
 
+enum class CombinedInstanceType
+{
+    NORMAL     = 0,
+    GLYPH      = 1,
+    IMAGE_TILE = 2,
+};
+
 struct combined_instance 
 {
-    vec4 bounds;
-    vec2 shape_position;
-    vec2 shape_size;
-    vec4 corners;
+    alignas(16) vec4 bounds;
+    alignas(8) vec2 shape_position;
+    alignas(8) vec2 shape_size;
+    
+    // Note(Leo): glyphs overlap their color overtop corners since they dont need it but need sample position.
+    alignas(16) vec4 corners;
     
     // Note(Leo): sample position/size is packed overtop the RGBA color of the element background allowing them to be discrimated by type
-    vec3 sample_position; // RGB
-    vec2 sample_size;     // A
-    int32_t type;
+    alignas(16) vec3 sample_position; // RGB
+    alignas(8) vec2 sample_size;     // A
+    alignas(4) int32_t type;
 };

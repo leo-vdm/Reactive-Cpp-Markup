@@ -5,10 +5,8 @@ class test_component : Component
     public:
     int mycolor;
     
-    #bind
     int count;
     
-    #bind
     int my_var;
     
     void CompMain(DOM* dom){
@@ -18,7 +16,6 @@ class test_component : Component
         count = 100;
     }
     
-    #subto count
     void on_count_changed(){
         printf("Changed");
         count = 10;
@@ -26,17 +23,17 @@ class test_component : Component
 };
 </code>
 <root>
-<div>
-	<div something="herro" style="color: {mycolor};">
+<vdiv>
+	<hdiv something="herro" style="color: {mycolor};">
 		Hello	
-	</div>
+	</hdiv>
 
-	<div>
-		<div class="orange" class="another" class="mein">
+	<hdiv>
+		<hdiv class="orange my_orange" class="another" class="mein">
 			Hello {my_var}
-		</div>
-	</div>
-</div>
+		</hdiv>
+	</hdiv>
+</vdiv>
 
 </root>
 
@@ -47,6 +44,6 @@ height: 100px;
 }
 
 myclass {
-maxWidth: 100%;
+max_width: 100%;
 }
 </style>

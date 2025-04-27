@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cassert>
 #include <map>
 
 #include "compiler.h"
@@ -247,11 +248,13 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
     
     // Note(Leo): Clear the registered bindings here so files dont end up using eachothers ids
     clear_registered_bindings();
+    Alloc(target->registered_bindings, sizeof(RegisteredBinding), zero());
     
     // Note(Leo): File system save fn expects a zeroed tag to mark the end of the page/comp
     Alloc(target->tags, sizeof(Tag), zero());
     // Note(leo): same for attributes
     Alloc(target->attributes, sizeof(Attribute), zero());
+    
 }
 
 std::map<std::string, TagType> tag_map = 
@@ -322,12 +325,14 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView
         RegisteredBinding* bindings = (RegisteredBinding*)bindings_arena->mapped_address;
         
         RegisteredBinding* existing_binding = bindings + binding_id;
+        
+        existing_binding->registered_tag_ids[existing_binding->num_registered] = tag_id;
+        
         existing_binding->num_registered = (existing_binding->num_registered + 1) % MAX_TAGS_PER_BINDING;
         if(existing_binding->num_registered == 0) // Indicates that the index passed over modulo
         {
             printf("Be careful, binding with name %s has gone over its registered tag limit!", terminated_name);
         }
-        existing_binding->registered_tag_ids[existing_binding->num_registered] = tag_id;
         
         DeAllocScratch(name);
         return search->second;
@@ -359,7 +364,7 @@ void clear_registered_bindings()
     registered_binding_map.clear();
 }
 
-std::map<std::string, int> registered_selector_map = {};
+std::map<std::string, Selector*> registered_selector_map = {};
 
 void clear_registered_selectors()
 {
@@ -426,19 +431,17 @@ int RegisterSelectorByName(Compiler::LocalStyles* target, StringView* name, int 
     // If the binding is already registered, return its ID
     if(search != registered_selector_map.end()){
         // Register the tag with the binding
-        int selector_id = search->second;
-        Selector* found_selector = (Selector*)target->selectors->mapped_address;
-        found_selector += selector_id; // ID is always the offset into the global selectors arena for a given selector.
+        Selector* found_selector = (Selector*)search->second;
         
+        found_selector->style_ids[found_selector->num_styles] = style_id;
         found_selector->num_styles = (found_selector->num_styles + 1) % MAX_STYLES_PER_SELECTOR;
         if(found_selector->num_styles == 0) // Indicates that the index passed over modulo
         {
-            printf("Be careful, selector with name %s has gone over its registered style limit!", terminated_name);
+            printf("Be careful, selector with name %s has gone over its registered style limit!\n", terminated_name);
         }
-        found_selector->style_ids[found_selector->num_styles] = style_id;
         DeAllocScratch(terminated_name);
         
-        return search->second;
+        return found_selector->global_id;
     }
     
     // Register the selector globally and locally since it doesnt exist
@@ -461,7 +464,7 @@ int RegisterSelectorByName(Compiler::LocalStyles* target, StringView* name, int 
     new_selector->style_ids[0] = style_id;
     
     // Set the local selector
-    registered_selector_map.insert({(const char*)terminated_name, new_selector->global_id});
+    registered_selector_map.insert({(const char*)terminated_name, new_selector});
     DeAllocScratch(terminated_name);
     return new_selector->global_id;
 }
@@ -501,6 +504,10 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         
         if(new_attribute->type == AttributeType::CUSTOM)
         {
+            if(parent_tag->type != TagType::CUSTOM)
+            {
+                printf("Warning: Custom attribute \"%.*s\" on non-component tag. Please insure this was intended and not a typo.\n", curr_token->body.len, curr_token->body.value);
+            }
             new_attribute->Custom.name_length = curr_token->body.len;
             new_attribute->Custom.name = (char*)Alloc(values_arena, new_attribute->Custom.name_length*sizeof(char));
             memcpy(new_attribute->Custom.name, curr_token->body.value, new_attribute->Custom.name_length);
@@ -625,6 +632,7 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
             case(TokenType::TEXT):
                 {
                 StringView stripped_name = StripOuterWhitespace(&curr_token->body);
+                
                 RegisterSelectorByName(target, &stripped_name, style_id, global_prefix, state);
                 eat();
                 if(curr_token->type == TokenType::COMMA) // Inidcates that there is another 
@@ -732,6 +740,26 @@ DisplayType parse_display_type(StringView* expression)
     return DisplayType::NONE;
 }
 
+int parse_int_field(StringView* expression)
+{
+    char* terminated_field = (char*)AllocScratch((expression->len + 1)*sizeof(char), no_zero());
+    memcpy(terminated_field, expression->value, expression->len);
+    terminated_field[expression->len] = '\0'; // Adding null terminator
+
+    int value = 0;
+    int result = sscanf(terminated_field, "%d", &value);
+    
+    if(result != 1)
+    {
+        DeAllocScratch(terminated_field);
+        printf("Unable to parse integer style field!\n");
+        return 0;
+    }
+    
+    DeAllocScratch(terminated_field);
+    return value;
+}
+
 std::map<std::string, StyleFieldType> style_field_map = 
 {
     {"text_wrapping", StyleFieldType::WRAPPING },
@@ -751,6 +779,7 @@ std::map<std::string, StyleFieldType> style_field_map =
     {"corners", StyleFieldType::CORNERS },
     {"font_size", StyleFieldType::FONT_SIZE },
     {"font", StyleFieldType::FONT_NAME },
+    {"priority", StyleFieldType::PRIORITY },
 };
 
 
@@ -767,6 +796,12 @@ void parse_style_expr(Style* target)
 
     switch(expr_type)
     {
+        case(StyleFieldType::PRIORITY):
+        {
+            if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
+            target->priority = parse_int_field(&curr_token->body);
+            break;
+        }
         case(StyleFieldType::WIDTH):
         {
             if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
@@ -891,16 +926,16 @@ void parse_style_expr(Style* target)
         case(StyleFieldType::TEXT_COLOR):
         {
             if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
-            target->color.r = 0.0f;
-            target->color.g = 0.0f;
-            target->color.b = 0.0f;
-            target->color.a = 1.0f;
+            target->text_color.r = 0.0f;
+            target->text_color.g = 0.0f;
+            target->text_color.b = 0.0f;
+            target->text_color.a = 1.0f;
             
             // Note(Leo): Text cant have transparency so we only read 3 channels
             for(int i = 0; i < 3; i++)
             {
                 StringView stripped = StripOuterWhitespace(&curr_token->body);
-                target->color.c[i] = parse_color_channel(&stripped);
+                target->text_color.c[i] = parse_color_channel(&stripped);
                 if(!expect_eat(TokenType::COMMA))
                 {
                     // We mustve come to the end of the color decleration and hit a semicolon.
@@ -1113,6 +1148,12 @@ Measurement parse_size_field(StringView* expression)
         if(search != measurement_unit_map.end()){
             parsed_measurement.type = search->second;
             parsed_measurement.size = size;
+            
+            // Note(Leo): Shaping platform expects % sizes in a normalized range
+            if(parsed_measurement.type == MeasurementType::PERCENT)
+            {
+                parsed_measurement.size /= 100.0f;
+            }
         }
         else
         {

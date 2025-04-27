@@ -81,21 +81,10 @@ enum class LayoutDirection
 enum class LayoutElementType
 {
     NORMAL, // Normal div types
-    NORMAL_TRANSPARENT, // Same as normal but color has a non opaque alpha
     TEXT,
     TEXT_COMBINED,
     IMAGE,
     END,
-};
-
-struct shape_color 
-{
-    float r, g, b;  
-};
-
-struct shape_color_transparent
-{
-    float r, g, b, a;
 };
 
 struct LayoutElement
@@ -116,21 +105,14 @@ struct LayoutElement
     {
         struct
         {
-            shape_color color;
+            StyleColor color;
             Corners corners;
             shape_clipping clipping;
             TextWrapping wrapping; // Controls how child text should be wrapped
         } NORMAL;
         struct
         {
-            shape_color_transparent color;
-            Corners corners;
-            shape_clipping clipping;
-            TextWrapping wrapping; // Controls how child text should be wrapped
-        } NORMAL_TRANSPARENT;
-        struct
-        {
-            shape_color text_color;
+            StyleColor text_color;
             FontHandle font_id;
             uint16_t font_size;     
             uint16_t text_length;
@@ -144,17 +126,20 @@ struct LayoutElement
         struct 
         {
             Corners corners;
-            uint16_t image_id;
-            uint16_t source_width;
-            uint16_t source_height;
+            LoadedImageHandle* handle;
         } IMAGE;
     };
 };
 
 struct shaping_context 
 {
+    uint32_t element_count;
+    uint32_t glyph_count;
+    uint32_t image_tile_count;
+    
     Arena* shape_arena;
     Arena* layout_element_arena;
+    Arena* final_renderque;
 };
 
 // Returns true if two bounding boxes intersect and optionally returns the intersection region
@@ -173,10 +158,13 @@ bool boxes_intersect(bounding_box* first, bounding_box* second, bounding_box* re
         }
         return false;
     }
-    region->x = MAX(first->x, second->x); 
-    region->y = MAX(first->y, second->y); 
-    region->width = MIN(first_right, second_right) - region->x;
-    region->height = MIN(first_bottom, second_bottom) - region->y;
+    if(region)
+    {
+        region->x = MAX(first->x, second->x); 
+        region->y = MAX(first->y, second->y); 
+        region->width = MIN(first_right, second_right) - region->x;
+        region->height = MIN(first_bottom, second_bottom) - region->y;   
+    }
     return true;
 }
 
@@ -212,24 +200,10 @@ void convert_element_style(InFlightStyle* in, LayoutElement* target)
         case(LayoutElementType::NORMAL):
             {
                 memcpy(&target->NORMAL.corners, &in->corners, sizeof(Corners));
-                // Note(Leo): This relies on StyleColor and shape_color using same sized components and being in rgba order
-                //          (we are under-copying from the style's color since we dont want the alpha component)
-                static_assert(sizeof(shape_color) < sizeof(StyleColor));
-                memcpy(&target->NORMAL.color, &in->corners, sizeof(shape_color));
+                memcpy(&target->NORMAL.color, &in->color, sizeof(StyleColor));
                 target->NORMAL.clipping.horizontal = in->horizontal_clipping;
                 target->NORMAL.clipping.vertical = in->vertical_clipping;
                 target->NORMAL.wrapping = in->wrapping;
-            }
-            break;
-        case(LayoutElementType::NORMAL_TRANSPARENT):
-            {
-                memcpy(&target->NORMAL_TRANSPARENT.corners, &in->corners, sizeof(Corners)); 
-                // Note(Leo): These two should be the same
-                static_assert(sizeof(shape_color_transparent) == sizeof(StyleColor));
-                memcpy(&target->NORMAL_TRANSPARENT.color, &in->color, sizeof(StyleColor)); 
-                target->NORMAL_TRANSPARENT.clipping.horizontal = in->horizontal_clipping;
-                target->NORMAL_TRANSPARENT.clipping.vertical = in->vertical_clipping;
-                target->NORMAL_TRANSPARENT.wrapping = in->wrapping;
             }
             break;
         case(LayoutElementType::IMAGE):
@@ -240,8 +214,7 @@ void convert_element_style(InFlightStyle* in, LayoutElement* target)
         case(LayoutElementType::TEXT):
             {
                 // Note(Leo): Text cant have transparency.
-                static_assert(sizeof(shape_color) < sizeof(StyleColor));
-                memcpy(&target->TEXT.text_color, &in->text_color, sizeof(shape_color));
+                memcpy(&target->TEXT.text_color, &in->text_color, sizeof(StyleColor));
                 target->TEXT.font_id = in->font_id;
                 target->TEXT.font_size = in->font_size;
             }
@@ -274,14 +247,7 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
             case(ElementType::ROOT):
             case(ElementType::GRID):
                 {
-                    if(curr->working_style.color.a >= 1.0f)
-                    {
-                        converted->type = LayoutElementType::NORMAL;
-                    }
-                    else
-                    {
-                        converted->type = LayoutElementType::NORMAL_TRANSPARENT;
-                    }
+                    converted->type = LayoutElementType::NORMAL;
                     
                     if(curr->type == ElementType::VDIV || curr->type == ElementType::ROOT)
                     {
@@ -305,15 +271,7 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
                     Element* comp_root = curr->first_child;
                     assert(comp_root->type == ElementType::ROOT);
                     converted->element_id = comp_root->id;
-
-                    if(comp_root->working_style.color.a >= 1.0f)
-                    {
-                        converted->type = LayoutElementType::NORMAL;
-                    }
-                    else
-                    {
-                        converted->type = LayoutElementType::NORMAL_TRANSPARENT;
-                    }
+                    converted->type = LayoutElementType::NORMAL;
                     converted->dir = LayoutDirection::VERTICAL;
                     convert_element_style(&comp_root->working_style, converted);
                 }
@@ -331,6 +289,7 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
                 {
                     converted->type = LayoutElementType::IMAGE;
                     converted->dir = LayoutDirection::NONE;
+                    converted->IMAGE.handle = curr->Image.handle;
                     convert_element_style(&curr->working_style, converted);
                 }
                 break;
@@ -427,12 +386,12 @@ void sanitize_size_axis(size_axis* parent, size_axis* child)
     }
     else if(child->desired.type == MeasurementType::PIXELS) // Bake padding sizes if we can
     {
-        if(child->padding1.type != MeasurementType::PERCENT)
+        if(child->padding1.type == MeasurementType::PERCENT)
         {
             child->padding1.type = MeasurementType::PIXELS;
             child->padding1.size = child->padding1.size * child->desired.size;
         }
-        if(child->padding2.type != MeasurementType::PERCENT)
+        if(child->padding2.type == MeasurementType::PERCENT)
         {
             child->padding2.type = MeasurementType::PIXELS;
             child->padding2.size = child->padding2.size * child->desired.size;
@@ -443,7 +402,8 @@ void sanitize_size_axis(size_axis* parent, size_axis* child)
 // Note(Leo): Explanation for first pass
 // First pass checks all the children of the given element for erroneous sizing and passes down known sizes (pixels or calculated 
 // %)
-// Also combines sibling text elements and measures + wraps them if it can
+// Also combines sibling text elements and measures + wraps them if it can.
+// Also also add the number of glyphs and tiles in an image into the context to eventaully get the renderque size
 void shape_first_pass(shaping_context* context, LayoutElement* parent)
 {
     MeasurementType p_width_type = parent->sizing.width.desired.type;
@@ -466,22 +426,31 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
         if(curr_child->type == LayoutElementType::TEXT)
         {
             // Note(Leo): There cant be more text children than total children in the parent so we wont underallocate here
-            StringView* text_views = ( StringView*)AllocScratch(parent->child_count*sizeof(StringView));
-            FontHandle* text_fonts = (FontHandle*)AllocScratch(parent->child_count*sizeof(char*));
-            uint16_t* font_sizes = (uint16_t*)AllocScratch(parent->child_count*sizeof(char*));
+            void* text_view_mem = AllocScratch((parent->child_count + 1)*sizeof(StringView));
+            StringView* text_views = align_mem(text_view_mem, StringView);
+            
+            void* text_font_mem = AllocScratch((parent->child_count + 1)*sizeof(FontHandle));
+            FontHandle* text_fonts = align_mem(text_font_mem, FontHandle);
+            
+            void* font_size_mem = AllocScratch((parent->child_count + 1)*sizeof(uint16_t));
+            uint16_t* font_sizes = align_mem(font_size_mem, uint16_t);
+            
+            void* text_color_mem = AllocScratch((parent->child_count + 1)*sizeof(StyleColor));
+            StyleColor* text_colors = align_mem(text_color_mem, StyleColor);
             
             // Aggregate text children
             int text_sibling_count = 0;
             LayoutElement* curr_text = curr_child;
             // Line height will be the height of the largest font
             int line_height = 0;
-            while(curr_text < target && curr_child->type == LayoutElementType::TEXT)
+            while(curr_text < target && curr_text->type == LayoutElementType::TEXT)
             {
-                text_views[text_sibling_count] = {(curr_child + text_sibling_count)->TEXT.text_content, (curr_child + text_sibling_count)->TEXT.text_length};
-                text_fonts[text_sibling_count] = (curr_child + text_sibling_count)->TEXT.font_id;
-                font_sizes[text_sibling_count] = (curr_child + text_sibling_count)->TEXT.font_size;
+                text_views[text_sibling_count] = {curr_text->TEXT.text_content, curr_text->TEXT.text_length};
+                text_fonts[text_sibling_count] = curr_text->TEXT.font_id;
+                font_sizes[text_sibling_count] = curr_text->TEXT.font_size;
+                text_colors[text_sibling_count] = curr_text->TEXT.text_color;
             
-                line_height = MAX(line_height, (curr_child + text_sibling_count)->TEXT.font_size);
+                line_height = MAX(line_height, curr_text->TEXT.font_size);
                 
                 text_sibling_count++;
                 curr_text++;
@@ -508,7 +477,9 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             
             // Shape text
             FontPlatformShapedText result = {};
-            FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_sibling_count, wrapping_point, line_height);
+            FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_colors, text_sibling_count, wrapping_point, line_height);
+            
+            context->glyph_count += result.glyph_count;
             
             // Convert current TEXT element to a combined text
             curr_child->type = LayoutElementType::TEXT_COMBINED;
@@ -524,13 +495,18 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             curr_child->sizing.height.desired.size = (float)result.required_height;
             curr_child->sizing.height.desired.type = MeasurementType::PIXELS;
             
-            DeAllocScratch(font_sizes);
-            DeAllocScratch(text_fonts);
-            DeAllocScratch(text_views);
+            DeAllocScratch(text_color_mem);
+            DeAllocScratch(font_size_mem);
+            DeAllocScratch(text_font_mem);
+            DeAllocScratch(text_view_mem);
             
             // Skip outer iteration over the other text siblings which have been combined into this one.
             curr_child = curr_child + text_sibling_count;
             continue;
+        }
+        else if(curr_child->type == LayoutElementType::IMAGE)
+        {
+            context->image_tile_count += curr_child->IMAGE.handle->tiled_width * curr_child->IMAGE.handle->tiled_height;
         }
         
         sanitize_size_axis(&parent->sizing.width, &curr_child->sizing.width);
@@ -957,7 +933,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     if(grow_width_meaure_count)
     {
         // Note(Leo): Since the required min size of growth elements is included in the p_width_accumulated this is the 
-        //            extra leftover space. IF this is less than zero that indicates a overflow of the parent.
+        //            extra leftover space. IF this is less than zero that indicates an overflow of the parent.
         float growth_space = p_width - p_width_accumulated;
         
         // Divying up the extra space if there is any
@@ -988,12 +964,99 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
     
 }
 
+void final_place_image(shaping_context* context, LayoutElement* image)
+{
+    LoadedImageHandle* handle = image->IMAGE.handle;
+    float horizontal_scale = image->sizing.width.desired.size / (float)handle->image_width;
+    float vertical_scale = image->sizing.height.desired.size / (float)handle->image_height;
 
+    float base_x = image->position.x;
+    float base_y = image->position.y;
+
+    // The instance bounds are the actual screen coordinates of each corner of the bounding box
+    vec4 bounds = { image->bounds.x, image->bounds.y, image->bounds.x + image->bounds.width, image->bounds.y + image->bounds.height };
+    
+    RenderPlatformImageTile* curr_tile = handle->first_tile;
+    while(curr_tile)
+    {
+        combined_instance* created = (combined_instance*)Alloc(context->final_renderque, sizeof(combined_instance));
+        memcpy(&created->bounds, &bounds, sizeof(vec4));
+        
+        static_assert(sizeof(Corners) == sizeof(vec4));
+        memcpy(&created->corners, &image->IMAGE.corners, sizeof(Corners));
+        
+        created->shape_position = { ((float)curr_tile->image_offsets.x * horizontal_scale) + base_x, ((float)curr_tile->image_offsets.y * vertical_scale) + base_y };
+        created->shape_size = { (float)curr_tile->content_width * horizontal_scale, (float)curr_tile->content_height * vertical_scale };
+        
+        created->sample_position = { (float)curr_tile->atlas_offsets.x, (float)curr_tile->atlas_offsets.y, (float)curr_tile->atlas_offsets.z };
+        created->sample_size = { (float)curr_tile->content_width, (float)curr_tile->content_height };
+        
+        created->type = (int)CombinedInstanceType::IMAGE_TILE;
+        
+        curr_tile = curr_tile->next;
+    }
+}
+
+void final_place_text(shaping_context* context, LayoutElement* combined_text)
+{
+    float base_x = combined_text->position.x;
+    float base_y = combined_text->position.y;
+    
+    for(uint32_t i = 0; i < combined_text->TEXT_COMBINED.glyph_count; i++)
+    {
+        FontPlatformShapedGlyph* curr_glyph = combined_text->TEXT_COMBINED.first_glyph + i;
+        
+        bounding_box adjusted_bounds = { base_x + curr_glyph->placement_offsets.x, base_y + curr_glyph->placement_offsets.y, curr_glyph->placement_size.x, curr_glyph->placement_size.y };
+     
+        // Skip hidden glyphs
+        if(!boxes_intersect(&combined_text->bounds, &adjusted_bounds, &adjusted_bounds))
+        {
+            continue;
+        }
+        
+        combined_instance* created = (combined_instance*)Alloc(context->final_renderque, sizeof(combined_instance));
+        
+        // The instance bounds are the actual screen coordinates of each corner of the bounding box
+        vec4 bounds = { adjusted_bounds.x, adjusted_bounds.y, adjusted_bounds.x + adjusted_bounds.width, adjusted_bounds.y + adjusted_bounds.height };
+        memcpy(&created->bounds, &bounds, sizeof(vec4));
+        
+        static_assert(sizeof(StyleColor) == sizeof(vec4));
+        // Note(Leo): Color gets put into the corners variable for glyphs since they dont have corners.
+        memcpy(&created->corners, &curr_glyph->color, sizeof(StyleColor));
+        
+        created->shape_position = { base_x + curr_glyph->placement_offsets.x, base_y + curr_glyph->placement_offsets.y };
+        memcpy(&created->shape_size, &curr_glyph->placement_size, sizeof(vec2));
+        
+        memcpy(&created->sample_position, &curr_glyph->atlas_offsets, sizeof(vec3));
+        memcpy(&created->sample_size, &curr_glyph->atlas_size, sizeof(vec2));
+               
+        created->type = (int)CombinedInstanceType::GLYPH;
+    }
+}
+
+
+void final_place_element(shaping_context* context, LayoutElement* element)
+{
+    combined_instance* created = (combined_instance*)Alloc(context->final_renderque, sizeof(combined_instance));
+    vec4 bounds = { element->bounds.x, element->bounds.y, element->bounds.x + element->bounds.width, element->bounds.y + element->bounds.height };
+    memcpy(&created->bounds, &bounds, sizeof(vec4));
+    
+    memcpy(&created->corners, &element->NORMAL.corners, sizeof(Corners));
+    
+    // Note(Leo): Color gets put into the sample_position variable since shapes dont sample anything.
+    created->sample_position = { element->NORMAL.color.r, element->NORMAL.color.g, element->NORMAL.color.b };
+    created->sample_size = { element->NORMAL.color.a, 0.0f };
+        
+    memcpy(&created->shape_position, &element->position, sizeof(vec2));
+    created->shape_size = { element->sizing.width.desired.size, element->sizing.height.desired.size };
+    created->type = (int)CombinedInstanceType::NORMAL;
+}
 
 // Note(Leo): The root element should have the screen size as its width/height and the measures should be pixels
-void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height)
+Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height)
 {
     shaping_context context = {};
+    context.element_count = (uint32_t)element_count;
     
     shape_arena->alloc_size = sizeof(LayoutElement);
     
@@ -1080,12 +1143,39 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
     curr_element->bounds.width = curr_element->sizing.width.desired.size;
     curr_element->bounds.height = curr_element->sizing.height.desired.size;
     
+    // +1 to leave space for alignment
+    // Note(Leo): This doesnt take culling into account so it will over-estimate the actual # of renderque objects
+    int renderque_length = (context.element_count + context.glyph_count + context.image_tile_count + 1);
+    void* final_renderque_memory = Alloc(context.shape_arena, renderque_length*sizeof(combined_instance));
+    
+    Arena* final_renderque = (Arena*)align_mem(Alloc(context.shape_arena, 2*sizeof(Arena)), Arena); // +1 for alignment
+    *final_renderque = CreateArenaWith(align_mem(final_renderque_memory, combined_instance), renderque_length*sizeof(combined_instance), sizeof(combined_instance));
+    context.final_renderque = final_renderque;
     
     while(visit_count)
     {
         visit_count--;
         curr_element = *visit_elements;
         shape_final_pass(&context, curr_element);
+        
+        switch(curr_element->type)
+        {
+            case(LayoutElementType::NORMAL):
+            {
+                final_place_element(&context, curr_element);
+                break;
+            }
+            case(LayoutElementType::TEXT_COMBINED):
+            {
+                final_place_text(&context, curr_element);
+                break;
+            }
+            case(LayoutElementType::IMAGE):
+            {
+                final_place_image(&context, curr_element);
+                break;
+            }
+        }
         
         LayoutDirection dir = curr_element->dir;
         
@@ -1121,12 +1211,6 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
             cursor_x -= curr_element->NORMAL.clipping.left_scroll;
             cursor_y -= curr_element->NORMAL.clipping.top_scroll;
         }
-        if(curr_element->type == LayoutElementType::NORMAL_TRANSPARENT)
-        {
-            cursor_x -= curr_element->NORMAL_TRANSPARENT.clipping.left_scroll;
-            cursor_y -= curr_element->NORMAL_TRANSPARENT.clipping.top_scroll;
-        }
-        
         
         for(int i = 0; i < curr_element->child_count; i++)
         {
@@ -1150,6 +1234,10 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
                 LayoutElement** added_visit = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
                 *added_visit = &curr_element->children[i];
                 visit_count++;
+            }
+            else
+            {
+                bounding_box bounds = curr_element->children[i].bounds;
             }
             
             if(dir == LayoutDirection::HORIZONTAL)
@@ -1176,4 +1264,6 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
         
         visit_elements++;
     }
+    
+    return context.final_renderque;
 }

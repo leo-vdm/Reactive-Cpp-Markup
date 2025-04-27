@@ -5,10 +5,10 @@ using namespace Compiler;
 
 #include <iostream>
 #include <fstream>
+#include <cstring>
 
-int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length);
-int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token);
-int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length);
+int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, const char* stop_chars, const char* ignored_chars = NULL);
+int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, const char* stop_chars);
 int tokenize_attribute_value(Arena* tokens_arena, Arena* token_values_arena, char* starting_char, char* boundary);
 
 void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
@@ -37,7 +37,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 }
                 
                 // Collect the tag name and put it in the token
-                aggregate_text(src, token_values_arena, new_token, " >", 2);
+                aggregate_text(src, token_values_arena, new_token, " >");
                                 
                 // Check for attributes
                 next_char = fgetc(src);
@@ -51,7 +51,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 // Push a new token for the attributes
                 new_token = push_token();
                 new_token->type = TokenType::TAG_ATTRIBUTE;
-                aggregate_text(src, token_values_arena, new_token, ">", 1); // everything between a tag name and closure is an attribute
+                aggregate_text(src, token_values_arena, new_token, ">"); // everything between a tag name and closure is an attribute
                 
                 break;
             case('>'):
@@ -79,7 +79,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 new_token->type = TokenType::TEXT;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token);
+                aggregate_text(src, token_values_arena, new_token, "<>{}", "\n\t\r");
                 break;
         }
     }
@@ -132,7 +132,7 @@ Token* TokenizeAttribute(Arena* tokens_arena, Arena* token_values_arena, Token* 
                 new_token = push_token();
                 new_token->type = TokenType::ATTRIBUTE_IDENTIFIER;
                 
-                current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, "\" =", 3);
+                current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, "\" =");
                 // If we hit an = add it here so we dont skip it on the iteration
                 if(*current_char == '=')
                 {
@@ -179,7 +179,7 @@ int tokenize_attribute_value(Arena* tokens_arena, Arena* token_values_arena, cha
             default:
                 new_token = push_token();
                 new_token->type = TokenType::TEXT;
-                int skipped_chars_count = aggregate_text(current_char, boundary, token_values_arena, new_token, "{}\"", 3);
+                int skipped_chars_count = aggregate_text(current_char, boundary, token_values_arena, new_token, "{}\"");
                 
                 // -1 to account for this iteration.
                 iterations += (skipped_chars_count - 1);
@@ -244,7 +244,7 @@ void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 new_token->type = TokenType::TEXT;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token, "{}\":;,", 6);
+                aggregate_text(src, token_values_arena, new_token, "{}\":;,");
                 break;
                 
         }
@@ -297,7 +297,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 new_token->type = TokenType::DIRECTIVE;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token, "\n", 1);
+                aggregate_text(src, token_values_arena, new_token, "\n");
                 break;                
             }
             case('{'):
@@ -323,7 +323,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 new_token->type = TokenType::TEXT;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token, "()\";=, \n{}", 10);
+                aggregate_text(src, token_values_arena, new_token, "()\";=, \n{}");
                 break;
         }
     }
@@ -379,7 +379,7 @@ Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char*
             default: // FN declerations, var declerations, type declerations etc.
                 new_token = push_token();
                 new_token->type = TokenType::TEXT;
-                curr_char += aggregate_text(curr_char, boundary, token_values_arena, new_token, "()=,:\0\n \t", 9);
+                curr_char += aggregate_text(curr_char, boundary, token_values_arena, new_token, "()=,:\0\n \t");
 
                 break;
         }
@@ -422,14 +422,14 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
                     new_token = push_token();
                     new_token->type = TokenType::DIRECTIVE;
                     
-                    current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, " ,\n", 3);
+                    current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, " ,\n");
                     identifier_hit = true;
                 }
                 else{
                     new_token = push_token();
                     new_token->type = TokenType::TEXT;
                     
-                    current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, " ,\n", 3);
+                    current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, " ,\n");
                 }
                 
                 if(*current_char == ',') // If we ended on a comma add it here so it doesnt get skipped during iteration
@@ -454,8 +454,9 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
 
 
 // Suited for tokenizing attributes/bindings
-int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length)
+int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, const char* stop_chars)
 {
+    int stop_chars_length = strlen(stop_chars);
     int value_length = 0;
     char* value_start = (char*)values_arena->next_address; // Assume we will get the next address
     
@@ -487,14 +488,30 @@ int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token*
 }
 
 // Aggregates the text from the current char to the next significant char, returns the length of text grabbed.
-int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char* stop_chars, int stop_chars_length)
+int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, const char* stop_chars, const char* ignored_chars)
 {
     int value_length = 0;
+    int ignored_chars_length = 0;
+    if(ignored_chars)
+    {
+        ignored_chars_length = strlen(ignored_chars);
+    }
+    
+    int stop_chars_length = strlen(stop_chars);
     char* value_start = (char*)values_arena->next_address; // Cheat and assume the address we will get is the next
     
     int next_char;
+    skip_char:
     while((next_char = fgetc(src)) != EOF)
-    {        
+    {    
+        // Check char against all the chars we wanna ignore
+        for(int i = 0; i < ignored_chars_length; i++)
+        {
+            if(next_char == ignored_chars[i])
+            {
+                goto skip_char;
+            }
+        }
         // Check char against all stopping chars.
         // TODO: SIMD the stop chars, next char to do multiple checks at once
         for(int i = 0; i < stop_chars_length; i++)
@@ -517,9 +534,4 @@ int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, char*
     concerned_token->body.len = value_length;
     concerned_token->body.value = value_start;
     return value_length;
-}
-
-inline int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token)
-{
-    return aggregate_text(src, values_arena, concerned_token, "<>{}", 4);
 }

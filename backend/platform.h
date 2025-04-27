@@ -1,6 +1,7 @@
 #include "arena.h"
 #include <vulkan/vulkan.h>
 #include "DOM.h"
+#include "graphics_types.h"
 #include <cassert>
 #pragma once
 #define MAX_WINDOW_COUNT 100
@@ -57,6 +58,8 @@ struct shared_window
 #define TIMER_INTRINSIC() __rdtsc()
 
 #define WINDOWS_WINDOW_CLASS_NAME "TemporaryMarkupWindowClass"
+
+#define FONT_PLATFORM_USE_SDF 1
 
 extern HMODULE windows_module_handle;
 
@@ -144,6 +147,10 @@ void RenderplatformLoadImage(FILE* image_file, const char* name);
 
 void RenderplatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot);
 
+vec3 RenderPlatformGetGlyphPosition(int glyph_slot);
+
+LoadedImageHandle* RenderplatformGetImage(const char* name);
+
 //void InitializePlatform(Arena* master_arena);
 
 int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary);
@@ -153,17 +160,36 @@ bool RuntimeInstanceMainPage();
 int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* combined_shader);
 void PlatformRegisterDom(void* dom);
 
+struct RenderPlatformImageTile
+{
+    RenderPlatformImageTile* next;
+    uint32_t content_width;
+    uint32_t content_height;
+    uvec2 image_offsets; // Offset of this tile in the original image
+    uvec3 atlas_offsets; // Offset of this tile's content inside the atlas
+};
+
+struct LoadedImageHandle
+{
+    uint32_t image_width;
+    uint32_t image_height;
+    
+    uint32_t tiled_width; // The # of tiles that this image is wide
+    uint32_t tiled_height;// # of tiles high this image is.
+    
+    RenderPlatformImageTile* first_tile;
+};
+
 struct FontPlatformShapedGlyph
 {
     // Note(Leo): All dimensions here are scaled versions of those of fixed size glyphs to fit the requested font size
-    // Note(Leo): Dimensions are in pixels and should be converted to relative screenspace coords in the vulkan layer
-    int horizontal_offset;
-    int vertical_offset;
-    int width;
-    int height;
-    uint32_t gpu_glyph_slot; 
-    // Note(Leo) gpu_glyph_slot is just the index into the arena that the glyph is
-    // at (ie your position in the arena is the position for your glyph on GPU), there is no ability for a glyph to be not on GPU ATM
+    vec2 placement_offsets;
+    vec2 placement_size;
+    
+    vec3 atlas_offsets;
+    vec2 atlas_size;
+    
+    StyleColor color;
 };
 
 struct FontPlatformGlyph
@@ -188,14 +214,14 @@ struct FontPlatformShapedText
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
-void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
 FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
-void RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height);
-void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height);
+Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height);
+Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height);
 
 #define USING_INSTREMENTATION 1
 // Instrumentation related stuff
@@ -209,6 +235,7 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
         TIMED_BLOCKS_RENDER_SUBMIT,
         TIMED_BLOCKS_RENDER_PRESENT,
         TIMED_BLOCKS_TICK_AND_BUILD,
+        TIMED_BLOCKS_HARFBUZZ,
         TIMED_BLOCKS_BLOCKS_MAX, // Note(Leo): Should be at the end of the enum
     };
     
@@ -238,6 +265,7 @@ void ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element
             "RENDER_SUBMIT",
             "RENDER_PRESENT",
             "TICK_AND_BUILD",
+            "HARFBUZZ",
             "BLOCKS_MAX",
         };
 
