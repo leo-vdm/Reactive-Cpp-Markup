@@ -107,6 +107,8 @@ void Append(ArenaString* target, ArenaString* source, int flags)
         last_in_target->next = source->head;
         target->tail = source->tail;
         target->length += source->length;
+        // Destroy the appended string's handle 
+        DeAlloc(source->parent_arena, source);
         return;
     }
     StringBlock* curr_copied = source->head;

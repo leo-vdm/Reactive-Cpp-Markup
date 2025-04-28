@@ -7,6 +7,7 @@
 #define MAX_WINDOW_COUNT 100
 #define MAX_TEXTURE_COUNT 30
 #define GLYPH_ATLAS_COUNT 200
+#define FontHandle uint16_t
 
 
 #define Kilobytes(num_bytes) (num_bytes * 1000 * sizeof(char)) 
@@ -21,6 +22,47 @@ struct vk_swapchain_image
     vk_swapchain_image* next;
     VkImageView image_view;
     VkImage image;
+};
+
+enum class MouseState 
+{
+    UP,
+    DOWN,
+    UP_THIS_FRAME, // The mouse has switched from being down last frame to now being up
+    DOWN_THIS_FRAME, // The mouse has switched from being up last frame to now being down
+};
+
+enum class MouseWheelDir
+{
+    NONE,
+    UP,
+    DOWN,
+};
+
+struct PlatformControlState
+{
+    MouseState mouse_left_state;
+    MouseState mouse_middle_state;
+    MouseState mouse_right_state;
+    vec2 scroll_dir;
+    vec2 cursor_pos;
+    vec2 cursor_delta;
+};
+
+enum class InputEventType
+{
+    KEYBOARD,
+    MOUSE,
+};
+
+struct DomInputEvent
+{
+    InputEventType type;
+    union
+    {
+        struct {} button;
+        struct {} key;
+    };
 };
 
 struct shared_window 
@@ -46,6 +88,8 @@ struct shared_window
     VkDeviceMemory vk_input_memory;
 
     VkDescriptorSet vk_combined_descriptor;
+    
+    PlatformControlState controls; 
 
     int width;
     int height;
@@ -209,7 +253,6 @@ struct FontPlatformShapedText
     uint32_t required_height;
 };
 
-#define FontHandle uint16_t
 
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
@@ -220,8 +263,10 @@ FontHandle FontPlatformGetFont(const char* font_name);
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
-Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height);
+Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height);
 Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int element_count, int window_width, int window_height);
+
+bool PointInsideBounds(const bounding_box bounds, const vec2 point);
 
 #define USING_INSTREMENTATION 1
 // Instrumentation related stuff

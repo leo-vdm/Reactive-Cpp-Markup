@@ -16,6 +16,10 @@ Atom x_wm_delete_message = {};
 
 const char* linux_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_XLIB_SURFACE_NAME};
 
+// Left/right scroll buttons for XButtonEvent
+#define Button6 6
+#define Button7 7
+
 PlatformWindow* linux_create_window(Arena* windows_arena)
 {
     #define WINDOW_WIDTH 800
@@ -44,9 +48,52 @@ PlatformWindow* linux_create_window(Arena* windows_arena)
     return created_window;
 }
 
+void print_input_state(PlatformWindow* window)
+{
+    printf("Window input state: \n");
+    printf("Scroll: (%f, %f)", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
+    printf("Buttons: l=%d, m=%d, r=%d", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
+    printf("Cursor: (%f, %f)", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
+}
+
+// Updates conrol state button states from THIS_FRAME to normal
+// Updates scroll to 0
+void update_control_state(PlatformWindow* target_window)
+{
+    if(target_window->controls.mouse_left_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_left_state =  MouseState::DOWN;
+    } 
+    else if(target_window->controls.mouse_left_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_left_state =  MouseState::UP;
+    }
+    
+    if(target_window->controls.mouse_middle_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_middle_state = MouseState::DOWN;
+    }
+    else if(target_window->controls.mouse_middle_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_middle_state = MouseState::UP;
+    }
+    
+    if(target_window->controls.mouse_right_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_right_state = MouseState::DOWN;
+    }
+    else if(target_window->controls.mouse_right_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_right_state = MouseState::UP;
+    }
+    
+    target_window->controls.scroll_dir = { 0.0, 0.0 };
+}
+
 // Returns flags for the runtime to know the status of the window
 void linux_process_window_events(PlatformWindow* target_window)
 {
+    update_control_state(target_window);
     XEvent x_event;
     int return_value = 0;
     while(XPending(x_display))
@@ -95,6 +142,32 @@ void linux_process_window_events(PlatformWindow* target_window)
                 int key_code = x_event.xkey.keycode;
                 printf("Keycode up: %d", key_code);
                 break;
+            }
+            case(ButtonPress):
+            {
+                if (x_event.xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::DOWN_THIS_FRAME; }
+                else if (x_event.xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::DOWN_THIS_FRAME; }
+                else if (x_event.xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::DOWN_THIS_FRAME; }
+                else if (x_event.xbutton.button == Button4) { target_window->controls.scroll_dir = { 0.0, 1.0 }; }
+                else if (x_event.xbutton.button == Button5) { target_window->controls.scroll_dir = { 0.0, -1.0 }; }
+                else if (x_event.xbutton.button == Button6) { target_window->controls.scroll_dir = { 1.0, 0.0 }; }
+                else if (x_event.xbutton.button == Button7) { target_window->controls.scroll_dir = { -1.0, 0.0 }; }
+                break;
+            }
+            case(ButtonRelease):
+            {
+                if (x_event.xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::UP_THIS_FRAME; }
+                else if (x_event.xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::UP_THIS_FRAME; }
+                else if (x_event.xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::UP_THIS_FRAME; }
+                break;
+            }
+            case MotionNotify:
+            {
+                float x = x_event.xmotion.x;
+                float y = x_event.xmotion.y;
+                
+                target_window->controls.cursor_delta = { x - target_window->controls.cursor_pos.x, y - target_window->controls.cursor_pos.y };
+                target_window->controls.cursor_pos = {x, y};
             }
             case(ClientMessage):
             {
@@ -305,6 +378,8 @@ int main()
         }    
         linux_process_window_events(platform.first_window);
         
+        print_input_state(platform.first_window);    
+        
         if(curr_window->flags)
         {
             if(curr_window->flags & RESIZED_WINDOW)
@@ -332,7 +407,7 @@ int main()
         }
     
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, curr_window->width, curr_window->height);
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);

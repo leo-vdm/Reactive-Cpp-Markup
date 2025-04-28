@@ -130,8 +130,6 @@ struct RegisteredBinding{
     RegisteredBindingType type;
 };
 
-#define MAX_ATTRIBUTE_NAME_LENGTH 57// The length of the longest built in attribute name
-
 struct attr_comp_id_body 
 {
     int id;

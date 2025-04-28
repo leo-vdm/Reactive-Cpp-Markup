@@ -2,135 +2,6 @@
 #include "platform.h"
 #include "DOM.h"
 
-/*
-struct size_axis 
-{
-    Measurement desired;
-    Measurement min_measurement; // Must be in px or %
-    Measurement max_measurement; // Must be in px or %
-    
-    // Calculated
-    float current;
-};
-*/
-/*
-struct shape_axis 
-{
-    size_axis width;
-    size_axis height;
-};
-*/
-
-struct size_axis
-{
-    union
-    {
-        struct
-        {
-            Measurement desired;
-            Measurement min; // Must be in px or %
-            Measurement max; // Must be in px or %             
-            
-            Measurement margin1; // Must be in px, % or grow             
-            Measurement margin2; // Must be in px, % or grow             
-            
-            Measurement padding1; // Must be in px or %
-            Measurement padding2; // Must be in px or %
-        };
-        
-        Measurement measures[7];
-    };
-    
-    // Calculated
-    float current;
-};
-
-struct shape_axis 
-{
-    size_axis width;
-    size_axis height;
-};
-
-struct shape_clipping
-{
-    ClipStyle horizontal;
-    uint16_t left_scroll; // How far in pixels we have scrolled from the left of the clipped region
-    ClipStyle vertical;    
-    uint16_t top_scroll; // How far in pixels we have scrolled from the top of the clipped region
-};
-
-struct bounding_box 
-{
-    float x, y, width, height;
-};
-
-struct screen_position
-{
-    float x, y;
-};
-
-// Controls how an element lays out its children
-enum class LayoutDirection
-{
-    NONE, // For elements that cant have chilren
-    VERTICAL,
-    HORIZONTAL,
-    GRID,
-};
-
-enum class LayoutElementType
-{
-    NORMAL, // Normal div types
-    TEXT,
-    TEXT_COMBINED,
-    IMAGE,
-    END,
-};
-
-struct LayoutElement
-{
-    uint32_t element_id;
-    LayoutElementType type;
-    LayoutDirection dir;
-    DisplayType display;
-    shape_axis sizing;
-    
-    bounding_box bounds;
-    screen_position position; // Position of the elment's top left corner. different from its bounding box since 
-    //                           bounding box is the visisble parts of the element and this is the actual position.
-    LayoutElement* children;
-    uint16_t child_count;
-    
-    union 
-    {
-        struct
-        {
-            StyleColor color;
-            Corners corners;
-            shape_clipping clipping;
-            TextWrapping wrapping; // Controls how child text should be wrapped
-        } NORMAL;
-        struct
-        {
-            StyleColor text_color;
-            FontHandle font_id;
-            uint16_t font_size;     
-            uint16_t text_length;
-            char* text_content;
-        } TEXT;
-        struct
-        {
-            FontPlatformShapedGlyph* first_glyph;
-            uint32_t glyph_count;
-        } TEXT_COMBINED;
-        struct 
-        {
-            Corners corners;
-            LoadedImageHandle* handle;
-        } IMAGE;
-    };
-};
-
 struct shaping_context 
 {
     uint32_t element_count;
@@ -239,6 +110,8 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
         LayoutElement* converted = (LayoutElement*)Push(context->layout_element_arena, sizeof(LayoutElement));
         converted->element_id = curr->id;
         
+        curr->last_sizing = converted;
+        
         // Converting element type to layout element type
         switch(curr->type)
         {
@@ -262,6 +135,9 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
                         converted->dir = LayoutDirection::GRID;
                     }
                     convert_element_style(&curr->working_style, converted);
+                    // Moving over the element's scroll
+                    converted->NORMAL.clipping.left_scroll = curr->scroll.x;
+                    converted->NORMAL.clipping.top_scroll = curr->scroll.y;
                 }
                 break;
             case(ElementType::CUSTOM):
@@ -969,7 +845,6 @@ void final_place_image(shaping_context* context, LayoutElement* image)
     LoadedImageHandle* handle = image->IMAGE.handle;
     float horizontal_scale = image->sizing.width.desired.size / (float)handle->image_width;
     float vertical_scale = image->sizing.height.desired.size / (float)handle->image_height;
-
     float base_x = image->position.x;
     float base_y = image->position.y;
 

@@ -262,6 +262,7 @@ std::map<std::string, TagType> tag_map =
     {"text", TagType::TEXT },
     {"hdiv", TagType::HDIV },
     {"vdiv", TagType::VDIV },
+    {"img", TagType::IMG },
     //{"end", TagType::CUSTOM},
 };
 
@@ -270,6 +271,7 @@ std::map<std::string, AttributeType> attribute_map =
     {"text", AttributeType::TEXT },
     {"class", AttributeType::CLASS },
     {"style", AttributeType::STYLE },
+    {"src", AttributeType::SRC },
 };
 
 

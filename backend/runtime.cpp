@@ -186,6 +186,22 @@ bool RuntimeInstanceMainPage()
     return true;
 }
 
+bool PointInsideBounds(const bounding_box bounds, const vec2 point)
+{
+    return point.x >= bounds.x && point.x <= (bounds.x + bounds.width) && point.y >= bounds.y && point.y <= (bounds.y + bounds.height);
+}
+
+// Creates a null terminated global name from a selector's name
+// Note(Leo): De-allocating name from scratch space is the caller's responsibility
+char* mangle_selector_name(StringView name, int file_id)
+{
+    int global_name_length = snprintf(NULL, 0, "%d-%.*s", file_id, name.len, name.value);
+    global_name_length++; // +1 to fit \0
+    char* global_name = (char*)AllocScratch(sizeof(char)*global_name_length);
+    sprintf(global_name, "%d-%.*s", file_id, name.len, name.value);
+    return global_name;
+}
+
 LoadedFileHandle* GetFileFromId(int id)
 {
     auto search = file_id_map.find(id);
@@ -245,30 +261,126 @@ inline Style* GetStyleFromID(int style_id)
     return ((Style*)runtime.styles->mapped_address) + style_id;
 }
 
-InFlightStyle merge_selector_styles(Selector* selector)
-{
-    // Todo(Leo): If we decide that styles cant be altered at runtime then we could cache the resulting style here into the
-    // selector. This would obviously be usefull especially in cases where selector merge is called alot or is expensive 
-    // (e.g. where a class attribute has a binding and the selectors it spits out have alot of styles to merge) 
+InFlightStyle* merge_selector_styles(Selector* selector)
+{   
+    // Note(Leo): We save the merged style into the selector as a cache, if we see that the selector has a valid
+    //            cached value we early return.
+    if(selector->flags & cache_valid())
+    {
+        return &selector->cached_style;
+    }
     
+    selector->flags = selector->flags | cache_valid();
     
-    InFlightStyle merged_style;
+    InFlightStyle* merged_style = &selector->cached_style;
+    
     // Note(Leo): Since styles can currently have priority 0, we must ensure that default style has -1 priority otherswise
     // priority 0 styles will be ignored
-    
-    DefaultStyle(&merged_style);
+    DefaultStyle(merged_style);
     
     for(int i = 0; i < selector->style_count; i++)
     {
-        MergeStyles(&merged_style, GetStyleFromID(selector->style_ids[i]));
+        MergeStyles(merged_style, GetStyleFromID(selector->style_ids[i]));
     }
     
     return merged_style;
 }
 
-// Note(Leo): Called for every element every frame!!!!!!
-void runtime_evaluate_attributes(DOM* dom, Element* element)
+// Gets a selector from the global pool by mangling its name into a global name
+Selector* GetGlobalSelector(StringView local_name, int file_id)
 {
+    int global_name_length = snprintf(NULL, 0, "%d-%.*s", file_id, local_name.len, local_name.value);
+    global_name_length++; // +1 to fit \0
+    char* global_name = (char*)AllocScratch(sizeof(char)*global_name_length);
+    sprintf(global_name, "%d-%.*s", file_id, local_name.len, local_name.value);
+    
+    Selector* found = GetSelectorFromName(global_name);
+    
+    DeAllocScratch(global_name);
+    return found;
+}
+
+// Merge the style of an element based on its type selector into the given style
+void merge_element_type_style(ElementType type, bool is_hovered, int file_id, InFlightStyle* target)
+{
+    ArenaString* selector = CreateString(runtime.strings);
+    switch(type)
+    {
+        case(ElementType::ROOT):
+        {
+            Append(selector, "root");
+            break;
+        }
+        case(ElementType::HDIV):
+        {
+            Append(selector, "hdiv");
+            break;
+        }
+        case(ElementType::VDIV):
+        {
+            Append(selector, "hdiv");
+            break;
+        }
+        case(ElementType::IMG):
+        {
+            Append(selector, "img");
+            break;
+        }
+        case(ElementType::GRID):
+        {
+            Append(selector, "grid");
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+    
+    char* base_name = Flatten(selector);
+    Selector* base_selector = GetGlobalSelector({base_name, (uint32_t)selector->length}, file_id);
+    
+    if(base_selector)
+    {
+        InFlightStyle* base_style = merge_selector_styles(base_selector);
+        MergeStyles(target, base_style);
+        DeAllocScratch(base_name); 
+    }
+    if(is_hovered)
+    {
+        Append(selector, "!hover");
+        char* hovered_name = Flatten(selector);
+        Selector* hovered_selector = GetGlobalSelector({hovered_name, (uint32_t)selector->length}, file_id);
+        if(hovered_selector)
+        {
+            InFlightStyle* hovered_style = merge_selector_styles(hovered_selector);
+            MergeStyles(target, hovered_style);
+            DeAllocScratch(hovered_name);
+        }
+    }
+    
+    FreeString(selector);
+}
+
+// Note(Leo): Called for every element every frame!!!!!!
+void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Element* element)
+{
+    DefaultStyle(&element->working_style);
+    if(element->last_sizing)
+    {
+        // Element is hovered
+        if(PointInsideBounds(element->last_sizing->bounds, controls->cursor_pos))
+        {
+            element->flags = element->flags | is_hovered(); 
+        }
+        else // Not hovered
+        {
+            element->flags &= ~is_hovered(); 
+        }
+    }
+    
+    merge_element_type_style(element->type, element->flags & is_hovered(), ((ElementMaster*)element->master)->file_id, &element->working_style);
+
     Attribute* curr_attribute = element->first_attribute;
     while(curr_attribute)
     {
@@ -306,14 +418,37 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                 
                 break;
             }
+            case(AttributeType::SRC):
+            {
+                // SRC is only for images and video elements
+                assert(element->type == ElementType::IMG || element->type == ElementType::VIDEO);
+                
+                if(element->type == ElementType::IMG)
+                {
+                    // Handle has not been cached yet, get it.
+                    if(!element->Image.handle)
+                    {
+                        char* terminated_name = (char*)AllocScratch((curr_attribute->Text.value_length + 1)*sizeof(char)); // +1 for \0
+                        memcpy(terminated_name, curr_attribute->Text.static_value, curr_attribute->Text.value_length*sizeof(char));
+                        terminated_name[curr_attribute->Text.value_length] = '\0';
+
+                        element->Image.handle = RenderplatformGetImage(terminated_name);
+                        DeAllocScratch(terminated_name);
+                    }
+                }
+                break;
+            }
             case(AttributeType::CLASS):
             {
                 // Todo(Leo): If an attribute has no binding then selector name(s) cant change, this means we could cache the 
                 // selectors that this attribute names in order to skip doing this string manipulation every frame! We can also
                 // have a cache_valid member or similiar which we can invalidate elsewhere if the selector names are manually changed
-                char* class_string = NULL;
-                int class_string_length = curr_attribute->Text.value_length;
-                int class_binding_length = 0;
+                ArenaString* class_string = CreateString(runtime.strings);
+                
+                if(curr_attribute->Text.binding_position) // Indicates theres text to copy before the binding
+                {
+                    Append(class_string, curr_attribute->Text.static_value, curr_attribute->Text.binding_position*sizeof(char));
+                }
                 
                 if(curr_attribute->Text.binding_id)
                 {
@@ -321,42 +456,30 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                     assert(binding->type == BoundExpressionType::ARENA_STRING);
                     assert(element->master);
                     ArenaString* binding_text = binding->stub_string((void*)element->master, runtime.strings);
-                    class_binding_length = binding_text->length;
-                    class_string_length += class_binding_length;
-                    class_string = (char*)Alloc(dom->frame_arena, class_string_length*sizeof(char));
                     
-                    // Note(Leo): We do a length limited flatten since we dont want a \0
-                    Flatten(binding_text, (class_string + curr_attribute->Text.binding_position), binding_text->length);
-                    FreeString(binding_text);
+                    // Note(Leo): binding_text gets freed as a part of class_string (dont need to call freestring)
+                    Append(class_string, binding_text, no_copy());
                 }
                 
-                if(!class_string)
-                {
-                    class_string = (char*)Alloc(dom->frame_arena, class_string_length*sizeof(char));
-                }
-                
-                if(curr_attribute->Text.binding_position) // Indicates theres text to copy before the binding
-                {
-                    memcpy(class_string, curr_attribute->Text.static_value, curr_attribute->Text.binding_position*sizeof(char));
-                }
                 
                 if(curr_attribute->Text.value_length > curr_attribute->Text.binding_position) // Indicates theres text after the binding
                 {
-                    memcpy(class_string + (curr_attribute->Text.binding_position + class_binding_length), curr_attribute->Text.static_value + curr_attribute->Text.binding_position, (curr_attribute->Text.value_length - curr_attribute->Text.binding_position)*sizeof(char));
+                    Append(class_string, curr_attribute->Text.static_value + curr_attribute->Text.binding_position, (curr_attribute->Text.value_length - curr_attribute->Text.binding_position)*sizeof(char));
                 }
                 
-                if(!class_string_length)
+                if(!class_string->length)
                 {
                     break;
                 }
                 
                 // Split selectors and mangle names to create global names and combine the styles from all the selectors
-                char* start_address = class_string; 
-                char* end_address = class_string; 
-                for(int i = 0; i < class_string_length; i++)
+                char* flat_class_string = Flatten(class_string); 
+                char* start_address = flat_class_string;
+                char* end_address = start_address; 
+                for(int i = 0; i < class_string->length; i++)
                 {
                     // Go until hitting a space or getting to the end of the string
-                    if(class_string[i] != ' ' && i != class_string_length - 1)
+                    if(flat_class_string[i] != ' ' && i != class_string->length - 1)
                     {
                         end_address++;
                         continue;
@@ -371,39 +494,53 @@ void runtime_evaluate_attributes(DOM* dom, Element* element)
                     }
                     
                     // We are on the last iteration so include the remaining charachter
-                    if(i == class_string_length - 1)
+                    if(i == class_string->length - 1)
                     {
                         end_address++;
                     }
                     
                     // Weve succesfully found a selector
-                    int unmangled_name_length = end_address - start_address;
+                    int name_length = end_address - start_address;
                     //printf("Found selector: %.*s\n", unmangled_name_length, start_address);
                     
-                    // Mangle the name
-                    int global_name_length = snprintf(NULL, 0, "%d-%.*s", ((ElementMaster*)element->master)->file_id, unmangled_name_length, start_address);
-                    global_name_length++; // +1 to fit \0
-                    char* global_name = (char*)AllocScratch(sizeof(char)*global_name_length);
-                    sprintf(global_name, "%d-%.*s", ((ElementMaster*)element->master)->file_id, unmangled_name_length, start_address);
-                    
-                    //printf("Mangled the name into: %s\n", global_name);
-                    Selector* found_selector = GetSelectorFromName(global_name);
-                    DeAllocScratch(global_name);
+                    Selector* found_selector = GetGlobalSelector({start_address, (uint32_t)name_length}, ((ElementMaster*)element->master)->file_id);
+
                     if(found_selector)
                     {
-                        InFlightStyle selector_style = merge_selector_styles(found_selector);
-                        MergeStyles(&element->working_style, &selector_style);
+                        InFlightStyle* selector_style = merge_selector_styles(found_selector);
+                        MergeStyles(&element->working_style, selector_style);
                     }
                     else
                     {
-                        printf("Unknown selector name: %s\n", global_name);
+                        printf("Unknown selector name: %.*s\n", name_length, start_address);
                     }
+                    
+                    if(element->flags & is_hovered())
+                    {
+                        // Check for a hovered version of the selector
+                        ArenaString* hovered_selector = CreateString(runtime.strings);
+                        Append(hovered_selector, start_address, name_length);
+                        Append(hovered_selector, "!hover");
+                        char* flat_selector_string = Flatten(hovered_selector);
+                        found_selector = GetGlobalSelector({flat_selector_string, (uint32_t)hovered_selector->length}, ((ElementMaster*)element->master)->file_id);
+
+                        if(found_selector)
+                        {
+                            InFlightStyle* selector_style = merge_selector_styles(found_selector);
+                            MergeStyles(&element->working_style, selector_style);
+                        }
+                        DeAllocScratch(flat_selector_string);
+                        FreeString(hovered_selector);
+                    }                
                     
                     // Move over the ' '
                     end_address++;
                     start_address = end_address;
                     
                 }
+                
+                DeAllocScratch(flat_class_string);
+                FreeString(class_string);
                 
                 break;
             }
@@ -423,7 +560,7 @@ void RuntimeClearTemporal(DOM* target)
     ResetArena(target->frame_arena);
 }
 
-Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width, int window_height)
+Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height)
 {
     // Note(Leo): Page root element is always at the first address of the dom
     Element* root_element = (Element*)dom->elements->mapped_address;
@@ -437,13 +574,13 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width
         if(curr_element->first_child)
         {
             curr_element = curr_element->first_child;
-            runtime_evaluate_attributes(dom, curr_element);
+            runtime_evaluate_attributes(dom, controls, curr_element);
             continue;
         }
         if(curr_element->next_sibling)
         {
             curr_element = curr_element->next_sibling;
-            runtime_evaluate_attributes(dom, curr_element);
+            runtime_evaluate_attributes(dom, controls, curr_element);
             continue;
         }
         
@@ -454,7 +591,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, int window_width
             if(curr_element->next_sibling)
             {
                 curr_element = curr_element->next_sibling;
-                runtime_evaluate_attributes(dom, curr_element);
+                runtime_evaluate_attributes(dom, controls, curr_element);
                 break;
             }
             curr_element = curr_element->parent;

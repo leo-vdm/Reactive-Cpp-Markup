@@ -45,6 +45,6 @@ void Append(ArenaString* target, const char* source_buffer, int length);
 
 
 // The no_copy() flag causes the target to simply point to the first value in source as a continuation after its last value so that both strings are sharing the values.
-// Of course target doesnt know if source is changed so it is recomended to no longer use source (but NOT FreeString it) if no_copy() is used
+// The source ArenaString block is automatically de-allocated so that source is fully consumed.
 void Append(ArenaString* target, ArenaString* source, int flags = 0);
 

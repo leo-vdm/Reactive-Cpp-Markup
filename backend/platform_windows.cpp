@@ -3,6 +3,7 @@
 #define INSTRUMENT_IMPLEMENTATION 1
 #include "platform.h"
 #include <windows.h>
+#include <windowsx.h>
 #include <cassert>
 
 HMODULE win32_module_handle = {};
@@ -12,7 +13,50 @@ const char* win32_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_WI
 
 PlatformWindow* curr_processed_window;
 
-// Note(Leo): should only handle size, close quit etc messages here and not input
+
+void print_input_state(PlatformWindow* window)
+{
+    printf("Window input state: \n");
+    printf("Scroll: (%f, %f)", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
+    printf("Buttons: l=%d, m=%d, r=%d", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
+    printf("Cursor: (%f, %f)", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
+}
+
+// Updates conrol state button states from THIS_FRAME to normal
+// Updates scroll to 0
+void update_control_state(PlatformWindow* target_window)
+{
+    if(target_window->controls.mouse_left_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_left_state =  MouseState::DOWN;
+    } 
+    else if(target_window->controls.mouse_left_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_left_state =  MouseState::UP;
+    }
+    
+    if(target_window->controls.mouse_middle_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_middle_state = MouseState::DOWN;
+    }
+    else if(target_window->controls.mouse_middle_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_middle_state = MouseState::UP;
+    }
+    
+    if(target_window->controls.mouse_right_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target_window->controls.mouse_right_state = MouseState::DOWN;
+    }
+    else if(target_window->controls.mouse_right_state == MouseState::UP_THIS_FRAME)
+    {
+        target_window->controls.mouse_right_state = MouseState::UP;
+    }
+    
+    target_window->controls.scroll_dir = { 0.0, 0.0 };
+}
+
+
 LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
 {
     LRESULT result = 0;
@@ -51,6 +95,65 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
         }
         case(WM_ACTIVATEAPP):
             break;
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_XBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONUP:
+        case WM_XBUTTONUP:
+        {
+
+            if (message == WM_LBUTTONDOWN)
+            {
+                curr_processed_window->controls.mouse_left_state = MouseState::DOWN_THIS_FRAME;
+            }
+            else if(message == WM_LBUTTONUP)
+            {
+                curr_processed_window->controls.mouse_left_state = MouseState::UP_THIS_FRAME;
+            }
+            else if (message == WM_RBUTTONDOWN)
+            {
+                curr_processed_window->controls.mouse_right_state = MouseState::DOWN_THIS_FRAME;
+            }
+            else if (message == WM_RBUTTONUP)
+            {
+                curr_processed_window->controls.mouse_right_state = MouseState::UP_THIS_FRAME;
+            }
+            else if (message == WM_MBUTTONDOWN)
+            {
+                curr_processed_window->controls.mouse_middle_state = MouseState::DOWN_THIS_FRAME;
+            }
+            else if (message == WM_MBUTTONUP)
+            {
+                curr_processed_window->controls.mouse_middle_state = MouseState::UP_THIS_FRAME;
+            }
+            break;
+        }
+        case WM_MOUSEMOVE:
+        {
+            float x = GET_X_LPARAM(l_param);
+            float y = GET_Y_LPARAM(l_param);
+
+            curr_processed_window->controls.cursor_pos = {x, y};
+
+            break;
+        }
+        case WM_MOUSEWHEEL:
+        {
+            // Note(Leo): https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousewheel
+            //            120 is microsoft's magic number for how much to scroll lol
+            curr_processed_window->controls.scroll_dir = {0.0f, (float)((SHORT) HIWORD(w_param)) / 120.0f };
+            break;
+        }
+
+        case WM_MOUSEHWHEEL:
+        {
+            // Note(Leo): x-axis scroll is inverted compared to other window managers
+            curr_processed_window->controls.scroll_dir = {(float)HIWORD(w_param) / -120.0f, 0.0f };
+            break;
+        }
         default:
         {
             result = DefWindowProcA(window_handle, message, w_param, l_param);
@@ -160,6 +263,7 @@ FileSearchResult* win32_find_image_resources(Arena* search_results_arena, Arena*
 
 void win32_process_window_events(PlatformWindow* target_window)
 {
+    update_control_state(target_window);
     curr_processed_window = target_window;
     
     MSG message;
@@ -287,6 +391,7 @@ int main()
         }
         
         win32_process_window_events(curr_window);
+        print_input_state(curr_window);
         
         if(curr_window->flags)
         {
@@ -316,7 +421,7 @@ int main()
         }
 
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, curr_window->width, curr_window->height);
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
         RenderplatformDrawWindow(curr_window, final_renderque);
@@ -327,7 +432,7 @@ int main()
         curr_window = curr_window->next_window;
         END_TIMED_BLOCK(PLATFORM_LOOP);
         
-        DUMP_TIMINGS();
+        //DUMP_TIMINGS();
     }
     
     return 0;

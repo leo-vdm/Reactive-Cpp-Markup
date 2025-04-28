@@ -30,7 +30,7 @@ const char* required_vk_device_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME 
 #ifdef NDEBUG
 // Note(Leo): validation layers have/appear to have a memory leak (at least in task manager) so turn them off when investigating leak issues
 #else
-    #define VK_USE_VALIDATION 1
+    #define VK_USE_VALIDATION 0
     const char* validation_layers[] = {"VK_LAYER_KHRONOS_validation"};
 #endif
 

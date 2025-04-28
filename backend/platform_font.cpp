@@ -6,7 +6,7 @@
 #include "harfbuzz/harfbuzz-10.1.0/src/hb.h"
 #include "harfbuzz/harfbuzz-10.1.0/src/hb-ft.h"
 
-#define DEFAULT_FACE_SIZE_PIXELS 500
+#define DEFAULT_FACE_SIZE_PIXELS 250
 #define CACHE_SIZE_GLYPHS 2000
 
 struct loaded_font_handle
