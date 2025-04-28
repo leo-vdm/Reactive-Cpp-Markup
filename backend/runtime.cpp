@@ -344,7 +344,6 @@ void merge_element_type_style(ElementType type, bool is_hovered, int file_id, In
     {
         InFlightStyle* base_style = merge_selector_styles(base_selector);
         MergeStyles(target, base_style);
-        DeAllocScratch(base_name); 
     }
     if(is_hovered)
     {
@@ -355,10 +354,11 @@ void merge_element_type_style(ElementType type, bool is_hovered, int file_id, In
         {
             InFlightStyle* hovered_style = merge_selector_styles(hovered_selector);
             MergeStyles(target, hovered_style);
-            DeAllocScratch(hovered_name);
         }
+        DeAllocScratch(hovered_name);
     }
     
+    DeAllocScratch(base_name); 
     FreeString(selector);
 }
 
