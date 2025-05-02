@@ -121,7 +121,6 @@ void DeAlloc(Arena* arena, void* address)
     arena->first_free.next_free = ((FreeBlock*)address);
 }
 
-// Release and re-obtain an address space to ensure resources go back to kernel
 void ResetArena(Arena* arena)
 {
     arena->next_address = arena->mapped_address;

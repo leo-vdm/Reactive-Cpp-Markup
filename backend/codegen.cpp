@@ -59,6 +59,7 @@ void reset_bound_vars();
 // Args: stub name, comp/page class name, var/fn name
 #define BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void, Arena* strings)\n{\nreturn make_string(((%s*)d_void)->%s, strings);\n}\n"
 #define BINDING_VOID_STUB_TEMPLATE "\nvoid %s(void* d_void)\n{\n((%s*)d_void)->%s;\n}\n"
+#define BINDING_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* d_void, void* ptr_void)\n{\n((%s*)d_void)->%s = ptr_void;\n}\n"
 
 
 static Token* curr_token;
@@ -224,6 +225,9 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
             break;
         case(RegisteredBindingType::VOID_RET):
             fprintf(target->code, BINDING_VOID_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name);
+            break;
+        case(RegisteredBindingType::VOID_PTR):
+            fprintf(target->code, BINDING_VOID_PTR_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name);
             break;
         }
 

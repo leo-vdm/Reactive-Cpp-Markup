@@ -13,13 +13,14 @@ const char* win32_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_WI
 
 PlatformWindow* curr_processed_window;
 
+float SCROLL_MULTIPLIER; 
 
 void print_input_state(PlatformWindow* window)
 {
     printf("Window input state: \n");
-    printf("Scroll: (%f, %f)", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
-    printf("Buttons: l=%d, m=%d, r=%d", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
-    printf("Cursor: (%f, %f)", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
+    printf("Scroll: (%f, %f)\n", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
+    printf("Buttons: l=%d, m=%d, r=%d\n", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
+    printf("Cursor: (%f, %f)\n", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
 }
 
 // Updates conrol state button states from THIS_FRAME to normal
@@ -144,14 +145,14 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
         {
             // Note(Leo): https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mousewheel
             //            120 is microsoft's magic number for how much to scroll lol
-            curr_processed_window->controls.scroll_dir = {0.0f, (float)((SHORT) HIWORD(w_param)) / 120.0f };
+            curr_processed_window->controls.scroll_dir = {0.0f, ((float)((SHORT) HIWORD(w_param)) / 120.0f) * SCROLL_MULTIPLIER };
             break;
         }
 
         case WM_MOUSEHWHEEL:
         {
             // Note(Leo): x-axis scroll is inverted compared to other window managers
-            curr_processed_window->controls.scroll_dir = {(float)HIWORD(w_param) / -120.0f, 0.0f };
+            curr_processed_window->controls.scroll_dir = {((float)HIWORD(w_param) / -120.0f) * SCROLL_MULTIPLIER, 0.0f };
             break;
         }
         default:
@@ -309,6 +310,8 @@ int main()
     InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
     
+    SCROLL_MULTIPLIER = 30; 
+    
     win32_module_handle = GetModuleHandleA(0);
     
     WNDCLASSA window_class = {};
@@ -391,7 +394,7 @@ int main()
         }
         
         win32_process_window_events(curr_window);
-        print_input_state(curr_window);
+        //print_input_state(curr_window);
         
         if(curr_window->flags)
         {

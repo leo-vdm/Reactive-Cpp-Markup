@@ -272,6 +272,8 @@ std::map<std::string, AttributeType> attribute_map =
     {"class", AttributeType::CLASS },
     {"style", AttributeType::STYLE },
     {"src", AttributeType::SRC },
+    {"onclick", AttributeType::ON_CLICK },
+    {"this", AttributeType::THIS },
 };
 
 
@@ -561,10 +563,15 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             case(AttributeType::ON_CLICK):
                 new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
                 break;
+            case(AttributeType::THIS):
+            {
+                new_attribute->This.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_PTR, state);
+                break;
+            }
             default: // All the attribtues that just use a text like body
                 //new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 new_attribute->Text.binding_position = front_length;
-                new_attribute->Text.binding_id =  RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                new_attribute->Text.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 break;
             }
             
@@ -587,6 +594,8 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         {
             // OnClick has no value
             case(AttributeType::ON_CLICK):
+                break;
+            case(AttributeType::THIS): // This has no value
                 break;
             // Text like attributes
             default:

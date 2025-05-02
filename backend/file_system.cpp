@@ -67,8 +67,11 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         switch(curr_attribute->type)
         {
             case(AttributeType::ON_CLICK):
-                // Todo(Leo): Implement saving for the onclick.
-                assert(0);
+                added_attribute.OnClick.binding_id = curr_attribute->OnClick.binding_id;
+                break;
+            case(AttributeType::THIS):
+                added_attribute.This.binding_id = curr_attribute->This.binding_id;
+                break;
             case(AttributeType::COMP_ID):
                 added_attribute.CompId.id = curr_attribute->CompId.id;
                 break;
@@ -154,7 +157,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
 }
 
-#define debug_load 1
+#define debug_load 0
 // Note(Leo): We cannot acces values to print for debugging until the end of the FN since thats when the values get read in.
 LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
@@ -171,7 +174,6 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     
         return handle;
     }
-
     
     uintptr_t base_tag = tags->next_address;
     uintptr_t base_attribute = attributes->next_address;
@@ -254,6 +256,16 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
                 added_attribute->Custom.name_length = read_attribute.Custom.name_length;
                 goto text_like;
                 break;
+            case(AttributeType::ON_CLICK):
+            {
+                added_attribute->OnClick.binding_id = read_attribute.OnClick.binding_id;
+                break;
+            }
+            case(AttributeType::THIS):
+            {
+                added_attribute->This.binding_id = read_attribute.This.binding_id;
+                break;
+            }
             default:
                 text_like:
                 added_attribute->Text.value = get_pointer(base_value, read_attribute.Text.value_index, char);

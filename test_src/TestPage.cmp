@@ -1,0 +1,74 @@
+<code>
+#usecomp "test_component.cmc"
+
+class TestPage : Page
+{    
+public:
+    int count;
+    void PageMain(DOM* dom){
+        printf("Hello from the test page!\n");
+        count = 0;
+	printf("Count is %d\n", count);
+        
+    }
+ 
+    void OnClickButton(){ 
+        count += 1;
+	printf("Test Page Count is now %d\n", count);
+    }
+};
+
+</code>
+<root>
+<vdiv class="fill">
+	<hdiv class="title">This isnt the bronx!</hdiv>
+	<hdiv class="img_container">
+		<img src="thumbs_up.jpg"></img>
+		<img src="thumbs_up.jpg"></img>
+	</hdiv>
+	<test_component></test_component>
+	<vdiv class="footer" onclick="{OnClickButton()}">
+		Test Count: {count}
+	</vdiv>
+</vdiv>
+</root>
+
+<style>
+
+fill {
+	height: 150%;
+	width: 100%;
+	vertical_clipping: scroll;
+}
+
+footer {
+	height: fit;
+	width: fit;
+	margin: grow, grow;
+	color: 120, 120, 120;
+}
+
+title {
+	margin: grow, grow, 0px, 0px;
+	font_size: 70px;
+	width: fit;
+	height: fit;
+}
+
+img_container {
+	margin: grow, grow, 0px, grow;
+	width: fit;
+	height: fit;
+}
+
+img {
+	width: 200px;
+	height: 200px;
+}
+
+img!hover {
+	priority: 2;
+	width: 400px;
+	height: 400px;
+}
+</style>

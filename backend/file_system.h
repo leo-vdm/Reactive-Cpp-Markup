@@ -41,6 +41,16 @@ struct SavedTag
     int first_child_index;
 };
 
+struct saved_attr_on_click_body
+{
+    int binding_id;
+};
+
+struct saved_attr_this_body
+{
+    int binding_id;
+};
+
 struct saved_attr_comp_id_body 
 {
     int id;
@@ -69,6 +79,8 @@ struct SavedAttribute
         saved_attr_comp_id_body CompId;
         saved_attr_text_like_body Text;
         saved_attr_custom_body Custom;
+        saved_attr_on_click_body OnClick;
+        saved_attr_this_body This;
     };
 };
 

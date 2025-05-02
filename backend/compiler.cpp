@@ -78,15 +78,9 @@ void reset_styles(LocalStyles* styles)
 CompileTarget init_compile_target(Arena* master_arena)
 {
     CompileTarget created;
-    Arena* bound_vars_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
-    *bound_vars_arena = CreateArena(sizeof(BoundVariable)*1000, sizeof(BoundVariable));
-    Arena* bound_var_names_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
-    *bound_var_names_arena = CreateArena(sizeof(char)*100000, sizeof(char));
     Arena* bound_expressions_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
     *bound_expressions_arena = CreateArena(sizeof(BindingExpression)*1000, sizeof(BindingExpression));
     
-    created.bound_vars = bound_vars_arena;
-    created.bound_var_names = bound_var_names_arena;
     created.bound_expressions = bound_expressions_arena;
     
     created.file_name = NULL;
@@ -98,8 +92,6 @@ CompileTarget init_compile_target(Arena* master_arena)
 
 void reset_compile_target(CompileTarget* target)
 {
-    ResetArena(target->bound_vars);
-    ResetArena(target->bound_var_names);
     ResetArena(target->bound_expressions);
     
     target->code = NULL;

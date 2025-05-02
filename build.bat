@@ -27,7 +27,8 @@ build\compiler.exe test_src test_build
 :: Building app
 pushd test_build
 cl /Zi /EHsc /c dom_attatchment.cpp /I. /ID:\Vulkan\Include /ID:\tmp\freetype\include
-LINK /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib D:\Vulkan\Lib\vulkan-1.lib D:\tmp\freetype\freetype.lib /OUT:test.exe
+::LINK /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib D:\Vulkan\Lib\vulkan-1.lib D:\tmp\freetype\freetype.lib /OUT:test.exe
+LINK /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib D:\tmp\freetype\freetype.lib /OUT:test.exe
 popd
 
 popd

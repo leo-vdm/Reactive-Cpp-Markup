@@ -11,11 +11,15 @@
 
 struct loaded_font_handle
 {
-    FT_Face face;
     hb_font_t* font;
     // Todo(Leo): This is probably really stupid so dont do it!
     // Note(Leo): Glyphs are stored in same sized large containers and sampled down in the shader
     std::map<uint32_t, FontPlatformGlyph*>* glyph_cache_map;
+    float line_height; // Pixel height of this face
+    float line_bottom_height;
+    float line_top_height;
+    
+    FT_Face face;
 };
 
 struct FontPlatform
@@ -137,6 +141,10 @@ void FontPlatformLoadFace(const char* font_name, FILE* font_file)
         printf("Failed to set size of font face!\n");
     }
     
+    created_font->line_height = (float)created_font->face->size->metrics.height / 64.0f;
+    created_font->line_top_height = (float)created_font->face->size->metrics.ascender / 64.0f;
+    created_font->line_bottom_height = ((float)created_font->face->size->metrics.descender / 64.0f) * -1.0f; // Descender is negative
+    
     created_font->font = hb_ft_font_create_referenced(created_font->face);
     
     created_font->glyph_cache_map = new std::map<uint32_t, FontPlatformGlyph*>;
@@ -231,7 +239,7 @@ const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UI
 
 
 // Note(Leo): Area height and width are expected in pixels
-void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point, uint32_t line_height)
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point)
 {
     // Used to mark the end of our sequence of glyphs
     #define mark_end() Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), zero())
@@ -245,10 +253,16 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
     result->first_glyph = (FontPlatformShapedGlyph*)glyph_arena->next_address;
     
     int cursor_x = 0;
-    int cursor_y = line_height;    
+    int cursor_y = 0;    
     result->required_width = 0;
     result->required_height = 0;
     result->glyph_count = 0;
+    
+    float top_line_height = 0.0f;
+    float lower_line_height = 0.0f;
+    
+    FontPlatformShapedGlyph* line_first = NULL;
+    uint32_t line_count = 0;
     
     for(int i = 0; i < text_block_count; i++)
     {
@@ -269,6 +283,10 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             mark_end();
             return;
         }
+        
+        float font_scale = (float)font_size / (float)font_platform.standard_glyph_size;
+        top_line_height = MAX(top_line_height, used_font->line_top_height * font_scale); // See if this font's height should be the current lines height
+        lower_line_height = MAX(lower_line_height, used_font->line_bottom_height * font_scale);
         
         // Change font size to the desired size so that shaping will have the offsets already in the correct size
         FT_Set_Pixel_Sizes(used_font->face, font_size, font_size);
@@ -302,11 +320,38 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             if(wrapping_point && cursor_x + (glyph_pos[i].x_advance / 64) >= wrapping_point)
             {
                 result->required_width = wrapping_point;
+                
+                // Go back and add line heights to all the glyphs
+                FontPlatformShapedGlyph* curr_glyph = line_first;
+                for(uint32_t j = 0; j < line_count; j++ )
+                {
+                    assert(curr_glyph);
+                    curr_glyph->placement_offsets.y += top_line_height; 
+                    
+                    curr_glyph++;
+                }
+                
+                result->required_height += top_line_height;
+                result->required_height += lower_line_height;
+                
+                line_first = NULL;
+                line_count = 0;
+                
                 cursor_x = 0;
-                cursor_y += line_height;
+                cursor_y += top_line_height;
+                cursor_y += lower_line_height;
+                top_line_height = 0.0f;
+                lower_line_height = 0.0f;
             }
             
             added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
+            
+            if(!line_first)
+            {
+                line_first = added_glyph; 
+            }
+            
+            line_count++;
             
             FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, glyph_info[i].codepoint);
                      
@@ -315,7 +360,6 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             added_glyph->color = color;
             
             // Bearings are relative to the glyph's raster size which is different from the size of the font so scale it
-            float font_scale = (float)font_size / (float)font_platform.standard_glyph_size;
             float scaled_bearing_x = (float)added_glyph_raster_info->bearing_x * font_scale;
             float scaled_bearing_y = (float)added_glyph_raster_info->bearing_y * font_scale;
             
@@ -339,10 +383,22 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
     //        printf("Cursor at (%d, %d)\n", cursor_x, cursor_y);
         }
         
-        // Note(Leo): + line_height to account for the first line
-        result->required_height = cursor_y + line_height;
+         
     }
+    
+    // Add line height to last line
+    FontPlatformShapedGlyph* curr_glyph = line_first;
+    for(uint32_t j = 0; j < line_count; j++ )
+    {
+        assert(curr_glyph);
+        curr_glyph->placement_offsets.y += top_line_height; 
         
+        curr_glyph++;
+    }
+    
+    result->required_height += top_line_height;
+    result->required_height += lower_line_height;
+    
     mark_end();
     return;
 }

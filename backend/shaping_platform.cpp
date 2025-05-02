@@ -317,17 +317,14 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             // Aggregate text children
             int text_sibling_count = 0;
             LayoutElement* curr_text = curr_child;
-            // Line height will be the height of the largest font
-            int line_height = 0;
+        
             while(curr_text < target && curr_text->type == LayoutElementType::TEXT)
             {
                 text_views[text_sibling_count] = {curr_text->TEXT.text_content, curr_text->TEXT.text_length};
                 text_fonts[text_sibling_count] = curr_text->TEXT.font_id;
                 font_sizes[text_sibling_count] = curr_text->TEXT.font_size;
                 text_colors[text_sibling_count] = curr_text->TEXT.text_color;
-            
-                line_height = MAX(line_height, curr_text->TEXT.font_size);
-                
+                 
                 text_sibling_count++;
                 curr_text++;
             }
@@ -353,7 +350,7 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             
             // Shape text
             FontPlatformShapedText result = {};
-            FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_colors, text_sibling_count, wrapping_point, line_height);
+            FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_colors, text_sibling_count, wrapping_point);
             
             context->glyph_count += result.glyph_count;
             
@@ -399,12 +396,15 @@ void grow_parent_axis(LayoutElement* parent_element, LayoutElement* child_elemen
     size_axis* parent = is_vertical ? &parent_element->sizing.height : &parent_element->sizing.width;
     size_axis* child = is_vertical ? &child_element->sizing.height : &child_element->sizing.width;
     
+    // Note(Leo): We actually should always do this otherwise parent wont know how much it has clipped
+    //            which it needs to be able to do scrolling 
+    /*
     // Dont need any sizing calculations if parent is fixed size.
     if(parent->desired.type == MeasurementType::PIXELS)
     {
         parent->current = parent->desired.size;
         return;
-    }
+    }*/
     
     // Note(Leo): Doing the vertical axis sizing with a horizontal layout parent is the same formula
     //            as doing the horzontal axis with a vertical layout parent. 
@@ -632,7 +632,7 @@ float accumulate_child_axis(size_axis* child)
 }
 
 // Note(Leo): This assumes all the growth measures receive growth_space worth of room, if we want them to have different weights this has to change
-// Adds grow_size to all the grow measuer in the child
+// Adds grow_size to all the grow measures in the child
 void grow_child(size_axis* child, float growth_space)
 {
     if(child->desired.type == MeasurementType::GROW)
@@ -644,6 +644,7 @@ void grow_child(size_axis* child, float growth_space)
             child->desired.size = MIN(child->desired.size, child->max.size);
         }
         child->desired.type = MeasurementType::PIXELS;
+        child->current = child->desired.size;
     }
     if(child->margin1.type == MeasurementType::GROW)
     {
@@ -749,7 +750,11 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             // Widths need to be summed together in horizontal layouts to find the remaining space in the parent
             if(dir == LayoutDirection::HORIZONTAL)
             {
-                p_width_accumulated += children[i].sizing.width.current;
+                // Only add the min-width if desired isnt defined yet 
+                if(children[i].sizing.width.desired.type == MeasurementType::GROW)
+                {
+                    p_width_accumulated += children[i].sizing.width.current;
+                }
                 revisit_width_elements[revisit_width_element_count] = &children[i];
                 revisit_width_element_count++;
             }
@@ -759,7 +764,12 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
                 
                 // width-grow space in a vertical layout is the remaining space either side of the element
                 float child_size = accumulate_child_axis(&children[i].sizing.width);
-                child_size += children[i].sizing.width.current;
+                
+                // Only add the min-width if desired isnt defined yet 
+                if(children[i].sizing.width.desired.type == MeasurementType::GROW)
+                {
+                    child_size += children[i].sizing.width.current;
+                }
                 float growth_space = (p_width - child_size) / grow_width_meaure_count;
                 growth_space = MAX(growth_space, 0.0f);
                 grow_width_meaure_count = 0; // Reset so other element can know how many growth measurements they have
@@ -767,7 +777,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
                 grow_child(&children[i].sizing.width, growth_space);
             }
         }
-        if((children[i].sizing.height.desired.type == MeasurementType::GROW || children[i].sizing.height.margin1.type == MeasurementType::GROW || children[i].sizing.height.margin2.type == MeasurementType::GROW))
+        if(children[i].sizing.height.desired.type == MeasurementType::GROW || children[i].sizing.height.margin1.type == MeasurementType::GROW || children[i].sizing.height.margin2.type == MeasurementType::GROW)
         {
             if(children[i].sizing.height.desired.type == MeasurementType::GROW)
             {
@@ -785,7 +795,10 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             // Heights need to be summed together in vertical layouts to find the remaining space in the parent
             if(dir == LayoutDirection::VERTICAL)
             {
-                p_height_accumulated += children[i].sizing.height.current;
+                if(children[i].sizing.height.desired.type == MeasurementType::GROW)
+                {
+                    p_height_accumulated += children[i].sizing.height.current;
+                }
                 revisit_height_elements[revisit_height_element_count] = &children[i];
                 revisit_height_element_count++;
             }
@@ -795,7 +808,10 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
                 
                 // height-grow space in a horizontal layout is the remaining space above/below the element
                 float child_size = accumulate_child_axis(&children[i].sizing.height);
-                child_size += children[i].sizing.height.current;
+                if(children[i].sizing.height.desired.type == MeasurementType::GROW)
+                {
+                    child_size += children[i].sizing.height.current;
+                }
                 float growth_space = (p_height - child_size) / grow_height_meaure_count;
                 growth_space = MAX(growth_space, 0.0f);
                 grow_height_meaure_count = 0; // Reset so other element can know how many growth measurements they have
@@ -828,7 +844,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
         
         // Divying up the extra space if there is any
         growth_space = MAX(growth_space / grow_height_meaure_count, 0.0f);
-        
+                   
         for(int i = 0; i < revisit_height_element_count; i++)
         {
             grow_child(&revisit_height_elements[i]->sizing.height, growth_space);
@@ -848,23 +864,31 @@ void final_place_image(shaping_context* context, LayoutElement* image)
     float base_x = image->position.x;
     float base_y = image->position.y;
 
-    // The instance bounds are the actual screen coordinates of each corner of the bounding box
-    vec4 bounds = { image->bounds.x, image->bounds.y, image->bounds.x + image->bounds.width, image->bounds.y + image->bounds.height };
     
     RenderPlatformImageTile* curr_tile = handle->first_tile;
     while(curr_tile)
     {
+        // The instance bounds are the actual screen coordinates of each corner of the bounding box
+        bounding_box tile_bounds = { ((float)curr_tile->image_offsets.x * horizontal_scale) + base_x, ((float)curr_tile->image_offsets.y * vertical_scale) + base_y, (float)curr_tile->content_width * horizontal_scale, (float)curr_tile->content_height * vertical_scale };
+        
+        boxes_intersect(&image->bounds, &tile_bounds, &tile_bounds);
+        
+        vec4 bounds = { tile_bounds.x, tile_bounds.y, tile_bounds.x + tile_bounds.width, tile_bounds.y + tile_bounds.height };
         combined_instance* created = (combined_instance*)Alloc(context->final_renderque, sizeof(combined_instance));
         memcpy(&created->bounds, &bounds, sizeof(vec4));
-        
+                
         static_assert(sizeof(Corners) == sizeof(vec4));
         memcpy(&created->corners, &image->IMAGE.corners, sizeof(Corners));
         
+        /*
         created->shape_position = { ((float)curr_tile->image_offsets.x * horizontal_scale) + base_x, ((float)curr_tile->image_offsets.y * vertical_scale) + base_y };
         created->shape_size = { (float)curr_tile->content_width * horizontal_scale, (float)curr_tile->content_height * vertical_scale };
+        */
+        created->shape_position = { base_x, base_y };
+        created->shape_size = { image->sizing.width.desired.size, image->sizing.height.desired.size };
         
-        created->sample_position = { (float)curr_tile->atlas_offsets.x, (float)curr_tile->atlas_offsets.y, (float)curr_tile->atlas_offsets.z };
-        created->sample_size = { (float)curr_tile->content_width, (float)curr_tile->content_height };
+        created->sample_position = { (float)curr_tile->atlas_offsets.x - (float)curr_tile->image_offsets.x, (float)curr_tile->atlas_offsets.y - (float)curr_tile->image_offsets.y, (float)curr_tile->atlas_offsets.z };
+        created->sample_size = { (float)handle->image_width, (float)handle->image_height };
         
         created->type = (int)CombinedInstanceType::IMAGE_TILE;
         
@@ -1105,14 +1129,9 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
             // Only add elements to be visited if they will be visisble
             if(boxes_intersect(&inner_bounds, &curr_element->children[i].bounds, &curr_element->children[i].bounds))
             {
-                // Note(Leo): +1 since we want to write to the 
                 LayoutElement** added_visit = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
                 *added_visit = &curr_element->children[i];
                 visit_count++;
-            }
-            else
-            {
-                bounding_box bounds = curr_element->children[i].bounds;
             }
             
             if(dir == LayoutDirection::HORIZONTAL)

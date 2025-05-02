@@ -244,6 +244,19 @@ void SwitchPage(DOM* dom, int id, int flags)
     InstancePage(dom, id);    
 }
 
+void SwitchPage(DOM* dom, const char* name, int flags)
+{
+    LoadedFileHandle* page = GetFileFromName(name);
+    if(!page)
+    {
+        return;
+    }
+    
+    // Queue the page switch
+    dom->switch_request.file_id = page->file_id;
+    dom->switch_request.flags = flags;
+}
+
 Selector* GetSelectorFromName(const char* name)
 {
     auto search = selector_map.find(name);
@@ -418,6 +431,11 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 
                 break;
             }
+            case(AttributeType::STYLE):
+            {
+                
+                break;
+            }
             case(AttributeType::SRC):
             {
                 // SRC is only for images and video elements
@@ -436,6 +454,60 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                         DeAllocScratch(terminated_name);
                     }
                 }
+                break;
+            }
+            case(AttributeType::ON_CLICK):
+            {
+                if((element->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
+                {
+                    element->click_state = ClickState::NONE;
+                    break;
+                }
+                else if(controls->mouse_left_state == MouseState::DOWN_THIS_FRAME)
+                {
+                    element->click_state = ClickState::MOUSE_DOWN;
+                    break;
+                }
+                else if(controls->mouse_left_state == MouseState::DOWN && element->click_state == ClickState::MOUSE_DOWN)
+                {
+                    element->click_state = ClickState::MOUSE_DOWN;
+                    break;
+                }
+                else if(controls->mouse_left_state == MouseState::DOWN) // Mouse is down but didnt start down on this element
+                {
+                    element->click_state = ClickState::NONE;
+                    break;
+                }
+                else if(element->click_state == ClickState::NONE)
+                {
+                    element->click_state = ClickState::NONE;
+                    break;
+                }
+
+                // This element must have had mouse down and now gotten mouse up all while being hovered
+                assert(controls->mouse_left_state == MouseState::UP_THIS_FRAME && element->click_state == ClickState::MOUSE_DOWN && element->flags & is_hovered()); 
+                assert(curr_attribute->OnClick.binding_id);
+                
+                BoundExpression* binding = GetBoundExpression(curr_attribute->OnClick.binding_id);
+                assert(binding->type == BoundExpressionType::VOID_RET);
+                assert(element->master);
+
+                binding->stub_void((void*)element->master);
+                
+                element->click_state = ClickState::NONE;
+                break;
+            }
+            case(AttributeType::THIS):
+            {
+                if(curr_attribute->This.is_initialized)
+                {
+                    break;
+                }
+                BoundExpression* binding = GetBoundExpression(curr_attribute->This.binding_id);
+                
+                binding->stub_ptr((void*)element->master, (void*)element);
+                curr_attribute->This.is_initialized = true;
+            
                 break;
             }
             case(AttributeType::CLASS):
@@ -510,10 +582,6 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                         InFlightStyle* selector_style = merge_selector_styles(found_selector);
                         MergeStyles(&element->working_style, selector_style);
                     }
-                    else
-                    {
-                        printf("Unknown selector name: %.*s\n", name_length, start_address);
-                    }
                     
                     if(element->flags & is_hovered())
                     {
@@ -560,13 +628,132 @@ void RuntimeClearTemporal(DOM* target)
     ResetArena(target->frame_arena);
 }
 
+//  Returns whether the element would like to captures any scrolling from the curent frame.
+//  The deepest element in the tree that is hovered by the mouse and has clipped content will be the
+//  one to capture the scroll
+bool should_capture_scroll(PlatformControlState* controls, Element* target)
+{
+    if(!target->last_sizing)
+    {
+        return false;
+    }
+    assert(target && controls);
+    
+    if(PointInsideBounds(target->last_sizing->bounds, controls->cursor_pos) && 
+        target->working_style.vertical_clipping == ClipStyle::SCROLL &&
+        target->last_sizing->bounds.height < target->last_sizing->sizing.height.desired.size 
+    )
+    {
+        return true;
+    }
+    
+    return false;   
+} 
+
+// Scrolls in the inputted direction 
+void scroll_element(vec2 scroll_dir, Element* target)
+{
+    if(!target->last_sizing)
+    {
+        return;
+    }
+    
+    float scrollable_top = (target->last_sizing->bounds.y - target->last_sizing->position.y);
+    scrollable_top += target->scroll.y;
+    float scrollable_bottom = (target->last_sizing->position.y + MAX(target->last_sizing->sizing.height.current, target->last_sizing->sizing.height.desired.size)) - (target->last_sizing->bounds.y + target->last_sizing->bounds.height);
+    scrollable_bottom -= target->scroll.y;
+     
+    float scrollable_left = target->last_sizing->bounds.x - target->last_sizing->position.x;
+    scrollable_left += target->scroll.x;
+    float scrollable_right = (target->last_sizing->position.x + MAX(target->last_sizing->sizing.width.current, target->last_sizing->sizing.width.desired.size)) - (target->last_sizing->bounds.x + target->last_sizing->bounds.width);
+    scrollable_right -= target->scroll.x;
+    
+        
+    if(scroll_dir.y > 0.0f && scrollable_top > 0.0f)
+    {
+        target->scroll.y -= MIN(scroll_dir.y, scrollable_top);
+    }
+    else if(scroll_dir.y < 0.0f && scrollable_bottom > 0.0f)
+    {
+        target->scroll.y += MIN((scroll_dir.y * -1.0f), scrollable_bottom);
+    }
+    
+    if(scroll_dir.x > 0.0f && scrollable_right > 0.0f)
+    {
+        target->scroll.x += MIN(scroll_dir.x, scrollable_right);
+    }
+    else if(scroll_dir.x < 0.0f && scrollable_left > 0.0f)
+    {
+        target->scroll.x -= MIN((scroll_dir.x * -1.0f), scrollable_left);
+    }
+}
+
+    // Note(Leo): When a scrolled div shrinks down past a point it was scrolled too the scrollables will be negative, 
+    //            we autoscroll back to the legal region
+void sanitize_scrollable(Element* target)
+{
+    if(!target->last_sizing)
+    {
+        return;
+    }
+    
+    if(!(target->working_style.vertical_clipping == ClipStyle::SCROLL || target->working_style.horizontal_clipping == ClipStyle::SCROLL))
+    {
+        return;
+    }
+    
+    float scrollable_top = (target->last_sizing->bounds.y - target->last_sizing->position.y);
+    scrollable_top += target->scroll.y;
+    float scrollable_bottom = (target->last_sizing->position.y + MAX(target->last_sizing->sizing.height.current, target->last_sizing->sizing.height.desired.size)) - (target->last_sizing->bounds.y + target->last_sizing->bounds.height);
+    scrollable_bottom -= target->scroll.y;
+    
+    float scrollable_left = target->last_sizing->bounds.x - target->last_sizing->position.x;
+    scrollable_left += target->scroll.x;
+    float scrollable_right = (target->last_sizing->position.x + MAX(target->last_sizing->sizing.width.current, target->last_sizing->sizing.width.desired.size)) - (target->last_sizing->bounds.x + target->last_sizing->bounds.width);
+    scrollable_right -= target->scroll.x;
+    
+    if(scrollable_top < 0.0f)
+    {
+        target->scroll.y += -1.0f * scrollable_top;
+    }
+    else if(scrollable_bottom < 0.0f)
+    {
+        target->scroll.y -= -1.0f * scrollable_bottom;
+    }
+    
+    if(scrollable_left < 0.0f)
+    {
+        target->scroll.x += -1.0f * scrollable_left;
+    }
+    else if(scrollable_right < 0.0f)
+    {
+        target->scroll.x -= -1.0f * scrollable_right;
+    }
+}
+
 Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height)
 {
+    // If a page switch was requested last frame do it now
+    if(dom->switch_request.file_id)
+    {
+        SwitchPage(dom, dom->switch_request.file_id, dom->switch_request.flags);
+        dom->switch_request = {};
+    }
+    
     // Note(Leo): Page root element is always at the first address of the dom
     Element* root_element = (Element*)dom->elements->mapped_address;
     assert(!root_element->parent && !root_element->next_sibling); // Root cant have a parent or siblings
     
+    Element* scroll_capturer = NULL; // The current deepest element asking to capture scroll
+    
     Element* curr_element = root_element;
+    
+    sanitize_scrollable(curr_element);
+    if(should_capture_scroll(controls, curr_element)) // Root is allowed to capture scroll
+    {
+        scroll_capturer = curr_element;
+    }
+    
     // Depth first walk
     while(curr_element)
     {
@@ -575,12 +762,26 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         {
             curr_element = curr_element->first_child;
             runtime_evaluate_attributes(dom, controls, curr_element);
+            
+            sanitize_scrollable(curr_element);
+            if(should_capture_scroll(controls, curr_element))
+            {
+                scroll_capturer = curr_element;
+            }
+            
             continue;
         }
         if(curr_element->next_sibling)
         {
             curr_element = curr_element->next_sibling;
             runtime_evaluate_attributes(dom, controls, curr_element);
+            
+            sanitize_scrollable(curr_element);
+            if(should_capture_scroll(controls, curr_element))
+            {
+                scroll_capturer = curr_element;
+            }
+            
             continue;
         }
         
@@ -592,10 +793,22 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
             {
                 curr_element = curr_element->next_sibling;
                 runtime_evaluate_attributes(dom, controls, curr_element);
+                
+                sanitize_scrollable(curr_element);
+                if(should_capture_scroll(controls, curr_element))
+                {
+                    scroll_capturer = curr_element;
+                }
+                
                 break;
             }
             curr_element = curr_element->parent;
         }
+    }
+    
+    if(scroll_capturer)
+    {
+        scroll_element(controls->scroll_dir, scroll_capturer);
     }
     
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we

@@ -3,90 +3,89 @@
 
 char* test = "Hello my string";
 
-class MainPage
+#include "platform.h"
+
+class MainPage : Page
 {    
 public:
     int mycolor;
     int count;
+    void* my_element;
     const char* my_var;
     
     void PageMain(DOM* dom){
         printf("Hello from page main!\n");
-        count = 1234;
+        count = 0;
 	my_var = test;
-	printf("%d\n", count);
+	printf("Count is %d\n", count);
         
     }
-    
-    void on_count_changed(){
-        printf("Changed");
-        count = 10;
+
+    void onSwitchPage()
+    {
+	SwitchPage(master_dom, "TestPage");
+    }
+ 
+    void on_count_changed(){ 
+        count += 1;
+	printf("Count is now %d\n", count);
+	Element* image_element = (Element*)my_element;
+	image_element->Image.handle = RenderplatformGetImage("thumbs_up.jpg");	    
     }
 };
 
 </code>
 <root>
-<hdiv class="fill">
-	<vdiv class="half">
-		Hello ive got half the screen!
-		<vdiv class="transparent fill">
-			<vdiv class="first">
-				First
-			</vdiv>
-			<img src="texture.png"></img>
-		</vdiv>
+<vdiv class="fill">
+	<hdiv class="title">Incredible Gallery</hdiv>
+	<hdiv class="img_container">
+		<img this="{my_element}" src="texture.png"></img>
+		<img src="texture.png" onclick="{onSwitchPage()}"></img>
+	</hdiv>
+	<vdiv class="footer" onclick="{on_count_changed()}">
+		Count: {count}
 	</vdiv>
-	<vdiv class="blue">
-		Ive got the other half	
-	</vdiv>
-<hdiv>
+</vdiv>
 </root>
 
 <style>
 
-half, blue {
-	width: 50.5%;
-	height: 100%;
-	padding: 30px, 30px, 30px, 30px;
-	color: 100, 100, 0;
-}
-
-first, second {
-	width: 100%;
-	height: 50px;
-	corners: 30px, 30px, 30px, 30px;
-	color: 100, 20, 0;
-	font_size: 20px;
-}
-
-first!hover {
-	priority: 2;
-	color: 10, 10, 10;
-}
-
-blue {
-	priority: 2;
-	color: 0, 0, 255;
-	text_color: 255, 255, 255;
-}
-
 fill {
-	height: 100%;
+	height: 150%;
 	width: 100%;
+	vertical_clipping: scroll;
 }
 
-transparent {
-	color: 0, 0, 0, 0;
+footer {
+	height: fit;
+	width: fit;
+	margin: grow, grow, grow;
+	color: 120, 120, 120;
+}
+
+title {
+	margin: grow, grow, 0px, 0px;
+	font_size: 70px;
+	width: fit;
+	height: fit;
+}
+
+img_container {
+	margin: grow, grow, 0px, 0px;
+	width: fit;
+	height: fit;
 }
 
 img {
 	width: 200px;
 	height: 200px;
+	corners: 30px, 30px, 30px, 30px;
 }
 
 img!hover {
 	priority: 2;
 	width: 400px;
 	height: 400px;
+	corners: 30px, 30px, 30px, 30px;
 }
 </style>

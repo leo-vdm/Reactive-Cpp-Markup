@@ -267,6 +267,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
         Token* new_token;
         switch(next_char)
         {
+            /*
             case(';'):
                 new_token = push_token();
                 new_token->type = TokenType::SEMI_COLON;
@@ -291,6 +292,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 new_token = push_token();
                 new_token->type = TokenType::QUOTE;
                 break;
+            */
             case('#'): // Directives (C++ or ours)
             {
                 new_token = push_token();
@@ -300,6 +302,7 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 aggregate_text(src, token_values_arena, new_token, "\n");
                 break;                
             }
+            /*
             case('{'):
                 new_token = push_token();
                 new_token->type = TokenType::OPEN_BRACKET;
@@ -318,13 +321,16 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 break;
             case('\t'):
                 break;
-            default: // FN declerations, var declerations, type declerations etc.
+            */
+            default: // Other c++ code
+            {
                 new_token = push_token();
                 new_token->type = TokenType::TEXT;
                 
                 ungetc(next_char, src); // Put the first char back.
-                aggregate_text(src, token_values_arena, new_token, "()\";=, \n{}");
+                aggregate_text(src, token_values_arena, new_token, "#");
                 break;
+            }
         }
     }
     

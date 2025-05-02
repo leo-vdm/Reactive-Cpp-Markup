@@ -96,8 +96,12 @@ struct shared_window
     int flags;
 };
 
+extern float SCROLL_MULTIPLIER;
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
+
+#define PLATFORM_WINDOWS 1
 
 #define TIMER_INTRINSIC() __rdtsc()
 
@@ -115,14 +119,24 @@ struct PlatformWindow : shared_window
     HWND window_handle;
 };
 
+#define VkLibrary HMODULE
+
+#define PlatformGetProcAddress(module, name) GetProcAddress(module, name)
+
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle);
 
 #elif defined(__linux__) && !defined(_WIN32)
+
+#define PLATFORM_LINUX 1
 
 #include "x86intrin.h"
 #define TIMER_INTRINSIC() __rdtsc()
 
 #include <X11/Xlib.h>
+#include <dlfcn.h>
+
+#define VkLibrary void*
+#define PlatformGetProcAddress(module, name) dlsym( module, name)
 
 extern Display* x_display;
 extern Visual* x_visual;
@@ -257,7 +271,7 @@ struct FontPlatformShapedText
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
-void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point, uint32_t line_height);
+void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point);
 FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
 int FontPlatformGetGlyphSize();

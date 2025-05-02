@@ -5,6 +5,7 @@
 #define VK_USE_PLATFORM_XLIB_KHR 1 
 #endif
 
+#define VK_NO_PROTOTYPES 1
 #define STB_IMAGE_IMPLEMENTATION 1
 #include "stb_image.h"
 
@@ -25,7 +26,7 @@ const char* required_vk_device_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME 
 #define MAX_RENDER_TILE_SIZE 64 
 
 #define WINDOW_STAGING_SIZE Megabytes(10) // Size of each window's staging buffer
-#define WINDOW_INPUT_SIZE Megabytes(50)
+#define WINDOW_INPUT_SIZE Megabytes(10)
 
 #ifdef NDEBUG
 // Note(Leo): validation layers have/appear to have a memory leak (at least in task manager) so turn them off when investigating leak issues
@@ -52,6 +53,7 @@ struct vk_atlas_texture
 
 struct VulkanRenderPlatform 
 {
+    VkLibrary vk_library;
     VkInstance vk_instance;
     VkPhysicalDevice vk_physical_device;
     bool vk_logical_device_initialized;
@@ -98,6 +100,278 @@ struct VulkanRenderPlatform
 
 VulkanRenderPlatform rendering_platform;
 
+// Exported fn's
+PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+
+// Global fn's
+PFN_vkCreateInstance vkCreateInstance;
+
+PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
+
+// Instance fn's
+PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
+
+PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties; 
+
+PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
+
+PFN_vkGetPhysicalDeviceFeatures vkGetPhysicalDeviceFeatures;
+
+PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
+
+PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
+
+PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+
+PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
+
+PFN_vkCreateDevice vkCreateDevice;
+
+PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
+
+PFN_vkGetPhysicalDeviceImageFormatProperties vkGetPhysicalDeviceImageFormatProperties;
+
+PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+
+#if PLATFORM_LINUX
+PFN_vkCreateXlibSurfaceKHR vkCreateXlibSurfaceKHR;
+#elif PLATFORM_WINDOWS
+PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+#endif
+
+// Device fn's
+
+PFN_vkGetDeviceQueue vkGetDeviceQueue;
+
+PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+
+PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+
+PFN_vkCreateImageView vkCreateImageView;
+
+PFN_vkCreateImage vkCreateImage;
+
+PFN_vkCreateDescriptorSetLayout vkCreateDescriptorSetLayout;
+
+PFN_vkCreateCommandPool vkCreateCommandPool;
+
+PFN_vkCreateDescriptorPool vkCreateDescriptorPool;
+
+PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
+
+PFN_vkAllocateMemory vkAllocateMemory;
+
+PFN_vkBindImageMemory vkBindImageMemory;
+
+PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+
+PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+
+PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
+
+PFN_vkEndCommandBuffer vkEndCommandBuffer;
+
+PFN_vkQueueSubmit vkQueueSubmit;
+
+PFN_vkQueueWaitIdle vkQueueWaitIdle;
+
+PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
+
+PFN_vkAllocateDescriptorSets vkAllocateDescriptorSets;
+
+PFN_vkUpdateDescriptorSets vkUpdateDescriptorSets;
+
+PFN_vkCreateShaderModule vkCreateShaderModule;
+
+PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
+
+PFN_vkCreateComputePipelines vkCreateComputePipelines;
+
+PFN_vkCreateSemaphore vkCreateSemaphore;
+
+PFN_vkCreateFence vkCreateFence;
+
+PFN_vkCreateBuffer vkCreateBuffer;
+
+PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+
+PFN_vkBindBufferMemory vkBindBufferMemory;
+
+PFN_vkMapMemory vkMapMemory;
+
+PFN_vkWaitForFences vkWaitForFences;
+
+PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+
+PFN_vkResetFences vkResetFences;
+
+PFN_vkResetCommandBuffer vkResetCommandBuffer;
+
+PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
+
+PFN_vkCmdBindPipeline vkCmdBindPipeline;
+
+PFN_vkCmdPushConstants vkCmdPushConstants;
+
+PFN_vkCmdBindDescriptorSets vkCmdBindDescriptorSets;
+
+PFN_vkCmdDispatch vkCmdDispatch;
+
+PFN_vkQueuePresentKHR vkQueuePresentKHR;
+
+PFN_vkUnmapMemory vkUnmapMemory;
+
+PFN_vkDestroyBuffer vkDestroyBuffer;
+
+PFN_vkFreeMemory vkFreeMemory;
+
+PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
+
+PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+
+PFN_vkDestroyImageView vkDestroyImageView;
+
+PFN_vkCreateSampler vkCreateSampler;
+
+PFN_vkGetFenceStatus vkGetFenceStatus;
+
+PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
+
+PFN_vkDestroySemaphore vkDestroySemaphore;
+
+PFN_vkDestroyFence vkDestroyFence;
+
+PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+
+bool vk_get_hook_address()
+{
+    #if PLATFORM_LINUX
+        rendering_platform.vk_library = dlopen("libvulkan.so", RTLD_NOW);
+        if(!rendering_platform.vk_library)
+        {
+            return false;
+        }
+    #elif PLATFORM_WINDOWS
+        rendering_platform.vk_library = (HMODULE)LoadLibrary(TEXT("vulkan-1.dll"));
+        if(!rendering_platform.vk_library)
+        {
+            return false;
+        }
+    #endif
+
+    vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)PlatformGetProcAddress(rendering_platform.vk_library, "vkGetInstanceProcAddr");
+    if(!vkGetInstanceProcAddr)
+    {
+        return false;
+    }
+    
+    return true;
+}
+
+bool vk_get_global_procs()
+{
+    #define VK_GLOBAL_LEVEL_FUNCTION( fun )                                                 \
+    if( !(fun = (PFN_##fun)vkGetInstanceProcAddr( nullptr, #fun )) ) {                      \
+        return false;                                                                       \
+    }
+    
+    VK_GLOBAL_LEVEL_FUNCTION(vkCreateInstance);
+    VK_GLOBAL_LEVEL_FUNCTION(vkEnumerateInstanceExtensionProperties);
+    
+    return true;
+}
+
+bool vk_get_instance_procs()
+{
+    #define VK_INSTANCE_LEVEL_FUNCTION( fun )                                                   \
+    if( !(fun = (PFN_##fun)vkGetInstanceProcAddr( rendering_platform.vk_instance, #fun )) ) {   \
+        return false;                                                                           \
+    }
+    
+    VK_INSTANCE_LEVEL_FUNCTION(vkEnumeratePhysicalDevices);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceQueueFamilyProperties);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceProperties);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceFeatures);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceSurfaceSupportKHR);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceSurfaceCapabilitiesKHR);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceSurfaceFormatsKHR);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceSurfacePresentModesKHR);
+    VK_INSTANCE_LEVEL_FUNCTION(vkCreateDevice);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetDeviceProcAddr);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceImageFormatProperties);
+    VK_INSTANCE_LEVEL_FUNCTION(vkGetPhysicalDeviceMemoryProperties);
+    VK_INSTANCE_LEVEL_FUNCTION(vkDestroySurfaceKHR);
+    
+    #if PLATFORM_LINUX
+        VK_INSTANCE_LEVEL_FUNCTION(vkCreateXlibSurfaceKHR);
+    #elif PLATFORM_WINDOWS
+        VK_INSTANCE_LEVEL_FUNCTION(vkCreateWin32SurfaceKHR);
+    #endif
+    
+    return true;
+}
+
+bool vk_get_device_procs()
+{
+    #define VK_DEVICE_LEVEL_FUNCTION( fun )                                                 \
+    if( !(fun = (PFN_##fun)vkGetDeviceProcAddr( rendering_platform.vk_device, #fun )) ) {   \
+        assert(0);\
+        return false;                                                                       \
+    }
+    
+    VK_DEVICE_LEVEL_FUNCTION(vkGetDeviceQueue);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateSwapchainKHR);
+    VK_DEVICE_LEVEL_FUNCTION(vkGetSwapchainImagesKHR);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateImageView);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateImage);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateDescriptorSetLayout);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateCommandPool);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateDescriptorPool);
+    VK_DEVICE_LEVEL_FUNCTION(vkGetImageMemoryRequirements);
+    VK_DEVICE_LEVEL_FUNCTION(vkAllocateMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkBindImageMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkAllocateCommandBuffers);
+    VK_DEVICE_LEVEL_FUNCTION(vkBeginCommandBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdPipelineBarrier);
+    VK_DEVICE_LEVEL_FUNCTION(vkEndCommandBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkQueueSubmit);
+    VK_DEVICE_LEVEL_FUNCTION(vkQueueWaitIdle);
+    VK_DEVICE_LEVEL_FUNCTION(vkFreeCommandBuffers);
+    VK_DEVICE_LEVEL_FUNCTION(vkAllocateDescriptorSets);
+    VK_DEVICE_LEVEL_FUNCTION(vkUpdateDescriptorSets);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateShaderModule);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreatePipelineLayout);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateComputePipelines);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateSemaphore);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateFence);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkGetBufferMemoryRequirements);
+    VK_DEVICE_LEVEL_FUNCTION(vkBindBufferMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkMapMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkWaitForFences);
+    VK_DEVICE_LEVEL_FUNCTION(vkAcquireNextImageKHR);
+    VK_DEVICE_LEVEL_FUNCTION(vkResetFences);
+    VK_DEVICE_LEVEL_FUNCTION(vkResetCommandBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdCopyBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdBindPipeline);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdPushConstants);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdBindDescriptorSets);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdDispatch);
+    VK_DEVICE_LEVEL_FUNCTION(vkQueuePresentKHR);
+    VK_DEVICE_LEVEL_FUNCTION(vkUnmapMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkDestroyBuffer);
+    VK_DEVICE_LEVEL_FUNCTION(vkFreeMemory);
+    VK_DEVICE_LEVEL_FUNCTION(vkCmdCopyBufferToImage);
+    VK_DEVICE_LEVEL_FUNCTION(vkDestroySwapchainKHR);
+    VK_DEVICE_LEVEL_FUNCTION(vkDestroyImageView);
+    VK_DEVICE_LEVEL_FUNCTION(vkCreateSampler);
+    VK_DEVICE_LEVEL_FUNCTION(vkGetFenceStatus);
+    VK_DEVICE_LEVEL_FUNCTION(vkDeviceWaitIdle);
+    VK_DEVICE_LEVEL_FUNCTION(vkDestroySemaphore);
+    VK_DEVICE_LEVEL_FUNCTION(vkDestroyFence);
+    
+    return true;
+}
 
 bool vk_extensions_supported(const VulkanSupportedExtensions supported_extensions, const VulkanSupportedExtensions required_extensions)
 {
@@ -229,7 +503,7 @@ VkPhysicalDevice* vk_pick_physical_device(VkPhysicalDevice* physical_devices, in
         vkGetPhysicalDeviceProperties(*(physical_devices + i), &device_properties);
         vkGetPhysicalDeviceFeatures(*(physical_devices + i), &device_features);
         
-        printf("Evaluating physical device with name \"%s\"\n", device_properties.deviceName);
+        //printf("Evaluating physical device with name \"%s\"\n", device_properties.deviceName);
         
         if(device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
         {
@@ -450,6 +724,11 @@ bool vk_initialize_logical_device(VkSurfaceKHR surface, const char** device_exte
         return false;
     }
     
+    if(!vk_get_device_procs())
+    {
+        return false;
+    }
+    
     vkGetDeviceQueue(rendering_platform.vk_device, compute_family_index, 0, &(rendering_platform.vk_compute_queue));
     vkGetDeviceQueue(rendering_platform.vk_device, present_family_index, 0, &(rendering_platform.vk_present_queue));
     
@@ -459,7 +738,7 @@ bool vk_initialize_logical_device(VkSurfaceKHR surface, const char** device_exte
     }
     
     
-    printf("Succesfully initialized logical device and queues!\n");
+//    printf("Succesfully initialized logical device and queues!\n");
     
     rendering_platform.vk_logical_device_initialized = true;
     return true;
@@ -1060,8 +1339,6 @@ void* vk_read_shader_bin(FILE* bin, int* len)
     file_length = ftell(bin);
     rewind(bin);
     
-    printf("Found file length of %d", file_length);
-    
     void* allocated_space = Alloc(rendering_platform.vk_binary_data, file_length, no_zero());
     fread(allocated_space, file_length, 1, bin);
     *len = file_length;
@@ -1094,10 +1371,17 @@ void vk_destroy_swapchain_image_views(vk_swapchain_image* first_image_view)
 
 int InitializeVulkan(Arena* master_arena, const char** required_extension_names, int required_extension_count, FILE* combined_shader)
 {
+    if(!vk_get_hook_address())
+    {
+        return 1;
+    }
+    if(!vk_get_global_procs())
+    {
+        return 1;
+    }
+    
     uint32_t extension_count;
     vkEnumerateInstanceExtensionProperties(NULL, &extension_count, NULL);
-    
-    printf("Found %d vulkan extensions\n", extension_count);
     
     // Note(Leo) + 1 since allignment can move the array over an entire element in worst case
     void* allocated_space = AllocScratch((extension_count + 1)*sizeof(VkExtensionProperties), no_zero());
@@ -1108,7 +1392,6 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     VulkanSupportedExtensions extension_support = {};
     for(int i = 0; i < extension_count; i++)
     {
-        printf("Supported extension: %s\n", supported_extensions[i].extensionName);
         // Note(Leo): This is really really ugly BUT glfw does it so idc
         if(strcmp(supported_extensions[i].extensionName, VK_E_KHR_SURFACE_NAME) == 0)
             extension_support.VK_E_KHR_SURFACE = true;
@@ -1171,7 +1454,12 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
         return 1;
     }    
     
-    printf("Succesfully initialized vulkan!\n");
+    if(!vk_get_instance_procs())
+    {
+        return 1;
+    }
+    
+//    printf("Succesfully initialized vulkan!\n");
     
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(rendering_platform.vk_instance, &device_count, 0);
@@ -1896,7 +2184,6 @@ void RenderplatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_heig
     uvec3 found_glyph_offsets = vk_get_tile_coordinate(&rendering_platform.vk_glyph_atlas, (uint32_t)FontPlatformGetGlyphSize(), glyph_slot);
     
     ivec3 glyph_offsets = {(int32_t)found_glyph_offsets.x, (int32_t)found_glyph_offsets.y, (int32_t)found_glyph_offsets.z};
-    printf("Adding glyph to slot %d at location (%d, %d, %d)\n", glyph_slot, glyph_offsets.x, glyph_offsets.y, glyph_offsets.z);
     
     if(!vk_copy_buffer_to_image(temp_stage, rendering_platform.vk_glyph_atlas.image, (uint32_t)glyph_width, (uint32_t)glyph_height, glyph_offsets))
     {
@@ -2079,7 +2366,7 @@ void vk_late_initialize()
     rendering_platform.vk_graphics_pipeline_initialized = true;
 }
 
-#if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+#if PLATFORM_WINDOWS
 #include <windows.h>
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle)
 {
@@ -2146,10 +2433,11 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
         printf("Failed to create window descriptors!\n");
     }
 }
+
 #endif
 
 
-#if defined(__linux__) && !defined(_WIN32)
+#if PLATFORM_LINUX
 #include <X11/Xlib.h>
 
 void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)

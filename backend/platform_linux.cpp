@@ -14,6 +14,8 @@ Visual* x_visual = {};
 XDefaultValues x_defaults = {};
 Atom x_wm_delete_message = {};
 
+float SCROLL_MULTIPLIER; 
+
 const char* linux_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_XLIB_SURFACE_NAME};
 
 // Left/right scroll buttons for XButtonEvent
@@ -51,9 +53,9 @@ PlatformWindow* linux_create_window(Arena* windows_arena)
 void print_input_state(PlatformWindow* window)
 {
     printf("Window input state: \n");
-    printf("Scroll: (%f, %f)", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
-    printf("Buttons: l=%d, m=%d, r=%d", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
-    printf("Cursor: (%f, %f)", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
+    printf("Scroll: (%f, %f)\n", window->controls.scroll_dir.x, window->controls.scroll_dir.y);
+    printf("Buttons: l=%d, m=%d, r=%d\n", (int)window->controls.mouse_left_state, (int)window->controls.mouse_middle_state, (int)window->controls.mouse_right_state);
+    printf("Cursor: (%f, %f)\n", window->controls.cursor_pos.x, window->controls.cursor_pos.y);
 }
 
 // Updates conrol state button states from THIS_FRAME to normal
@@ -148,10 +150,10 @@ void linux_process_window_events(PlatformWindow* target_window)
                 if (x_event.xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::DOWN_THIS_FRAME; }
                 else if (x_event.xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::DOWN_THIS_FRAME; }
                 else if (x_event.xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::DOWN_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button4) { target_window->controls.scroll_dir = { 0.0, 1.0 }; }
-                else if (x_event.xbutton.button == Button5) { target_window->controls.scroll_dir = { 0.0, -1.0 }; }
-                else if (x_event.xbutton.button == Button6) { target_window->controls.scroll_dir = { 1.0, 0.0 }; }
-                else if (x_event.xbutton.button == Button7) { target_window->controls.scroll_dir = { -1.0, 0.0 }; }
+                else if (x_event.xbutton.button == Button4) { target_window->controls.scroll_dir = { 0.0f, SCROLL_MULTIPLIER }; }
+                else if (x_event.xbutton.button == Button5) { target_window->controls.scroll_dir = { 0.0f, -1.0f * SCROLL_MULTIPLIER }; }
+                else if (x_event.xbutton.button == Button6) { target_window->controls.scroll_dir = { SCROLL_MULTIPLIER, 0.0f }; }
+                else if (x_event.xbutton.button == Button7) { target_window->controls.scroll_dir = { -1.0f * SCROLL_MULTIPLIER, 0.0f }; }
                 break;
             }
             case(ButtonRelease):
@@ -293,6 +295,8 @@ int main()
     InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
     
+    SCROLL_MULTIPLIER = 30;
+    
     x_display = XOpenDisplay(NULL);
     
     if(!x_display)
@@ -378,7 +382,7 @@ int main()
         }    
         linux_process_window_events(platform.first_window);
         
-        print_input_state(platform.first_window);    
+        //print_input_state(platform.first_window);    
         
         if(curr_window->flags)
         {

@@ -3,47 +3,37 @@
 class test_component : Component
 {
     public:
-    int mycolor;
     
     int count;
     
-    int my_var;
-    
     void CompMain(DOM* dom){
 	count = 2;
-	printf("Hello from component main in test component!\n");
         printf("Count is at: %d\n", count);
-        count = 100;
     }
     
     void on_count_changed(){
-        printf("Changed");
-        count = 10;
+        count += 10;
     }
 };
 </code>
 <root>
 <vdiv>
-	<hdiv something="herro" style="color: {mycolor};">
-		Hello	
-	</hdiv>
-
-	<hdiv>
-		<hdiv class="orange my_orange" class="another" class="mein">
-			Hello {my_var}
-		</hdiv>
+	<hdiv onclick="{on_count_changed()}">
+		Component Count {count}
 	</hdiv>
 </vdiv>
 
 </root>
 
 <style>
-div {
-width: 100px;
-height: 100px;
+root, vdiv, hdiv {
+	margin: grow, grow;
+	width: fit;
+	height: fit;
 }
 
-myclass {
-max_width: 100%;
+hdiv!hover {
+	color: 12, 12, 12;
 }
+
 </style>

@@ -43,21 +43,11 @@ struct LinkedPointer
     void* data;  
 };
 
-struct ElementMaster 
+struct PageSwitchRequest
 {
+    int flags;
     int file_id;
 };
-
-struct Component : ElementMaster
-{
-
-};
-
-struct Page : ElementMaster
-{
-
-};
-
 
 struct DOM
 {
@@ -79,7 +69,26 @@ struct DOM
     Arena* changed_que;
     
     Arena* frame_arena; // Composted every frame
+    
+    PageSwitchRequest switch_request;
 };
+
+struct ElementMaster 
+{
+    int file_id;
+    DOM* master_dom;
+};
+
+struct Component : ElementMaster
+{
+
+};
+
+struct Page : ElementMaster
+{
+
+};
+
 
 struct Runtime
 {
@@ -171,12 +180,23 @@ COLUMN,
 SRC, // For the VIDEO and IMG tags
 COMP_ID, // For custom components
 ON_CLICK,
-THIS_ELEMENT, // For binding an element to a variable
+THIS, // For binding an element to a variable
 };
 
 struct attr_comp_id_body 
 {
     int id;
+};
+
+struct attr_on_click_body
+{
+    int binding_id;
+};
+
+struct attr_this_body
+{
+    int binding_id;
+    bool is_initialized;
 };
 
 struct attr_text_like_body
@@ -213,6 +233,8 @@ struct Attribute
         attr_comp_id_body CompId;
         attr_text_like_body Text;
         attr_custom_body Custom;
+        attr_on_click_body OnClick;
+        attr_this_body This;
     };
 };
 
@@ -343,6 +365,12 @@ struct LayoutElement
     };
 };
 
+enum class ClickState
+{
+    NONE, // Element has no current click state
+    MOUSE_DOWN, // Element has had mouse down on it and mouse has stayed over it
+};
+
 struct Element 
 {
     void* master;
@@ -350,6 +378,7 @@ struct Element
     
     int id;
     ElementType type;
+    ClickState click_state;
     
     // Note(Leo): Attributes are not contiguous in memory
     Attribute* first_attribute;
@@ -399,6 +428,7 @@ struct Element
 // Types of bound functions
 typedef void (*SubscribedStubVoid)(void*); 
 typedef ArenaString* (*SubscribedStubString)(void*, Arena*); 
+typedef void (*SubscribedStubPointer)(void*, void*); // For feeding pointers to the user
 
 enum class BoundExpressionType
 {
@@ -415,12 +445,14 @@ struct BoundExpression
     union {
         SubscribedStubVoid stub_void;
         SubscribedStubString stub_string;
+        SubscribedStubPointer stub_ptr;
     };
     
 };
 
 BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubString fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id);
 
 extern Runtime runtime;
 
@@ -454,8 +486,11 @@ void BuildRenderQue(DOM* dom);
 void Draw(DOM* dom);
 
 // Tells the program master to switch the page of the specified DOM to the specified one
-// Flags may tell the master wether to delete the curernt DOM or keep it and save the state
+// Flags may tell the master whether to delete the curernt DOM or keep it and save the state
 void SwitchPage(DOM* dom, int id, int flags = 0);
+
+// Same as SwitchPage but takes the name of the page to switch to 
+void SwitchPage(DOM* dom, const char* name, int flags = 0);
 
 // Expects a DOM with cleared element Arena, instances all the 
 void* InstancePage(DOM* target_dom, int id);

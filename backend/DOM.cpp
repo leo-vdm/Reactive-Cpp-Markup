@@ -76,6 +76,23 @@ BoundExpression* register_bound_expr(SubscribedStubString fn, int id)
     return created;
 }
 
+BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id)
+{
+    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
+    
+    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
+    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
+    {   
+        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
+        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
+    }
+    created->expression_id = id;
+    created->type = BoundExpressionType::VOID_PTR;
+    created->stub_ptr = fn;
+
+    return created;
+}
+
 // Note(Leo): Expressions are stored in the expression arena as an array with their id as their index
 BoundExpression* GetBoundExpression(int id)
 {
@@ -189,6 +206,10 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
     
     switch(added->type)
     {
+        case(AttributeType::ON_CLICK):
+        {
+            added->OnClick.binding_id = converted_attribute->OnClick.binding_id;
+        }
         case(AttributeType::COMP_ID):
             added->CompId.id = converted_attribute->CompId.id;
             return added;
@@ -210,12 +231,12 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
     return added;
 }
 
-Element* tag_to_element(DOM* dom, Compiler::Tag* converted_tag, Element* target_element = NULL)
+Element* tag_to_element(DOM* dom, Arena* element_arena, Compiler::Tag* converted_tag, Element* target_element = NULL)
 {
     Element* added = target_element;
     if(!added)
     {
-        added = (Element*)Alloc(dom->elements, sizeof(Element), zero());
+        added = (Element*)Alloc(element_arena, sizeof(Element), zero());
     }
     
     added->num_attributes = converted_tag->num_attributes;
@@ -268,16 +289,23 @@ void* InstancePage(DOM* target_dom, int id)
     // Note(Leo): All pages should inherit the Page struct so that they have the file_id member
     Page* page_obj = (Page*)created_page;
     page_obj->file_id = page_bin->file_id;
+    page_obj->master_dom = target_dom;
     
     Compiler::Tag* curr = page_bin->root_tag;
     
     Element* added;
     
+    // Note(Leo): Should already be aligned to Element requirements
+    // Using an arena to reserve all the required contiguous slots for elements in this page.
+    // Required since otherwise instance component will interfere with our pointers by allocing components
+    void* page_elements_mem = Alloc(target_dom->elements, page_bin->file_info.tag_count*sizeof(Element));
+    Arena page_elements = CreateArenaWith(page_elements_mem, page_bin->file_info.tag_count*sizeof(Element), sizeof(Element));
+    
     Compiler::Tag* tag_base = (Compiler::Tag*)page_bin->root_tag;
-    Element* element_base = (Element*)target_dom->elements->mapped_address;
+    Element* element_base = (Element*)page_elements_mem;
     
     // Adding root element
-    added = tag_to_element(target_dom, curr);
+    added = tag_to_element(target_dom, &page_elements, curr);
     added->parent = NULL;
     added->next_sibling = NULL;
     added->first_child = (Element*)get_pointer(tag_base, element_base, curr->first_child);
@@ -286,7 +314,7 @@ void* InstancePage(DOM* target_dom, int id)
     
     while(curr->tag_id)
     {
-        added = tag_to_element(target_dom, curr);
+        added = tag_to_element(target_dom, &page_elements, curr);
         added->parent = (Element*)get_pointer(tag_base, element_base, curr->parent);;
         added->next_sibling = (Element*)get_pointer(tag_base, element_base, curr->next_sibling);
         added->first_child = (Element*)get_pointer(tag_base, element_base, curr->first_child);
@@ -335,6 +363,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     // Note(Leo): All components should inherit the Component struct so that they have the file_id member
     Component* comp_obj = (Component*)added_comp;
     comp_obj->file_id = comp_bin->file_id;
+    comp_obj->master_dom = target_dom;
     
     // Allocate the element lookup array and align it so we can store pointers
     // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
@@ -349,7 +378,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     // Adding root element
     Element* added = (Element*)Alloc(target_dom->elements, sizeof(Element), zero());
     element_addresses[curr->tag_id] = (void*)added;
-    tag_to_element(target_dom, curr, added);
+    tag_to_element(target_dom, target_dom->elements, curr, added);
     added->master = added_comp;
     added->id = index_of(added, target_dom->elements->mapped_address, Element);
     
@@ -387,7 +416,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
             element_addresses[curr->tag_id] = (void*)added;
         }
         
-        tag_to_element(target_dom, curr, added);
+        tag_to_element(target_dom, target_dom->elements, curr, added);
         added->parent = (Element*)element_addresses[curr->parent->tag_id];
         added->id = index_of(added, target_dom->elements->mapped_address, Element);
         
