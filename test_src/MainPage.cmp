@@ -5,6 +5,11 @@ char* test = "Hello my string";
 
 #include "platform.h"
 
+struct test_struct
+{
+    int test_number;
+};
+
 class MainPage : Page
 {    
 public:
@@ -13,24 +18,36 @@ public:
     void* my_element;
     const char* my_var;
     
+    test_struct* things;
+    int things_len;
+    
     void PageMain(DOM* dom){
         printf("Hello from page main!\n");
         count = 0;
-	my_var = test;
-	printf("Count is %d\n", count);
-        
+        my_var = test;
+        printf("Count is %d\n", count);
+        should_show = false;
+        my_element = NULL;
+        things_len = 3;
+        things = (test_struct*)malloc(things_len*sizeof(test_struct));
     }
 
     void onSwitchPage()
     {
-	SwitchPage(master_dom, "TestPage");
+	   SwitchPage(master_dom, "TestPage");
     }
  
+    bool should_show;
+ 
     void on_count_changed(){ 
+        should_show = !should_show;
         count += 1;
-	printf("Count is now %d\n", count);
-	Element* image_element = (Element*)my_element;
-	image_element->Image.handle = RenderplatformGetImage("thumbs_up.jpg");	    
+    	printf("Count is now %d\n", count);
+    	if(my_element)
+    	{
+    	   Element* image_element = (Element*)my_element;
+    	   image_element->Image.handle = RenderplatformGetImage("thumbs_up.jpg");
+    	}
     }
 };
 
@@ -38,11 +55,14 @@ public:
 <root>
 <vdiv class="fill">
 	<hdiv class="title">Incredible Gallery</hdiv>
-	<hdiv class="img_container">
+	<hdiv class="img_container" condition="{return e->should_show;}">
 		<img this="{my_element}" src="texture.png"></img>
-		<img src="texture.png" onclick="{onSwitchPage()}"></img>
+		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>
 	</hdiv>
-	<vdiv class="footer" onclick="{on_count_changed()}">
+	<each loop="{things;return e->things_len;test_struct}">
+	   This is a loooooped text! {{test_number}}
+	</each>
+	<vdiv class="footer" onclick="{e->on_count_changed()}">
 		Count: {count}
 	</vdiv>
 </vdiv>

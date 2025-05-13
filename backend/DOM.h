@@ -3,6 +3,7 @@
 
 #include "arena.h"
 #include "arena_string.h"
+
 #include "file_system.h"
 
 
@@ -14,6 +15,7 @@
 // Common flags
 #define cache_valid() (uint64_t)(1 << 0)
 #define is_hovered() (uint64_t)(1 << 1)
+#define is_hidden() (uint64_t)(1 << 2)
 
 // Aligns the given pointer to where the type wants it to start in memory
 // Note(Leo): GCC doesnt need decltype inside of alignof but msvc does and will error otherwise
@@ -79,15 +81,6 @@ struct ElementMaster
     DOM* master_dom;
 };
 
-struct Component : ElementMaster
-{
-
-};
-
-struct Page : ElementMaster
-{
-
-};
 
 
 struct Runtime
@@ -101,6 +94,7 @@ struct Runtime
     Arena* loaded_files;
 
     Arena* loaded_tags;
+    Arena* loaded_templates;
     Arena* loaded_attributes;
     Arena* loaded_styles;
     Arena* loaded_selectors;
@@ -122,7 +116,7 @@ typedef Compiler::ClipStyle ClipStyle;
 typedef Compiler::DisplayType DisplayType;
 
 typedef Compiler::Style Style;
-
+typedef Compiler::BindingContext BindingContext;
 
 // Note(Leo): Same struct as Style but with priority numbers for each member, allowing styles to be combined and the higher
 // priority style's non-null members to override the lower priority style's ones.
@@ -166,6 +160,7 @@ struct Selector
     char* name;
 };
 
+
 enum class AttributeType
 {
 NONE,
@@ -180,7 +175,9 @@ COLUMN,
 SRC, // For the VIDEO and IMG tags
 COMP_ID, // For custom components
 ON_CLICK,
-THIS, // For binding an element to a variable
+THIS_ELEMENT, // For binding an element to a variable
+CONDITION,
+LOOP,
 };
 
 struct attr_comp_id_body 
@@ -193,10 +190,22 @@ struct attr_on_click_body
     int binding_id;
 };
 
+struct attr_condition_body
+{
+    int binding_id;
+};
+
 struct attr_this_body
 {
     int binding_id;
     bool is_initialized;
+};
+
+struct attr_loop_body
+{
+    int array_binding;
+    int length_binding;
+    int template_id;
 };
 
 struct attr_text_like_body
@@ -212,6 +221,7 @@ struct attr_custom_body : attr_text_like_body
     char* name_value;
     int name_length;
 };
+
 
 // Marks an attribute as having been initialized (for attributes that need initialization in the runtime evaluator)
 #define AttributeInitilized (uint32_t)(1 << 0)
@@ -235,6 +245,8 @@ struct Attribute
         attr_custom_body Custom;
         attr_on_click_body OnClick;
         attr_this_body This;
+        attr_condition_body Condition;
+        attr_loop_body Loop;
     };
 };
 
@@ -249,6 +261,7 @@ enum class ElementType
     GRID,
     IMG,
     VIDEO,
+    EACH,
 };
 
 struct LoadedImageHandle;
@@ -374,9 +387,11 @@ enum class ClickState
 struct Element 
 {
     void* master;
+    void* context_master;
     uint64_t flags;
     
     int id;
+    int context_index; // For keeping track of which index in an each element spawned this element.
     ElementType type;
     ClickState click_state;
     
@@ -421,14 +436,39 @@ struct Element
             Measurement* temporal_columns;
         
         } Grid;
+        struct {
+            Compiler::Tag* inner_template;
+            int last_count;
+            void* array_ptr;
+        } Each;
     };
 };
 
 
+struct Component : ElementMaster
+{
+    Element* custom_element;
+};
+
+struct Page : ElementMaster
+{
+
+};
+
 // Types of bound functions
 typedef void (*SubscribedStubVoid)(void*); 
-typedef ArenaString* (*SubscribedStubString)(void*, Arena*); 
+typedef ArenaString* (*SubscribedStubString)(void*, Arena*);
+typedef bool (*SubscribedStubBool)(void*); 
 typedef void (*SubscribedStubPointer)(void*, void*); // For feeding pointers to the user
+typedef void* (*SubscribedStubGetPointer)(void*); // For getting pointers from the user
+typedef int (*SubscribedStubInt)(void*);
+
+typedef ArenaString* (*ArrSubscribedStubString)(void*, Arena*, int);
+typedef void (*ArrSubscribedStubVoid)(void*, void*, int);
+typedef bool (*ArrSubscribedStubBool)(void*, void*, int);
+typedef void (*ArrSubscribedStubPointer)(void*, int, void*); // For feeding pointers to the user
+typedef void* (*ArrSubscribedStubGetPointer)(void*, int); // For getting pointers from the user
+typedef int (*ArrSubscribedStubInt)(void*, void*, int);
 
 enum class BoundExpressionType
 {
@@ -436,16 +476,34 @@ enum class BoundExpressionType
     VOID_RET,
     ARENA_STRING,
     VOID_PTR,
+    BOOL_RET,
+    PTR_RET,
+    INT_RET,
 };
 
 struct BoundExpression 
 {
     int expression_id;
     BoundExpressionType type;
-    union {
+    BindingContext context;
+    
+    union
+    {
+        // Globals //
         SubscribedStubVoid stub_void;
         SubscribedStubString stub_string;
         SubscribedStubPointer stub_ptr;
+        SubscribedStubBool stub_bool;
+        SubscribedStubGetPointer stub_get_ptr;
+        SubscribedStubInt stub_int;
+        
+        // Locals //
+        ArrSubscribedStubVoid arr_stub_void;
+        ArrSubscribedStubString arr_stub_string;
+        ArrSubscribedStubPointer arr_stub_ptr;
+        ArrSubscribedStubBool arr_stub_bool;
+        ArrSubscribedStubGetPointer arr_stub_get_ptr;
+        ArrSubscribedStubInt arr_stub_int;
     };
     
 };
@@ -453,6 +511,16 @@ struct BoundExpression
 BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubString fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubBool fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubGetPointer fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubInt fn, int id);
+
+BoundExpression* register_bound_expr(ArrSubscribedStubVoid fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubString fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubPointer fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubBool fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubGetPointer fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubInt fn, int id);
 
 extern Runtime runtime;
 
@@ -498,6 +566,8 @@ void* InstancePage(DOM* target_dom, int id);
 // Instances a component of the type specified by id, returns a pointer to the component's object
 void* InstanceComponent(DOM* target_dom, Element* parent, int id);
 
+void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int template_id, int index);
+
 void* AllocPage(DOM* dom, int size, int file_id);
 
 void* AllocComponent(DOM* dom, int size, int file_id);
@@ -509,4 +579,9 @@ LoadedFileHandle* GetFileFromId(int id);
 LoadedFileHandle* GetFileFromName(const char* name);
 
 BoundExpression* GetBoundExpression(int id);
+BodyTemplate* GetTemplate(int id);
 void RuntimeClearTemporal(DOM* target);
+
+// Frees all the element masters that have been malloc'ed in all the child elements of the given start element
+// Optionally DeAlloc's all the elements/attributes that are encountered aswell
+void FreeSubtreeObjects(Element* start, DOM* dom = NULL); // If DOM is given then elements are DeAlloc'ed

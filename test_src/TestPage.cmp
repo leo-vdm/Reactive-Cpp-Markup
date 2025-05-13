@@ -27,7 +27,7 @@ public:
 		<img src="thumbs_up.jpg"></img>
 	</hdiv>
 	<test_component></test_component>
-	<vdiv class="footer" onclick="{OnClickButton()}">
+	<vdiv class="footer" onclick="{e->OnClickButton()}">
 		Test Count: {count}
 	</vdiv>
 </vdiv>

@@ -41,57 +41,35 @@ void Draw()
     
 }
 
-// Todo(Leo): Move all bound expression related stuff into runtime since the objects are now shared universally and stored on a runtime arena
-BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id)
-{    
-    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
-    
-    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
-    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
-    {   
-        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
-        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
-    }
-    created->expression_id = id;
-    created->type = BoundExpressionType::VOID_RET;
-    created->stub_void = fn;
-    
-    return created;
+#define bound_expr(expr_context, fn_type, expr_type, union_name)                                                  \
+BoundExpression* register_bound_expr( fn_type fn, int id)                                           \
+{                                                                                                   \
+    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id;    \
+    if(runtime.bound_expressions->next_address <= (uintptr_t)created)                               \
+    {                                                                                               \
+        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);                          \
+        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);     \
+    }                                                                                               \
+    created->expression_id = id;                                                                    \
+    created->type = expr_type ;                                                                     \
+    created->union_name = fn;                                                                       \
+    created->context = expr_context;                                                                \
+    return created;                                                                                 \
 }
 
-BoundExpression* register_bound_expr(SubscribedStubString fn, int id)
-{
-    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
-    
-    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
-    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
-    {   
-        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
-        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
-    }
-    created->expression_id = id;
-    created->type = BoundExpressionType::ARENA_STRING;
-    created->stub_string = fn;
-    
-    return created;
-}
+bound_expr(BindingContext::GLOBAL, SubscribedStubVoid, BoundExpressionType::VOID_RET, stub_void);
+bound_expr(BindingContext::GLOBAL, SubscribedStubString, BoundExpressionType::ARENA_STRING, stub_string);
+bound_expr(BindingContext::GLOBAL, SubscribedStubPointer, BoundExpressionType::VOID_PTR, stub_ptr);
+bound_expr(BindingContext::GLOBAL, SubscribedStubBool, BoundExpressionType::BOOL_RET, stub_bool);
+bound_expr(BindingContext::GLOBAL, SubscribedStubGetPointer, BoundExpressionType::PTR_RET, stub_get_ptr);
+bound_expr(BindingContext::GLOBAL, SubscribedStubInt, BoundExpressionType::INT_RET, stub_int);
 
-BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id)
-{
-    BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id; 
-    
-    // Check if we have enough space allocated for the required slot to be available, if not allocated up until the needed slot
-    if(runtime.bound_expressions->next_address <= (uintptr_t)created)
-    {   
-        uintptr_t endpoint = (uintptr_t)created + sizeof(BoundExpression);
-        Alloc(runtime.bound_expressions, endpoint - runtime.bound_expressions->mapped_address);
-    }
-    created->expression_id = id;
-    created->type = BoundExpressionType::VOID_PTR;
-    created->stub_ptr = fn;
-
-    return created;
-}
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubVoid, BoundExpressionType::VOID_RET, arr_stub_void);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubString, BoundExpressionType::ARENA_STRING, arr_stub_string);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubPointer, BoundExpressionType::VOID_PTR, arr_stub_ptr);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubBool, BoundExpressionType::BOOL_RET, arr_stub_bool);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubGetPointer, BoundExpressionType::PTR_RET, arr_stub_get_ptr);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubInt, BoundExpressionType::INT_RET, arr_stub_int);
 
 // Note(Leo): Expressions are stored in the expression arena as an array with their id as their index
 BoundExpression* GetBoundExpression(int id)
@@ -119,7 +97,7 @@ Attribute* GetAttribute(Element* element, AttributeType searched_type)
 
 void* AllocPage(DOM* dom, int size, int file_id)
 {
-    // TODO(Leo): DONT USE MALLOC HERE THIS IS TEMPORARY, put this onto an arena instead
+    // Note(Leo): Need to use FreeSubtreeObject to ensure that this malloc'ed memory gets freed
     void* allocated = malloc(size);
     memset(allocated, 0, size);
     return allocated;
@@ -128,7 +106,7 @@ void* AllocPage(DOM* dom, int size, int file_id)
 
 void* AllocComponent(DOM* dom, int size, int file_id)
 {
-    // TODO(Leo): DONT USE MALLOC HERE THIS IS TEMPORARY, put this onto an arena instead
+    // Note(Leo): Need to use FreeSubtreeObject to ensure that this malloc'ed memory gets freed
     void* allocated = malloc(size);
     memset(allocated, 0, size);
     return allocated;
@@ -215,10 +193,19 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
             return added;
             break;
         case(AttributeType::CUSTOM):
+        {
             added->Custom.name_value = converted_attribute->Custom.name;
             added->Custom.name_length = converted_attribute->Custom.name_length;
             goto text_like;
             break;
+        }
+        case(AttributeType::LOOP):
+        {
+            added->Loop.array_binding = converted_attribute->Loop.array_binding;
+            added->Loop.length_binding = converted_attribute->Loop.length_binding;
+            added->Loop.template_id = converted_attribute->Loop.template_id;
+            break;
+        }
         default:
             text_like:
             added->Text.binding_id = converted_attribute->Text.binding_id;
@@ -364,6 +351,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     Component* comp_obj = (Component*)added_comp;
     comp_obj->file_id = comp_bin->file_id;
     comp_obj->master_dom = target_dom;
+    comp_obj->custom_element = parent;
     
     // Allocate the element lookup array and align it so we can store pointers
     // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
@@ -380,6 +368,9 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     element_addresses[curr->tag_id] = (void*)added;
     tag_to_element(target_dom, target_dom->elements, curr, added);
     added->master = added_comp;
+    added->context_master = parent->context_master;
+    added->context_index = parent->context_index;
+    
     added->id = index_of(added, target_dom->elements->mapped_address, Element);
     
     // Note(Leo): Parent is the Custom element type that calls this instance-ing and so it should have no existing children
@@ -440,6 +431,8 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
         }
         
         added->master = added_comp;
+        added->context_master = parent->context_master;
+        added->context_index = parent->context_index;
         
         // If the element being added is a component, instance it
         if(curr->type == Compiler::TagType::CUSTOM)
@@ -464,6 +457,127 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     DeAllocScratch(element_addresses_unaligned);
     
     return added_comp;
+}
+
+// Note(Leo): Templates are stored in the templates arena with their id as their index + 1
+BodyTemplate* GetTemplate(int id)
+{
+    assert(id > 0);
+    assert(runtime.loaded_templates->mapped_address);
+    return (BodyTemplate*)runtime.loaded_templates->mapped_address + (id - 1);
+}
+
+void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int template_id, int index)
+{
+    BodyTemplate* used_template = GetTemplate(template_id);
+    
+    // Allocate the element lookup array and align it so we can store pointers
+    // Note(Leo): + 1 since we use the element's id to index into this array and element ids start at 1 and + 1 to leave alignment room
+    void* element_addresses_unaligned = AllocScratch((used_template->tag_count + 2) * sizeof(Element*), zero());
+    void** element_addresses = (void**)align_ptr(element_addresses_unaligned);
+    
+    // Note(Leo): We use element id to index into this array, since id's are local to the file we know that
+    //  they are in the range 1 - num_tags + 1
+    
+    Compiler::Tag* curr = used_template->first_tag;
+    
+    // Adding first element
+    Element* added = (Element*)Alloc(target_dom->elements, sizeof(Element), zero());
+    element_addresses[curr->tag_id] = (void*)added;
+    tag_to_element(target_dom, target_dom->elements, curr, added);
+    added->master = parent->master;
+    added->context_master = array_ptr;
+    added->context_index = index;
+    
+    added->id = index_of(added, target_dom->elements->mapped_address, Element);
+    
+    // Note(Leo): Parent is the each element, indeces are added in reverse order so that we end up with the 
+    //            highest index as the last child.
+    added->next_sibling = parent->first_child;
+    parent->first_child = added;
+    
+    added->parent = parent;
+    
+    // Pre allocate an address for the first child element of root
+    if(curr->first_child)
+    {
+        element_addresses[curr->first_child->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
+        added->first_child = (Element*)(element_addresses[curr->first_child->tag_id]); 
+    }
+    
+    // Note(Leo): Move off of root since it has id == 0 which would break the loop 
+    curr++;
+    
+    // Allocates an element for the given tag id and puts the pointer in element_addresses 
+    #define PushElement(tag_id) element_addresses[tag_id] = Alloc(target_dom->elements, sizeof(Element), zero())
+    
+    for(int i = 0; i < (used_template->tag_count - 1); i++)
+    {
+        // An address has already been allocated for this element
+        if(element_addresses[curr->tag_id])
+        {
+            added = (Element*)element_addresses[curr->tag_id];
+        }
+        // Element has not had an address allocated yet, allocate one
+        else
+        {
+            added = (Element*)Alloc(target_dom->elements, sizeof(Element), zero());
+            element_addresses[curr->tag_id] = (void*)added;
+        }
+        
+        tag_to_element(target_dom, target_dom->elements, curr, added);
+        
+        // Note(Leo): The top level tags in a template have no parents 
+        if(curr->parent)
+        {
+            added->parent = (Element*)element_addresses[curr->parent->tag_id];
+        }
+        added->id = index_of(added, target_dom->elements->mapped_address, Element);
+        
+        if(curr->next_sibling)
+        {
+            // Note(Leo): Allocate the element in advance if it doenst exist
+            if(!element_addresses[curr->next_sibling->tag_id])
+            {
+                PushElement(curr->next_sibling->tag_id);
+            }
+            added->next_sibling = (Element*)element_addresses[curr->next_sibling->tag_id];
+        }
+        if(curr->first_child)
+        {
+            // Note(Leo): Allocate the element in advance if it doenst exist
+            if(!element_addresses[curr->first_child->tag_id])
+            {
+                PushElement(curr->first_child->tag_id);
+            }
+            added->first_child = (Element*)element_addresses[curr->first_child->tag_id];
+        }
+        
+        added->master = parent;
+        added->context_master = array_ptr;
+        added->context_index = index;
+        
+        // If the element being added is a component, instance it
+        if(curr->type == Compiler::TagType::CUSTOM)
+        {
+            Attribute* comp_specifier = GetAttribute(added, AttributeType::COMP_ID);
+            
+            // Comp element must be corrupted/uninitialized if it doesnt have a specifier for file id
+            assert(comp_specifier);
+            // Must specify a comp id
+            assert(comp_specifier->CompId.id);
+            
+            if(comp_specifier)
+            {
+                InstanceComponent(target_dom, added, comp_specifier->CompId.id);
+            }
+            
+        }
+        
+        curr++;
+    }
+    
+    DeAllocScratch(element_addresses_unaligned);
 }
 
 // Merge the members of the secondary in-flight style into the main style
@@ -559,4 +673,39 @@ void MergeStyles(InFlightStyle* main, Style* style)
     convert_style(style, &temp);
         
     MergeStyles(main, &temp);
+}
+
+void FreeSubtreeObjects(Element* start, DOM* dom)
+{
+    // Todo(Leo): This is a recursive approach which isnt ideal, replace it!
+    Element* curr = start->first_child;
+    while(curr)
+    {
+        FreeSubtreeObjects(curr, dom);
+        curr = curr->next_sibling;
+    }
+    
+    if(start->type == ElementType::ROOT && start->master)
+    {
+        free(start->master);
+    }
+    
+    if(dom)
+    {
+        Attribute* curr_attribute = start->first_attribute;
+        Attribute* last_attribute = curr_attribute;
+        while(curr_attribute)
+        {
+            last_attribute = curr_attribute; 
+            curr_attribute = curr_attribute->next_attribute;
+            DeAlloc(dom->attributes, last_attribute);
+        }
+        
+        if(last_attribute)
+        {
+            DeAlloc(dom->attributes, last_attribute);
+        }
+        
+        DeAlloc(dom->elements, start);
+    }
 }

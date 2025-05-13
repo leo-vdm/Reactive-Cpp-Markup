@@ -18,7 +18,7 @@ class test_component : Component
 </code>
 <root>
 <vdiv>
-	<hdiv onclick="{on_count_changed()}">
+	<hdiv onclick="{e->on_count_changed();}">
 		Component Count {count}
 	</hdiv>
 </vdiv>

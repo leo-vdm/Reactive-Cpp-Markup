@@ -7,8 +7,6 @@ using namespace Compiler;
 
 static Token* curr_token; 
 
-int curr_tag_id;
-
 #define eat() curr_token++
 static bool expect_eat(TokenType expected_type);
 Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindings_arena, Arena* values_arena, Tag* parent_tag, Token* attribute_start_token, CompilerState* state);
@@ -18,22 +16,37 @@ Measurement parse_size_field(StringView* expression);
 void parse_style_expr(Style* target);
 void clear_registered_bindings();
 
-const char* tag_type_names[] = { "ROOT", "TEXT", "DIV", "CUSTOM", "GRID", "IMG", "VIDEO" };
-
+struct ast_context
+{
+    Arena* tags;
+    int curr_tag_id;
+    StringView context_name;
+};
 
 void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* state)
 {
-    #define push_tag() (Tag*)Alloc(target->tags, sizeof(Tag))
+    void* context_stack_memory = AllocScratch(sizeof(ast_context)*101);
+    ast_context* context_stack = (ast_context*)align_mem(context_stack_memory, ast_context);
+    int context_depth = 0;
     
+    #define push_context(added, name) context_depth++;context_stack[context_depth - 1] = {added, 0, name}
+    #define pop_context() context_depth--
+    #define context_arena() (context_stack[context_depth - 1].tags)
+    #define context_tag_id() (context_stack[context_depth - 1].curr_tag_id)
+    #define context_name() (context_stack[context_depth - 1].context_name)
+    #define push_tag() (Tag*)Alloc(context_arena(), sizeof(Tag))
+    
+    StringView base_context_name = {};
+    push_context(target->tags, base_context_name);
     
     curr_token = (Token*)tokens->mapped_address;
     Tag* curr_tag = push_tag();
     
     // First tag is always root
-    // NOTE(Leo): Tag IDS are local to the file, other systems use global ids. Element ids are decided at runtime.
-    curr_tag_id = 1;
+    // Note(Leo): Tag IDS are local to the file, other systems use global ids. Element ids are decided at runtime.
+    context_tag_id() = 1;
     curr_tag->type = TagType::ROOT;
-    curr_tag->tag_id = curr_tag_id++;
+    curr_tag->tag_id = context_tag_id()++;
     
     curr_tag->first_attribute = NULL;
     curr_tag->parent = NULL;
@@ -52,8 +65,10 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
         switch(curr_token->type)
         {
             case (TokenType::TAG_START):
-                {
+            {
                 Tag* new_tag = push_tag();
+                
+                new_tag->context_name = context_name();
                 
                 // Indicates new tag is a sibling
                 if(has_ended)
@@ -66,9 +81,11 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                     
                     curr_tag = new_tag;
                 }
-                else{ // Indicates new tag is a child
+                else
+                {   // Indicates new tag is a child
                     // This must be the first child
                     new_tag->parent = curr_tag;
+                    
                     curr_tag->first_child = new_tag;
                     has_ended = false;
                     
@@ -85,8 +102,36 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 {
                     custom_component_id = RegisterComponent(&curr_token->body, state);
                 }
+                // Note(Leo): Each is special cos its only allowed the loop attribute, it cant have others cos it is 
+                //            not a "real" element and also needs to push a new context to put its child tags into a
+                //            template.
+                else if(curr_tag->type == TagType::EACH) 
+                {
+                    curr_tag->tag_id = context_tag_id()++;
+                    eat();
+                    
+                    if(curr_token->type != TokenType::TAG_ATTRIBUTE)
+                    {
+                        printf("Error: The Each element must have a \"loop\" attribute\n");
+                        break;
+                    }
+                    
+                    // Tokenize the attribute and then eat the token
+                    Token* first_attribute_token = TokenizeAttribute(tokens, token_values, curr_token);
+                    curr_tag->first_attribute = parse_attribute_expr(target->attributes, target->registered_bindings, target->values, curr_tag, first_attribute_token, state);
+                    assert(curr_tag->first_attribute->type == AttributeType::LOOP);
+                    
+                    RegisteredTemplate* each_template = RegisterTemplate(target->templates, state);
+                    push_context(&each_template->tags, curr_tag->first_attribute->Loop.type_name);
+                    context_tag_id() = 1;
+                                        
+                    curr_tag->first_attribute->Loop.template_id = each_template->template_id;
+                    
+                    eat();  
+                    break;
+                }
                 
-                curr_tag->tag_id = curr_tag_id++;
+                curr_tag->tag_id = context_tag_id()++;
                 
                 eat();
                 curr_tag->first_attribute = NULL;
@@ -124,7 +169,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 }
             
                 break;
-                }
+            }
             case (TokenType::TAG_END):
                 {
                 TagType expected_type; 
@@ -146,10 +191,14 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                     expected_type = curr_tag->type;
                 }
                 
+                if(expected_type == TagType::EACH && curr_tag->type != TagType::TEXT)
+                {
+                    pop_context();
+                }
+                
                 if(curr_tag->type != TagType::TEXT && expected_type != GetTagFromName(&curr_token->body))
                 {
                     printf("Unexpected tag end!\n");
-                    printf("Expected \"%s\" but got \"%.*s\"\n", tag_type_names[(int)curr_tag->type], curr_token->body.len, curr_token->body.value);
                 }
                 
                 break;
@@ -157,6 +206,8 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
             case(TokenType::TEXT):
             {
                 Tag* new_tag = push_tag();          
+                
+                new_tag->context_name = context_name();
                 
                 if(has_ended) // Indicates text is a sibling
                 {
@@ -177,7 +228,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 }
                 
                 curr_tag->type = TagType::TEXT;
-                curr_tag->tag_id = curr_tag_id++;
+                curr_tag->tag_id = context_tag_id()++;
                 curr_tag->num_attributes = 1;
                 
                 Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute), zero());
@@ -191,16 +242,24 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 break;
             }
             case(TokenType::OPEN_BRACKET):
+            {
+                bool is_local = false;
+                
+                // Double brackets are local bindings
+                if((curr_token + 1)->type == TokenType::OPEN_BRACKET)
                 {
+                    is_local = true;
+                    eat();
+                }    
+                
                 if(!expect_eat(TokenType::TEXT))
                 {
                     printf("Expeced binding definition!");
                 }
                 
-                
-                
                 Tag* new_tag = push_tag();    
                 
+                new_tag->context_name = context_name();
                 if(has_ended) // Indicates text binding is a sibling
                 {
                     curr_tag->next_sibling = new_tag;
@@ -220,7 +279,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 }
                 
                 curr_tag->type = TagType::TEXT;
-                curr_tag->tag_id = curr_tag_id++;
+                curr_tag->tag_id = context_tag_id()++;
                 curr_tag->num_attributes = 1;
                 
                 // need an attribute to attatch the binding to
@@ -230,7 +289,7 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 text_content->Text.value_length = 0;
                 text_content->Text.binding_position = 0;
                 
-                text_content->Text.binding_id = RegisterBindingByName(target->registered_bindings, target->values, &curr_token->body, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                text_content->Text.binding_id = RegisterBindingByName(target->registered_bindings, target->values, &curr_token->body, curr_tag->tag_id, RegisteredBindingType::TEXT_RET, is_local, state, curr_tag->context_name);
                                 
                 curr_tag->first_attribute = text_content;
                 
@@ -254,15 +313,18 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
     Alloc(target->tags, sizeof(Tag), zero());
     // Note(leo): same for attributes
     Alloc(target->attributes, sizeof(Attribute), zero());
-    
+    Alloc(target->templates, sizeof(RegisteredTemplate), zero());
+    DeAllocScratch(context_stack_memory);
 }
 
 std::map<std::string, TagType> tag_map = 
 {
     {"text", TagType::TEXT },
     {"hdiv", TagType::HDIV },
+    {"button", TagType::HDIV }, // Buttons are just a macro for hdiv
     {"vdiv", TagType::VDIV },
     {"img", TagType::IMG },
+    {"each", TagType::EACH },
     //{"end", TagType::CUSTOM},
 };
 
@@ -273,7 +335,9 @@ std::map<std::string, AttributeType> attribute_map =
     {"style", AttributeType::STYLE },
     {"src", AttributeType::SRC },
     {"onclick", AttributeType::ON_CLICK },
-    {"this", AttributeType::THIS },
+    {"this", AttributeType::THIS_ELEMENT },
+    {"condition", AttributeType::CONDITION },
+    {"loop", AttributeType::LOOP },
 };
 
 
@@ -313,7 +377,16 @@ AttributeType GetAttributeFromName(StringView* name)
     return AttributeType::CUSTOM;
 }
 
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, RegisteredBindingType type, CompilerState* state)
+RegisteredTemplate* RegisterTemplate(Arena* templates_arena, Compiler::CompilerState* state)
+{
+    RegisteredTemplate* new_template = (RegisteredTemplate*)Alloc(templates_arena, sizeof(RegisteredTemplate), zero());
+    new_template->tags = CreateArena(2000*sizeof(Tag), sizeof(Tag));
+    new_template->template_id = state->next_template_id++;
+    
+    return new_template;
+}
+
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, Compiler::RegisteredBindingType type, bool is_local, Compiler::CompilerState* state, StringView context_name)
 {
     char* terminated_name = (char*)AllocScratch((name->len + 1)*sizeof(char), no_zero()); // extra charachter to fit the NULL terminator
     memcpy(terminated_name, name->value, name->len*sizeof(char)); 
@@ -330,14 +403,6 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView
         
         RegisteredBinding* existing_binding = bindings + binding_id;
         
-        existing_binding->registered_tag_ids[existing_binding->num_registered] = tag_id;
-        
-        existing_binding->num_registered = (existing_binding->num_registered + 1) % MAX_TAGS_PER_BINDING;
-        if(existing_binding->num_registered == 0) // Indicates that the index passed over modulo
-        {
-            printf("Be careful, binding with name %s has gone over its registered tag limit!", terminated_name);
-        }
-        
         DeAllocScratch(name);
         return search->second;
     }
@@ -353,10 +418,17 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView
     new_binding->binding_name = saved_name;
     new_binding->name_length = name->len;
     
-    new_binding->num_registered = 1;
-    new_binding->registered_tag_ids[0] = tag_id;
-    
     new_binding->type = type;
+    
+    if(is_local)
+    {
+        new_binding->context = BindingContext::LOCAL;
+        new_binding->context_name = context_name;   
+    }
+    else
+    {
+        new_binding->context = BindingContext::GLOBAL;
+    }
     
     registered_binding_map.insert({(const char*)terminated_name, new_binding->binding_id});
     DeAllocScratch(terminated_name);
@@ -433,7 +505,8 @@ int RegisterSelectorByName(Compiler::LocalStyles* target, StringView* name, int 
     auto search = registered_selector_map.find((const char*)terminated_name);
     
     // If the binding is already registered, return its ID
-    if(search != registered_selector_map.end()){
+    if(search != registered_selector_map.end())
+    {
         // Register the tag with the binding
         Selector* found_selector = (Selector*)search->second;
         
@@ -552,7 +625,16 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
         // If binding was first or after text handle it
         if(curr_token->type == TokenType::OPEN_BRACKET)
         {
-            if(!expect_eat(TokenType::TEXT)){
+            bool is_local = false;
+            // Double brackets is for locals
+            if((curr_token + 1)->type == TokenType::OPEN_BRACKET)
+            {
+                is_local = true;
+                eat();
+            }
+            
+            if(!expect_eat(TokenType::TEXT))
+            {
                 printf("No variable name provided for binding!");
                 return NULL;
             }
@@ -561,24 +643,102 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             switch(new_attribute->type)
             {
             case(AttributeType::ON_CLICK):
-                new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_RET, state);
+                new_attribute->OnClick.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_RET, is_local, state, parent_tag->context_name);
                 break;
-            case(AttributeType::THIS):
+            case(AttributeType::THIS_ELEMENT):
             {
-                new_attribute->This.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_PTR, state);
+                new_attribute->This.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::VOID_PTR, is_local, state, parent_tag->context_name);
+                break;
+            }
+            case(AttributeType::CONDITION):
+            {
+                new_attribute->Condition.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::BOOL_RET, is_local, state, parent_tag->context_name);
+                break;
+            }
+            case(AttributeType::LOOP):
+            {
+                assert(parent_tag->type == TagType::EACH);
+                StringView array_name = {};
+                StringView count_name = {};
+                
+                array_name.value = curr_token->body.value;
+                
+                for(int i = 0; i < curr_token->body.len; i++)
+                {
+                    if(array_name.value[i] == ';')
+                    {
+                        break;
+                    }
+                    array_name.len++;
+                }
+                
+                if(array_name.len == 0 || array_name.len == curr_token->body.len)
+                {
+                    printf("Error: Needed an array name in loop attribute binding!\n");
+                    break;
+                }
+                
+                new_attribute->Loop.array_binding = RegisterBindingByName(registered_bindings_arena, values_arena, &array_name, parent_tag->tag_id, RegisteredBindingType::PTR_RET, is_local, state, parent_tag->context_name);
+                
+                // +1 to step over ;
+                count_name.value = curr_token->body.value + (array_name.len + 1);
+                
+                for(int i = 0; i < (curr_token->body.len - array_name.len); i++)
+                {
+                    if(count_name.value[i] == ';')
+                    {
+                        break;
+                    }
+                    count_name.len++;
+                }
+            
+                if(count_name.len == 0 || (count_name.len + array_name.len + 1) == curr_token->body.len)
+                {
+                    printf("Error: Needed an array count variable in loop attribute binding!\n");
+                    break;
+                }
+                
+                new_attribute->Loop.length_binding = RegisterBindingByName(registered_bindings_arena, values_arena, &count_name, parent_tag->tag_id, RegisteredBindingType::INT_RET, is_local, state, parent_tag->context_name);
+                
+                // +1 to step over ;
+                char* type_name = count_name.value + (count_name.len + 1);
+                if(type_name > (curr_token->body.value + curr_token->body.len))
+                {
+                    printf("Error: Needed a type name in loop attribute binding!\n");
+                    break;
+                }
+                new_attribute->Loop.type_name.len = curr_token->body.len - (array_name.len + count_name.len + 2);
+                
+                assert(type_name + new_attribute->Loop.type_name.len == curr_token->body.value + curr_token->body.len);
+                
+                // +2 to account for 2 skipped ; chars
+                new_attribute->Loop.type_name.value = (char*)Alloc(values_arena, new_attribute->Loop.type_name.len*sizeof(char));
+                memcpy(new_attribute->Loop.type_name.value, type_name, new_attribute->Loop.type_name.len);
+            
                 break;
             }
             default: // All the attribtues that just use a text like body
                 //new_attribute->binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, (char*)curr_token->token_value, curr_token->value_length, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
                 new_attribute->Text.binding_position = front_length;
-                new_attribute->Text.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, state);
+                new_attribute->Text.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, parent_tag->tag_id, RegisteredBindingType::TEXT_RET, is_local, state, parent_tag->context_name);
                 break;
             }
             
-            if(!expect_eat(TokenType::CLOSE_BRACKET)){
+            if(!expect_eat(TokenType::CLOSE_BRACKET))
+            {
                 printf("Expected a closing bracket after binding");
                 return NULL;
             }
+            
+            if(is_local)
+            {
+                if(!expect_eat(TokenType::CLOSE_BRACKET))
+                {
+                    printf("Expected another closing bracket after local binding");
+                    return NULL;
+                }
+            }
+            
             eat(); // Eat the closing bracket
         }
         //if there is text after the binding handle it
@@ -595,8 +755,16 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
             // OnClick has no value
             case(AttributeType::ON_CLICK):
                 break;
-            case(AttributeType::THIS): // This has no value
+            case(AttributeType::THIS_ELEMENT): // This has no value
                 break;
+            case(AttributeType::CONDITION):
+            {
+                break;
+            }
+            case(AttributeType::LOOP):
+            {
+                break;
+            }
             // Text like attributes
             default:
             {
@@ -631,8 +799,6 @@ Attribute* parse_attribute_expr(Arena* attribute_arena, Arena* registered_bindin
     return first_added;
 }
 
-
-
 // Registers all the selectors to the given style id until it hits an open bracket.
 void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, CompilerState* state)
 {
@@ -641,7 +807,7 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
         switch(curr_token->type)
         {
             case(TokenType::TEXT):
-                {
+            {
                 StringView stripped_name = StripOuterWhitespace(&curr_token->body);
                 
                 RegisterSelectorByName(target, &stripped_name, style_id, global_prefix, state);
@@ -650,8 +816,8 @@ void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, C
                 {
                     eat();
                 }
-                }
                 break;
+            }
             case(TokenType::OPEN_BRACKET):
                 return;
                 break;

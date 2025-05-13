@@ -48,7 +48,12 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         
         added_tag.parent_index = get_index(saved_tree->tags, curr_tag->parent);
         added_tag.next_sibling_index = get_index(saved_tree->tags, curr_tag->next_sibling);
-        added_tag.first_child_index = get_index(saved_tree->tags, curr_tag->first_child);
+        
+        // Each shouldnt have children
+        if(added_tag.type != TagType::EACH)
+        {
+            added_tag.first_child_index = get_index(saved_tree->tags, curr_tag->first_child);
+        }
         
         fwrite(&added_tag, sizeof(SavedTag), 1, out_file);
         
@@ -56,6 +61,69 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         header.tag_count++;
         curr_tag++;
     }
+    
+    RegisteredTemplate* curr_template = (RegisteredTemplate*)saved_tree->templates->mapped_address;
+    
+    int template_count = (RegisteredTemplate*)saved_tree->templates->next_address - (RegisteredTemplate*)saved_tree->templates->mapped_address;
+    
+    // Note(Leo): +1 to account for alignment
+    void* saved_template_mem = AllocScratch((template_count + 1)*sizeof(SavedTemplate)); 
+    Arena saved_templates = CreateArenaWith(align_mem(saved_template_mem, SavedTemplate), template_count*sizeof(SavedTemplate), sizeof(SavedTemplate));
+    
+    // Saving all tags inside of templates
+    while(curr_template->template_id != 0)
+    {
+        int tag_index_offset = header.tag_count;
+        
+        SavedTemplate* created_template = (SavedTemplate*)Alloc(&saved_templates, sizeof(SavedTemplate), zero());
+        created_template->id = curr_template->template_id;
+        created_template->first_tag_index = tag_index_offset + 1; // Todo(Leo): Is this correct??
+    
+        curr_tag = (Tag*)curr_template->tags.mapped_address;
+        SavedTag added_tag;
+        while(curr_tag->tag_id != 0)
+        {
+            added_tag = {};
+            added_tag.tag_id = curr_tag->tag_id;
+            added_tag.first_attribute_index = get_index(saved_tree->attributes, curr_tag->first_attribute);
+            added_tag.num_attributes = curr_tag->num_attributes;
+            
+            added_tag.type = curr_tag->type;
+            
+            // Base tags in a template should have parent set to null
+            if(curr_tag->parent->type != TagType::EACH)
+            {
+                // Indexe all need to be offset cos the static tags have already been added
+                added_tag.parent_index = curr_tag->parent ? tag_index_offset + get_index((&curr_template->tags), curr_tag->parent) : 0;
+            }
+            
+            added_tag.next_sibling_index = curr_tag->next_sibling ? tag_index_offset + get_index((&curr_template->tags), curr_tag->next_sibling) : 0;
+            added_tag.first_child_index = curr_tag->first_child ? tag_index_offset + get_index((&curr_template->tags), curr_tag->first_child) : 0;
+            
+            fwrite(&added_tag, sizeof(SavedTag), 1, out_file);
+        
+            current_index += sizeof(SavedTag);
+            header.tag_count++;
+            created_template->tag_count++;
+            curr_tag++;
+        }
+        curr_template++;
+    }
+    
+    Alloc(&saved_templates, sizeof(SavedTemplate), zero()); // Stopper
+    
+    header.first_template_index = current_index;
+    
+    SavedTemplate* curr_saved_template = (SavedTemplate*)saved_templates.mapped_address;
+    while(curr_saved_template->id != 0)
+    {
+        fwrite(curr_saved_template, sizeof(SavedTemplate), 1, out_file);
+        header.template_count++;
+        current_index += sizeof(SavedTemplate);
+        curr_saved_template++;
+    }
+    
+    DeAllocScratch(saved_template_mem);
     
     header.first_attribute_index = current_index;
     
@@ -69,19 +137,34 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
             case(AttributeType::ON_CLICK):
                 added_attribute.OnClick.binding_id = curr_attribute->OnClick.binding_id;
                 break;
-            case(AttributeType::THIS):
+            case(AttributeType::THIS_ELEMENT):
                 added_attribute.This.binding_id = curr_attribute->This.binding_id;
                 break;
             case(AttributeType::COMP_ID):
                 added_attribute.CompId.id = curr_attribute->CompId.id;
                 break;
+            case(AttributeType::CONDITION):
+            {
+                added_attribute.Condition.binding_id = curr_attribute->Condition.binding_id;
+                break;
+            }
+            case(AttributeType::LOOP):
+            {
+                added_attribute.Loop.array_binding = curr_attribute->Loop.array_binding;
+                added_attribute.Loop.length_binding = curr_attribute->Loop.length_binding;
+                added_attribute.Loop.template_id = curr_attribute->Loop.template_id;
+                break;
+            }
             case(AttributeType::CUSTOM):
+            {
                 added_attribute.Custom.name_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->Custom.name, curr_attribute->Custom.name_length);
                 added_attribute.Custom.name_length = curr_attribute->Custom.name_length;
                 // Fill the shared parameters
                 goto text_like;
                 break;
+            }
             default: // Text like attributes
+            {
                 text_like:
                 added_attribute.Text.value_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->Text.value, curr_attribute->Text.value_length);
                 added_attribute.Text.value_length = curr_attribute->Text.value_length;
@@ -89,6 +172,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
                 added_attribute.Text.binding_id = curr_attribute->Text.binding_id;
                 
                 break;
+            }
         }
         
         fwrite(&added_attribute, sizeof(SavedAttribute), 1, out_file);
@@ -157,9 +241,9 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
 }
 
-#define debug_load 0
+#define debug_load 1
 // Note(Leo): We cannot acces values to print for debugging until the end of the FN since thats when the values get read in.
-LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
+LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
     #define get_pointer(base_ptr, index, type) (index ? (type*)(base_ptr + sizeof(type)*(index - 1)) : NULL)
     
@@ -176,6 +260,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     }
     
     uintptr_t base_tag = tags->next_address;
+    uintptr_t base_template = templates->next_address;
     uintptr_t base_attribute = attributes->next_address;
     uintptr_t base_style = styles->next_address;
     uintptr_t base_selector = selectors->next_address;
@@ -189,6 +274,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     handle.file_id = header.file_id;
     handle.flags = header.flags;
     handle.root_tag = (Tag*)tags->next_address;
+    handle.first_template = (BodyTemplate*)templates->next_address;
     handle.first_selector = (Selector*)selectors->next_address;
     handle.first_style = (Style*)styles->next_address;
     handle.file_info = header;
@@ -198,6 +284,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     printf("\t Flags: %d\n", header.flags);
     printf("\t File ID: %d\n", header.file_id);
     printf("\t First Tag: %d, # of Tags: %d\n", header.first_tag_index, header.tag_count);
+    printf("\t First Template: %d, # of Templates: %d\n", header.first_template_index, header.template_count);
     printf("\t First Atr: %d, # of Atribs: %d\n", header.first_attribute_index, header.attribute_count);
     printf("\t First Style: %d, # of Styles: %d\n", header.first_style_index, header.style_count);
     printf("\t First Selector: %d, # of Selectors: %d\n", header.first_selector_index, header.selector_count);
@@ -237,6 +324,44 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
     Attribute* added_attribute;
 
 #if debug_load
+    printf("\n--== Templates ==--\n");
+#endif
+
+    BodyTemplate* added_template;
+    SavedTemplate read_template;
+
+    for(int i = 0; i < header.template_count; i++)
+    {
+        fread(&read_template, sizeof(SavedTemplate), 1, file);
+        // Note(Leo): Templates are indexed in the arena by their ID 
+        
+        // See if we need to allocated more for this template's slot to be valid
+        BodyTemplate* added_template = get_pointer(((BodyTemplate*)templates->mapped_address), read_template.id, BodyTemplate);
+        // Note(Leo): <= since if we are on the next_address then the memory for the object is over it
+        if((BodyTemplate*)templates->next_address <= added_template)
+        {
+            int required = added_template - (BodyTemplate*)templates->next_address;
+            if(required == 0)
+            {
+                required++;
+            }
+            required++; 
+            
+            Alloc(templates, required*sizeof(BodyTemplate), zero());
+        }
+                
+        added_template->id = read_template.id;
+        added_template->first_tag = get_pointer(base_tag, read_template.first_tag_index, Tag);
+        added_template->tag_count = read_template.tag_count;
+#if debug_load
+        printf(" --Template--\n");
+        printf("\tTemplate id: %d\n", added_template->id);
+        printf("\tFirst Tag: %d\n", read_template.first_tag_index);
+        printf("\tTag Count: %d\n", read_template.tag_count);
+#endif
+    }
+
+#if debug_load
     printf("\n--== Attributes ==--\n");
 #endif
     
@@ -261,9 +386,21 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* attributes, Arena* sty
                 added_attribute->OnClick.binding_id = read_attribute.OnClick.binding_id;
                 break;
             }
-            case(AttributeType::THIS):
+            case(AttributeType::THIS_ELEMENT):
             {
                 added_attribute->This.binding_id = read_attribute.This.binding_id;
+                break;
+            }
+            case(AttributeType::CONDITION):
+            {
+                added_attribute->Condition.binding_id = read_attribute.Condition.binding_id;
+                break;
+            }
+            case(AttributeType::LOOP):
+            {
+                added_attribute->Loop.array_binding = read_attribute.Loop.array_binding;
+                added_attribute->Loop.length_binding = read_attribute.Loop.length_binding;
+                added_attribute->Loop.template_id = read_attribute.Loop.template_id;
                 break;
             }
             default:

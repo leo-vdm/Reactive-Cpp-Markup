@@ -15,6 +15,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
     #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
 
     char next_char;
+    bool inside_quote = false;
     
     while((next_char = fgetc(src)) != EOF)
     {
@@ -22,6 +23,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
         switch(next_char)
         {
             case('<'):
+            {
                 next_char = fgetc(src);
                 new_token = push_token();
                        
@@ -47,13 +49,51 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                     break;
                 }
                 
-                
                 // Push a new token for the attributes
                 new_token = push_token();
                 new_token->type = TokenType::TAG_ATTRIBUTE;
-                aggregate_text(src, token_values_arena, new_token, ">"); // everything between a tag name and closure is an attribute
+                
+                aggregate_text(src, token_values_arena, new_token, ">\""); // everything between a tag name and closure is an attribute
+                next_char = fgetc(src);
+                
+                if(next_char == '>')
+                {
+                    ungetc(next_char, src);
+                    break;
+                }
+                
+                // hit a quote
+                ungetc(next_char, src);
+
+                char* value_start = new_token->body.value;
+                int value_len = (int)new_token->body.len;
+                
+                while(true)
+                {
+                    value_len += aggregate_text(src, token_values_arena, new_token, ">\""); // everything between a tag name and closure is an attribute
+                    next_char = fgetc(src);
+                    if(next_char == '\"') // Hit a quote
+                    {
+                        *(char*)Alloc(token_values_arena, sizeof(char)) = next_char;
+                        inside_quote = !inside_quote;
+                        value_len++;
+                    }
+                    else if(!inside_quote && next_char == '>')
+                    {
+                        new_token->body.value = value_start;
+                        new_token->body.len = (uint32_t)value_len;
+                        break;
+                    }
+                    else
+                    {
+                        *(char*)Alloc(token_values_arena, sizeof(char)) = next_char;
+                        value_len++;
+                    }
+                }
+                ungetc(next_char, src);
                 
                 break;
+            }
             case('>'):
                 new_token = push_token();
                 new_token->type = TokenType::CLOSE_TAG;
@@ -227,11 +267,11 @@ void TokenizeStyle(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
                 break;
             case('\0'): 
                 break;
-            case('\n'): // Put newline tokens in
-                new_token = push_token();
-                new_token->type = TokenType::NEW_LINE;
+            case('\n'): 
                 break;
             case(' '): // Skip whitespaces
+                break;
+            case('\r'):
                 break;
             case('\t'):
                 break;
@@ -431,7 +471,8 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
                     current_char += aggregate_text(current_char, boundary, token_values_arena, new_token, " ,\n");
                     identifier_hit = true;
                 }
-                else{
+                else
+                {
                     new_token = push_token();
                     new_token->type = TokenType::TEXT;
                     
@@ -506,7 +547,7 @@ int aggregate_text(FILE* src, Arena* values_arena, Token* concerned_token, const
     int stop_chars_length = strlen(stop_chars);
     char* value_start = (char*)values_arena->next_address; // Cheat and assume the address we will get is the next
     
-    int next_char;
+    char next_char;
     skip_char:
     while((next_char = fgetc(src)) != EOF)
     {    

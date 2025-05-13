@@ -31,11 +31,14 @@ AST init_ast(Arena* master_arena)
     *bindings_arena = CreateArena(sizeof(RegisteredBinding)*5000, sizeof(RegisteredBinding));
     Arena* values_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
     *values_arena = CreateArena(sizeof(char)*100000, sizeof(char)); 
+    Arena* templates_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
+    *templates_arena = CreateArena(sizeof(RegisteredTemplate)*200, sizeof(RegisteredTemplate));
     
     created.tags = tags_arena;
     created.attributes = attributes_arena;
     created.registered_bindings = bindings_arena;
     created.values = values_arena;
+    created.templates = templates_arena;
     return created;
 }
 
@@ -45,6 +48,7 @@ void reset_ast(AST* ast)
     ResetArena(ast->attributes);
     ResetArena(ast->registered_bindings);
     ResetArena(ast->values);
+    ResetArena(ast->templates);
     
     ast->file_id = 0;
 }
@@ -120,7 +124,7 @@ void add_main(ArenaString* string, int file_id, const char* used_template)
 int main(int argc, char* argv[])
 {
     // Initialize scratch arena
-    InitScratch(sizeof(char)*10000);
+    InitScratch(sizeof(char)*100000);
     
     // Get source and build dir     
     if(argc < 3)

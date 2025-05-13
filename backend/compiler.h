@@ -6,25 +6,29 @@
 #pragma once
 #include "string_view.h"
 
+// Aligns the given pointer to where the type wants it to start in memory
+// Note(Leo): GCC doesnt need decltype inside of alignof but msvc does and will error otherwise
+#define align_mem(ptr, type) (type*)((uintptr_t)ptr + alignof(type) - ((uintptr_t)ptr % alignof(type)))
+
 // Compilation Types //
 namespace Compiler {
 
 struct CompilerState
 {
     int next_file_id;
-    int next_bound_var_id;
     int next_bound_expr_id;
     
     int next_style_id;
     int next_selector_id;
+    int next_template_id;
     
     CompilerState()
     {
         next_file_id = 1;
-        next_bound_var_id = 1;
         next_bound_expr_id = 1;
         next_style_id = 1;
         next_selector_id = 1;
+        next_template_id = 1;
     }
 };
 
@@ -91,6 +95,7 @@ enum class TagType {
     GRID,
     IMG,
     VIDEO,
+    EACH,
 };
 
 enum class AttributeType
@@ -107,7 +112,9 @@ enum class AttributeType
     SRC, // For the VIDEO and IMG tags
     COMP_ID, // For custom components
     ON_CLICK, // For click bindings
-    THIS,
+    THIS_ELEMENT,
+    CONDITION, // Makes any element into the equivelent of an #if statement in svelte
+    LOOP, // For the each element
 };
 
 #define MAX_TAGS_PER_BINDING 20
@@ -118,18 +125,34 @@ enum class RegisteredBindingType
     VOID_RET,
     TEXT_RET,
     VOID_PTR,
+    BOOL_RET,
+    PTR_RET,
+    INT_RET,
 };
 
-struct RegisteredBinding{
+enum class BindingContext
+{
+    NONE,
+    GLOBAL,
+    LOCAL,
+};
+
+struct RegisteredBinding
+{
     int binding_id;
     
     char* binding_name;
     int name_length;
     
-    int registered_tag_ids[MAX_TAGS_PER_BINDING];
-    int num_registered;
-    
     RegisteredBindingType type;
+    BindingContext context;
+    StringView context_name;
+};
+
+struct RegisteredTemplate
+{
+    int template_id;
+    Arena tags;
 };
 
 struct attr_comp_id_body 
@@ -147,6 +170,11 @@ struct attr_on_click_body
     int binding_id;
 };
 
+struct attr_condition_body
+{
+    int binding_id;
+};
+
 struct attr_text_like_body
 {
     char* value;
@@ -155,13 +183,22 @@ struct attr_text_like_body
     int binding_id; 
 };
 
+struct attr_loop_body
+{
+    int array_binding;
+    int length_binding;
+    StringView type_name;
+    int template_id;
+};
+
 struct attr_custom_body : attr_text_like_body
 {
     char* name;
     int name_length;
 };
 
-struct Attribute {
+struct Attribute
+{
     AttributeType type;
     
     union 
@@ -171,10 +208,13 @@ struct Attribute {
         attr_text_like_body Text;
         attr_custom_body Custom;
         attr_this_body This;
+        attr_condition_body Condition;
+        attr_loop_body Loop;
     };
 };
 
-struct Tag {
+struct Tag
+{
     TagType type;
     int tag_id; // Given by parser
     
@@ -184,6 +224,8 @@ struct Tag {
     Tag* parent;
     Tag* next_sibling;
     Tag* first_child;
+
+    StringView context_name;
 };
 
 // Currently: maxHeight - 9 chars
@@ -381,6 +423,7 @@ struct AST {
     
     Arena* attributes;
     Arena* registered_bindings;
+    Arena* templates;
     
     int file_id;
     
@@ -392,6 +435,7 @@ struct AST {
         attributes = NULL;
         registered_bindings = NULL;
         values = NULL;
+        templates = NULL;
     }
     
 };
@@ -405,9 +449,6 @@ struct BindingExpression {
 
     char* eval_fn_name;
     int name_length;
-    
-    int subscribed_element_ids[MAX_TAGS_PER_BINDING];
-    int subscriber_count;
 };
 
 #define MAX_BOUND_VAR_SUBS 20
@@ -474,7 +515,7 @@ Compiler::TagType GetTagFromName(StringView* name);
 Compiler::AttributeType GetAttributeFromName(StringView* name);
 
 // Register a binding if it doesnt exist or return its id if it does
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, Compiler::RegisteredBindingType type, Compiler::CompilerState* state); // Returns the id of the binding.
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, Compiler::RegisteredBindingType type, bool is_local, Compiler::CompilerState* state, StringView context_name); // Returns the id of the binding.
 
 // Wants the target to already have initialized arenas in it.
 void ProduceAST(Compiler::AST* target, Arena* tokens, Arena* token_values, Compiler::CompilerState* state);
@@ -501,3 +542,5 @@ void GenerateDOMAttatchment(FILE* dom_attatchment, Compiler::CompilerState* stat
 
 // Scans the given dir recursively looking for .cmc and .cmp files
 void ScanSourceDirectory(Arena* sources, char* dir_name);
+
+Compiler::RegisteredTemplate* RegisterTemplate(Arena* templates_arena, Compiler::CompilerState* state);

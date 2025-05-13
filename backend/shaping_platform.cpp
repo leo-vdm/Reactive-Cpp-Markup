@@ -106,6 +106,13 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
     Element* curr = first_child;
     while(curr)
     {
+        // Dont add curr or any of its children to layouts
+        if(curr->flags & is_hidden())
+        {
+            curr = curr->next_sibling;
+            continue;
+        }
+    
         count++;
         LayoutElement* converted = (LayoutElement*)Push(context->layout_element_arena, sizeof(LayoutElement));
         converted->element_id = curr->id;
@@ -119,56 +126,68 @@ void unpack(shaping_context* context, Element* first_child, LayoutElement** firs
             case(ElementType::HDIV):
             case(ElementType::ROOT):
             case(ElementType::GRID):
+            {
+                converted->type = LayoutElementType::NORMAL;
+                
+                if(curr->type == ElementType::VDIV || curr->type == ElementType::ROOT)
                 {
-                    converted->type = LayoutElementType::NORMAL;
-                    
-                    if(curr->type == ElementType::VDIV || curr->type == ElementType::ROOT)
-                    {
-                        converted->dir = LayoutDirection::VERTICAL;
-                    }
-                    else if(curr->type == ElementType::HDIV)
-                    {
-                        converted->dir = LayoutDirection::HORIZONTAL;
-                    }
-                    else 
-                    {
-                        converted->dir = LayoutDirection::GRID;
-                    }
-                    convert_element_style(&curr->working_style, converted);
-                    // Moving over the element's scroll
-                    converted->NORMAL.clipping.left_scroll = curr->scroll.x;
-                    converted->NORMAL.clipping.top_scroll = curr->scroll.y;
-                }
-                break;
-            case(ElementType::CUSTOM):
-                {
-                    // Note(Leo): Custom element is just a parent for the root of the component, we flatten it here by skipping it
-                    // and replacing it with its root
-                    Element* comp_root = curr->first_child;
-                    assert(comp_root->type == ElementType::ROOT);
-                    converted->element_id = comp_root->id;
-                    converted->type = LayoutElementType::NORMAL;
                     converted->dir = LayoutDirection::VERTICAL;
-                    convert_element_style(&comp_root->working_style, converted);
                 }
+                else if(curr->type == ElementType::HDIV)
+                {
+                    converted->dir = LayoutDirection::HORIZONTAL;
+                }
+                else 
+                {
+                    converted->dir = LayoutDirection::GRID;
+                }
+                convert_element_style(&curr->working_style, converted);
+                // Moving over the element's scroll
+                converted->NORMAL.clipping.left_scroll = curr->scroll.x;
+                converted->NORMAL.clipping.top_scroll = curr->scroll.y;
                 break;
+            }
+            case(ElementType::CUSTOM):
+            {
+                // Note(Leo): Custom element is just a parent for the root of the component, we flatten it here by skipping it
+                // and replacing it with its root
+                Element* comp_root = curr->first_child;
+                assert(comp_root->type == ElementType::ROOT);
+                converted->element_id = comp_root->id;
+                converted->type = LayoutElementType::NORMAL;
+                converted->dir = LayoutDirection::VERTICAL;
+                convert_element_style(&comp_root->working_style, converted);
+                break;
+            }
             case(ElementType::TEXT):
-                {
-                    converted->type = LayoutElementType::TEXT;
-                    converted->dir = LayoutDirection::NONE;
-                    converted->TEXT.text_content = curr->Text.temporal_text;
-                    converted->TEXT.text_length = curr->Text.temporal_text_length;
-                    convert_element_style(&curr->working_style, converted);
-                }
+            {
+                converted->type = LayoutElementType::TEXT;
+                converted->dir = LayoutDirection::NONE;
+                converted->TEXT.text_content = curr->Text.temporal_text;
+                converted->TEXT.text_length = curr->Text.temporal_text_length;
+                convert_element_style(&curr->working_style, converted);
                 break;
+            }
             case(ElementType::IMG):
-                {
-                    converted->type = LayoutElementType::IMAGE;
-                    converted->dir = LayoutDirection::NONE;
-                    converted->IMAGE.handle = curr->Image.handle;
-                    convert_element_style(&curr->working_style, converted);
-                }
+            {
+                converted->type = LayoutElementType::IMAGE;
+                converted->dir = LayoutDirection::NONE;
+                converted->IMAGE.handle = curr->Image.handle;
+                convert_element_style(&curr->working_style, converted);
                 break;
+            }
+            case(ElementType::EACH):
+            {
+                // Note(Leo): Each gets flat unpacked into its parent since it does not actually have sizing 
+                //            (it isnt a container)
+                Pop(context->layout_element_arena, sizeof(LayoutElement));
+                uint16_t extra_children = 0;
+                LayoutElement* first_unpacked;
+                unpack(context, curr->first_child, &first_unpacked, &extra_children);
+                count += extra_children;
+                count--;
+                break;
+            }
             default:
                 assert(0);
                 break;

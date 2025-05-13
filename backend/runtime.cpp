@@ -14,6 +14,7 @@ void InitRuntime(Arena* master_arena, Runtime* target)
     target->master_arena = master_arena;
     target->loaded_files = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_tags = (Arena*)Alloc(master_arena, sizeof(Arena));
+    target->loaded_templates = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_styles = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->loaded_selectors = (Arena*)Alloc(master_arena, sizeof(Arena));
@@ -26,6 +27,7 @@ void InitRuntime(Arena* master_arena, Runtime* target)
 
     *(target->loaded_files) = CreateArena(100*sizeof(LoadedFileHandle), sizeof(LoadedFileHandle));
     *(target->loaded_tags) = CreateArena(10000*sizeof(Compiler::Tag), sizeof(Compiler::Tag));
+    *(target->loaded_templates) = CreateArena(1000*sizeof(BodyTemplate), sizeof(BodyTemplate));
     *(target->loaded_attributes) = CreateArena(10000*sizeof(Compiler::Attribute), sizeof(Compiler::Attribute));
     *(target->loaded_styles) = CreateArena(10000*sizeof(Compiler::Style), sizeof(Compiler::Style));
     *(target->loaded_selectors) = CreateArena(10000*sizeof(Compiler::Selector), sizeof(Compiler::Selector));
@@ -138,7 +140,7 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
         FILE* bin_file = fopen(curr->file_path, "rb");
         
         LoadedFileHandle* loaded_bin = (LoadedFileHandle*)Alloc(runtime.loaded_files, sizeof(LoadedFileHandle));
-        *loaded_bin = LoadPage(bin_file, runtime.loaded_tags, runtime.loaded_attributes, runtime.loaded_styles, runtime.loaded_selectors, runtime.static_combined_values);
+        *loaded_bin = LoadPage(bin_file, runtime.loaded_tags, runtime.loaded_templates, runtime.loaded_attributes, runtime.loaded_styles, runtime.loaded_selectors, runtime.static_combined_values);
         assert(loaded_bin);
         
         ConvertSelectors(loaded_bin->first_selector);
@@ -419,7 +421,16 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 BoundExpression* binding = GetBoundExpression(curr_attribute->Text.binding_id);
                 assert(binding->type == BoundExpressionType::ARENA_STRING);
                 assert(element->master);
-                ArenaString* binding_text = binding->stub_string((void*)element->master, runtime.strings);
+                
+                ArenaString* binding_text = NULL;
+                if(binding->context == BindingContext::GLOBAL)
+                {
+                    binding_text = binding->stub_string((void*)element->master, runtime.strings);
+                }
+                else
+                {
+                    binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
+                }
                 
                 element->Text.temporal_text_length = binding_text->length;
                 
@@ -454,6 +465,59 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                         DeAllocScratch(terminated_name);
                     }
                 }
+                break;
+            }
+            case(AttributeType::LOOP):
+            {
+                assert(element->type == ElementType::EACH);
+                
+                BoundExpression* binding = GetBoundExpression(curr_attribute->Loop.length_binding);
+                assert(binding->type == BoundExpressionType::INT_RET);
+                
+                int count = 0;
+                if(binding->context == BindingContext::GLOBAL)
+                {
+                    count = binding->stub_int((void*)element->master);
+                }
+                else
+                {
+                    count = binding->arr_stub_int((void*)element->context_master, (void*)element->master, element->context_index);
+                }
+                
+                if(element->Each.last_count == count)
+                {
+                    break;
+                }
+                
+                element->Each.last_count = count;
+                binding = GetBoundExpression(curr_attribute->Loop.array_binding);
+                assert(binding->type == BoundExpressionType::PTR_RET);
+                
+                element->Each.array_ptr = NULL;
+                
+                if(binding->context == BindingContext::GLOBAL) 
+                {
+                    element->Each.array_ptr = binding->stub_get_ptr((void*)element->master);
+                }
+                else
+                {
+                    element->Each.array_ptr = binding->arr_stub_get_ptr((void*)element->context_master, element->context_index);
+                }
+                
+                if(!element->Each.array_ptr || count == 0)
+                {
+                    break;
+                }
+                
+                // Note(Leo): adding template elements backwards since they are appended as the first child of 
+                //            the EACH, meaning the last one to get added is the first child
+                for(int i = (count - 1); i >= 0; i--)
+                {
+                    InstanceTemplate(dom, element, element->Each.array_ptr, curr_attribute->Loop.template_id, i);
+                }
+                
+                printf("Built the looped thing\n");
+                
                 break;
             }
             case(AttributeType::ON_CLICK):
@@ -492,12 +556,19 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 assert(binding->type == BoundExpressionType::VOID_RET);
                 assert(element->master);
 
-                binding->stub_void((void*)element->master);
+                if(binding->context == BindingContext::GLOBAL)
+                {
+                    binding->stub_void((void*)element->master);
+                }
+                else
+                {
+                    binding->arr_stub_void((void*)element->context_master, (void*)element->master, element->context_index);
+                }
                 
                 element->click_state = ClickState::NONE;
                 break;
             }
-            case(AttributeType::THIS):
+            case(AttributeType::THIS_ELEMENT):
             {
                 if(curr_attribute->This.is_initialized)
                 {
@@ -505,9 +576,44 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 }
                 BoundExpression* binding = GetBoundExpression(curr_attribute->This.binding_id);
                 
-                binding->stub_ptr((void*)element->master, (void*)element);
+                if(binding->context == BindingContext::GLOBAL)
+                {
+                    binding->stub_ptr((void*)element->master, (void*)element);
+                }
+                else
+                {
+                    binding->arr_stub_ptr((void*)element->context_master, element->context_index, (void*)element);
+                }
                 curr_attribute->This.is_initialized = true;
             
+                break;
+            }
+            case(AttributeType::CONDITION):
+            {
+                BoundExpression* binding = GetBoundExpression(curr_attribute->Condition.binding_id);
+                assert(binding->type == BoundExpressionType::BOOL_RET);
+                assert(element->master);
+                
+                bool is_hidden = false;
+                if(binding->context == BindingContext::GLOBAL)
+                {
+                    is_hidden = binding->stub_bool((void*)element->master);
+                }
+                else
+                {
+                    is_hidden = binding->arr_stub_bool((void*)element->context_master, (void*)element->master, element->context_index);
+                }
+                
+                // Hidden
+                if(!is_hidden)
+                {
+                    element->flags = element->flags | is_hidden();
+                }
+                else // Not hidden
+                {
+                    element->flags &= ~is_hidden();
+                }
+                
                 break;
             }
             case(AttributeType::CLASS):
@@ -527,7 +633,16 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                     BoundExpression* binding = GetBoundExpression(curr_attribute->Text.binding_id);
                     assert(binding->type == BoundExpressionType::ARENA_STRING);
                     assert(element->master);
-                    ArenaString* binding_text = binding->stub_string((void*)element->master, runtime.strings);
+                    ArenaString* binding_text = NULL;
+                    
+                    if(binding->context == BindingContext::GLOBAL)
+                    {
+                        binding_text = binding->stub_string((void*)element->master, runtime.strings);
+                    }
+                    else
+                    {
+                        binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
+                    }
                     
                     // Note(Leo): binding_text gets freed as a part of class_string (dont need to call freestring)
                     Append(class_string, binding_text, no_copy());
@@ -733,16 +848,17 @@ void sanitize_scrollable(Element* target)
 
 Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height)
 {
-    // If a page switch was requested last frame do it now
-    if(dom->switch_request.file_id)
-    {
-        SwitchPage(dom, dom->switch_request.file_id, dom->switch_request.flags);
-        dom->switch_request = {};
-    }
-    
     // Note(Leo): Page root element is always at the first address of the dom
     Element* root_element = (Element*)dom->elements->mapped_address;
     assert(!root_element->parent && !root_element->next_sibling); // Root cant have a parent or siblings
+    
+    // If a page switch was requested last frame do it now
+    if(dom->switch_request.file_id)
+    {
+        FreeSubtreeObjects(root_element);
+        SwitchPage(dom, dom->switch_request.file_id, dom->switch_request.flags);
+        dom->switch_request = {};
+    }
     
     Element* scroll_capturer = NULL; // The current deepest element asking to capture scroll
     
@@ -758,7 +874,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     while(curr_element)
     {
     
-        if(curr_element->first_child)
+        if(curr_element->first_child && curr_element->flags ^ is_hidden())
         {
             curr_element = curr_element->first_child;
             runtime_evaluate_attributes(dom, controls, curr_element);
