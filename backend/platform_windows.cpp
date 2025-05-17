@@ -15,6 +15,22 @@ PlatformWindow* curr_processed_window;
 
 float SCROLL_MULTIPLIER; 
 
+struct win32_platform_state
+{
+    Arena master_arena;  
+    Arena* windows;
+    Arena* pointer_arrays;
+    Arena* search_results;
+    Arena* search_result_values;
+
+    Arena* runtime_master_arena;
+    
+    PlatformWindow* first_window;
+    
+    VirtualKeyboard keyboard_state;
+};
+win32_platform_state platform;
+
 void print_input_state(PlatformWindow* window)
 {
     printf("Window input state: \n");
@@ -57,6 +73,7 @@ void update_control_state(PlatformWindow* target_window)
     target_window->controls.scroll_dir = { 0.0, 0.0 };
 }
 
+Event* last_event; 
 
 LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LPARAM l_param)
 {
@@ -132,6 +149,46 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             }
             break;
         }
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+        {
+            if((uint8_t)w_param >= VIRTUAL_KEY_COUNT)
+            {
+                break;
+            }
+        
+            Event* added = PushEvent((DOM*)curr_processed_window->window_dom);
+            if(message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            {
+                added->type = EventType::KEY_DOWN;
+                curr_processed_window->controls.keyboard_state->keys[(uint8_t)w_param] = (uint8_t)KeyState::DOWN;
+            }
+            else
+            {
+                added->type = EventType::KEY_UP;
+                curr_processed_window->controls.keyboard_state->keys[(uint8_t)w_param] = (uint8_t)KeyState::UP;
+            }
+            added->Key.code = (uint8_t)w_param;
+            last_event = added;
+            
+            break;
+        }
+        case WM_CHAR:
+        case WM_SYSCHAR:
+        {
+            Event* added = last_event;
+            if(!last_event)
+            {
+                assert(0);
+                added = PushEvent((DOM*)curr_processed_window->window_dom);
+            }
+            
+            added->Key.key_char = w_param;
+            
+            break;
+        }
         case WM_MOUSEMOVE:
         {
             float x = GET_X_LPARAM(l_param);
@@ -148,7 +205,6 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             curr_processed_window->controls.scroll_dir = {0.0f, ((float)((SHORT) HIWORD(w_param)) / 120.0f) * SCROLL_MULTIPLIER };
             break;
         }
-
         case WM_MOUSEHWHEEL:
         {
             // Note(Leo): x-axis scroll is inverted compared to other window managers
@@ -178,6 +234,7 @@ PlatformWindow* win32_create_window(Arena* windows_arena, const char* window_nam
     
     created_window->width = rect.right - rect.left;
     created_window->height = rect.bottom - rect.top;
+    created_window->controls.keyboard_state = &platform.keyboard_state;
     
     win32_vk_create_window_surface(created_window, win32_module_handle);
     
@@ -264,6 +321,7 @@ FileSearchResult* win32_find_image_resources(Arena* search_results_arena, Arena*
 
 void win32_process_window_events(PlatformWindow* target_window)
 {
+    last_event = NULL;
     update_control_state(target_window);
     curr_processed_window = target_window;
     
@@ -280,19 +338,6 @@ void win32_process_window_events(PlatformWindow* target_window)
     target_window->flags = target_window->flags | return_value;
 }
 
-struct win32_platform_state
-{
-    Arena master_arena;  
-    Arena* windows;
-    Arena* pointer_arrays;
-    Arena* search_results;
-    Arena* search_result_values;
-
-    Arena* runtime_master_arena;
-    
-    PlatformWindow* first_window;
-};
-
 void win32_destroy_window(Arena* windows_arena, PlatformWindow* window)
 {
     DestroyWindow(window->window_handle);
@@ -302,7 +347,12 @@ void win32_destroy_window(Arena* windows_arena, PlatformWindow* window)
     DeAlloc(windows_arena, window);
 }
 
-win32_platform_state platform;
+KeyState GetKeyState(uint8_t key_code)
+{
+    assert(key_code < VIRTUAL_KEY_COUNT);
+    
+    return (KeyState)platform.keyboard_state.keys[key_code]; 
+}
 
 int main()
 {
@@ -392,7 +442,7 @@ int main()
         {
             curr_window = platform.first_window;
         }
-        
+           
         win32_process_window_events(curr_window);
         //print_input_state(curr_window);
         

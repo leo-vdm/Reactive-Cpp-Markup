@@ -14,6 +14,7 @@ void InitDOM(Arena* master_arena, DOM* target)
     target->attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->changed_que = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->frame_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
+    target->events = (Arena*)Alloc(master_arena, sizeof(Arena));
     
     *(target->static_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->cached_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
@@ -24,21 +25,9 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));
     *(target->changed_que) = CreateArena(sizeof(int*)*1000, sizeof(int*));
     *(target->frame_arena) = CreateArena(sizeof(char)*10000, sizeof(char));
-}
-
-void CalculateStyles()
-{
+    *(target->events) = CreateArena(sizeof(Event)*100, sizeof(Event));
     
-}
-
-void BuildRenderque()
-{
-    
-}
-
-void Draw()
-{
-    
+    target->max_events = 100;
 }
 
 #define bound_expr(expr_context, fn_type, expr_type, union_name)                                                  \
@@ -187,11 +176,18 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
         case(AttributeType::ON_CLICK):
         {
             added->OnClick.binding_id = converted_attribute->OnClick.binding_id;
+            break;
+        }
+        case(AttributeType::ON_FOCUS):
+        {
+            added->OnFocus.binding_id = converted_attribute->OnFocus.binding_id;
+            break;
         }
         case(AttributeType::COMP_ID):
+        {
             added->CompId.id = converted_attribute->CompId.id;
-            return added;
             break;
+        }
         case(AttributeType::CUSTOM):
         {
             added->Custom.name_value = converted_attribute->Custom.name;
@@ -204,6 +200,10 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
             added->Loop.array_binding = converted_attribute->Loop.array_binding;
             added->Loop.length_binding = converted_attribute->Loop.length_binding;
             added->Loop.template_id = converted_attribute->Loop.template_id;
+            break;
+        }
+        case(AttributeType::FOCUSABLE):
+        {
             break;
         }
         default:
@@ -226,6 +226,7 @@ Element* tag_to_element(DOM* dom, Arena* element_arena, Compiler::Tag* converted
         added = (Element*)Alloc(element_arena, sizeof(Element), zero());
     }
     
+    added->global_id = converted_tag->global_id;
     added->num_attributes = converted_tag->num_attributes;
     added->type = (ElementType)((int)converted_tag->type);
     
@@ -493,16 +494,26 @@ void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int tem
     
     // Note(Leo): Parent is the each element, indeces are added in reverse order so that we end up with the 
     //            highest index as the last child.
-    added->next_sibling = parent->first_child;
+    Element* sibling = parent->first_child;
     parent->first_child = added;
     
     added->parent = parent;
     
-    // Pre allocate an address for the first child element of root
+    // Pre allocate an address for the child/sibling of the first element
     if(curr->first_child)
     {
         element_addresses[curr->first_child->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
         added->first_child = (Element*)(element_addresses[curr->first_child->tag_id]); 
+    }
+    if(curr->next_sibling)
+    {
+        element_addresses[curr->next_sibling->tag_id] = (void*)Alloc(target_dom->elements, sizeof(Element), zero());
+        added->next_sibling = (Element*)(element_addresses[curr->next_sibling->tag_id]); 
+    }
+    // Note(Leo): The last top level element should have the previous first child of EACH as its sibling
+    else
+    {      
+        added->next_sibling = sibling;
     }
     
     // Note(Leo): Move off of root since it has id == 0 which would break the loop 
@@ -527,10 +538,20 @@ void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int tem
         
         tag_to_element(target_dom, target_dom->elements, curr, added);
         
-        // Note(Leo): The top level tags in a template have no parents 
+        // Note(Leo): The top level tags in a template have no parents, give them the each element as a parent
         if(curr->parent)
         {
             added->parent = (Element*)element_addresses[curr->parent->tag_id];
+        }
+        else
+        {
+            added->parent = parent;
+            
+            // Note(Leo): The last top level element should have the previous first child of EACH as its sibling
+            if(!curr->next_sibling)
+            {      
+                added->next_sibling = sibling;
+            }
         }
         added->id = index_of(added, target_dom->elements->mapped_address, Element);
         
@@ -708,4 +729,64 @@ void FreeSubtreeObjects(Element* start, DOM* dom)
         
         DeAlloc(dom->elements, start);
     }
+}
+
+Element* GetFocused(DOM* dom)
+{
+    return dom->focused_element;
+}
+
+Event* PushEvent(DOM* dom)
+{
+    assert(dom);
+    if(dom->event_count + 1 > dom->max_events)
+    {
+        if(dom->last_event >= dom->max_events)
+        {
+            dom->last_event = 0; // Circle back to evicting from the front
+        }
+        
+        // Evict the oldest event to make space for the new one
+        DeAlloc(dom->events, (Event*)dom->events->mapped_address + dom->last_event);
+        dom->last_event++;
+        dom->event_count--;
+    }
+    
+    // Note(Leo): This always works cos of the Arena's freelist
+    Event* created = (Event*)Alloc(dom->events, sizeof(Event), zero());
+    dom->event_count++;
+    return created;
+}
+
+// Note(Leo): Returns NULL if there are no more events
+Event* PopEvent(DOM* dom)
+{
+    if(dom->event_count == 0)
+    {
+        return NULL;
+    }
+
+    Event* popped = (Event*)dom->events->mapped_address + (dom->event_count - 1);
+
+    void* allocated = Alloc(dom->frame_arena, sizeof(Event)*2);
+    Event* copied = align_mem(allocated, Event);
+    memcpy(copied, popped, sizeof(Event));
+    
+    DeAlloc(dom->events, popped);
+    dom->event_count--;
+    dom->last_event = dom->event_count;
+    
+    return copied;
+}
+
+void RouteEvent(void* master, Event* event)
+{
+    assert(master);
+    if(!master)
+    {
+        return;
+    }
+    
+    call_comp_event(((ElementMaster*)master)->master_dom, event, ((ElementMaster*)master)->file_id, master);
+    
 }

@@ -39,6 +39,18 @@ enum class MouseWheelDir
     DOWN,
 };
 
+enum class KeyState
+{
+    UP,
+    DOWN,
+};
+
+#define VIRTUAL_KEY_COUNT 255
+struct VirtualKeyboard
+{
+    uint8_t keys[VIRTUAL_KEY_COUNT];
+};
+
 struct PlatformControlState
 {
     MouseState mouse_left_state;
@@ -47,22 +59,10 @@ struct PlatformControlState
     vec2 scroll_dir;
     vec2 cursor_pos;
     vec2 cursor_delta;
-};
-
-enum class InputEventType
-{
-    KEYBOARD,
-    MOUSE,
-};
-
-struct DomInputEvent
-{
-    InputEventType type;
-    union
-    {
-        struct {} button;
-        struct {} key;
-    };
+    
+    // Note(Leo): Keyboard state is shared by all windows but only the active window gets                                 
+    //            key press events
+    VirtualKeyboard* keyboard_state; 
 };
 
 struct shared_window 
@@ -96,12 +96,15 @@ struct shared_window
     int flags;
 };
 
+KeyState GetKeyState(uint8_t key_code);
+
 extern float SCROLL_MULTIPLIER;
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
 
 #define PLATFORM_WINDOWS 1
+#include "key_codes.h"
 
 #define TIMER_INTRINSIC() __rdtsc()
 
@@ -134,6 +137,8 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
 
 #include <X11/Xlib.h>
 #include <dlfcn.h>
+
+#include "key_codes.h"
 
 #define VkLibrary void*
 #define PlatformGetProcAddress(module, name) dlsym( module, name)

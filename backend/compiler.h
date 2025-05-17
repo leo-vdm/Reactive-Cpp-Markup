@@ -21,6 +21,9 @@ struct CompilerState
     int next_style_id;
     int next_selector_id;
     int next_template_id;
+    // Note(Leo): Element ID's are global identifiers given to tags that have an ID attribute,
+    //            The numeric ids are global but names can overlap between files.
+    int next_element_id; 
     
     CompilerState()
     {
@@ -29,6 +32,7 @@ struct CompilerState
         next_style_id = 1;
         next_selector_id = 1;
         next_template_id = 1;
+        next_element_id = 1;
     }
 };
 
@@ -115,6 +119,9 @@ enum class AttributeType
     THIS_ELEMENT,
     CONDITION, // Makes any element into the equivelent of an #if statement in svelte
     LOOP, // For the each element
+    ON_FOCUS,
+    FOCUSABLE,
+    ID,
 };
 
 #define MAX_TAGS_PER_BINDING 20
@@ -175,6 +182,11 @@ struct attr_condition_body
     int binding_id;
 };
 
+struct attr_on_focus_body
+{
+    int binding_id;
+};
+
 struct attr_text_like_body
 {
     char* value;
@@ -210,6 +222,7 @@ struct Attribute
         attr_this_body This;
         attr_condition_body Condition;
         attr_loop_body Loop;
+        attr_on_focus_body OnFocus;
     };
 };
 
@@ -217,6 +230,7 @@ struct Tag
 {
     TagType type;
     int tag_id; // Given by parser
+    int global_id; // Set if tag has an ID attribute
     
     Attribute* first_attribute;
     int num_attributes;
@@ -402,6 +416,12 @@ struct Selector {
     int num_styles; // Number of styles in the style_ids array.
 };
 
+struct ElementId
+{
+    int id;
+    StringView name;
+};
+
 struct LocalStyles {
     Arena* selectors;
     Arena* selector_values;
@@ -424,6 +444,7 @@ struct AST {
     Arena* attributes;
     Arena* registered_bindings;
     Arena* templates;
+    Arena* element_ids;
     
     int file_id;
     
@@ -436,6 +457,7 @@ struct AST {
         registered_bindings = NULL;
         values = NULL;
         templates = NULL;
+        element_ids = NULL;
     }
     
 };
@@ -476,10 +498,14 @@ struct CompileTarget
 
 #define CALL_PAGE_MAIN_FN_TEMPLATE "case(%d):\n\tpage_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
 #define CALL_COMP_MAIN_FN_TEMPLATE "case(%d):\n\tcomp_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
+#define CALL_PAGE_FRAME_FN_TEMPLATE "case(%d):\n\tpage_frame_%d(dom, d_void);\n\tbreak;\n"
+#define CALL_COMP_EVENT_FN_TEMPLATE "case(%d):\n\tcomp_event_%d(dom, event, d_void);\n\tbreak;\n"
 #define COMP_MAIN_FN_TEMPLATE "\nvoid call_comp_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
 #define PAGE_MAIN_FN_TEMPLATE "\nvoid call_page_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
-#define CLOSE_MAIN_CALL_TEMLATE "default:\n\tprintf(\"Component/Page does not exist!\\n\");\n\tbreak;\n}\n}\n" 
-#define DOM_ATTATCHMENT_INCLUDES "#include \"DOM.h\"\n#include \"overloads.cpp\"\n#include \"dom_attatchment.h\"\n"
+#define CLOSE_MAIN_CALL_TEMLATE "default:\n\tprintf(\"Component/Page does not exist!\\n\");\n\tbreak;\n}\n}\n"
+#define PAGE_FRAME_FN_TEMPLATE "\nvoid call_page_frame(DOM* dom, int file_id, void* d_void){\nswitch(file_id){\n"
+#define COMP_EVENT_FN_TEMPLATE "\nvoid call_comp_event(DOM* dom, Event* event, int file_id, void* d_void){\nswitch(file_id){\n"
+#define DOM_ATTATCHMENT_INCLUDES "#include \"element_ids.h\"\n#include \"DOM.h\"\n#include \"overloads.cpp\"\n#include \"dom_attatchment.h\"\n"
 
 };
 
@@ -515,7 +541,7 @@ Compiler::TagType GetTagFromName(StringView* name);
 Compiler::AttributeType GetAttributeFromName(StringView* name);
 
 // Register a binding if it doesnt exist or return its id if it does
-int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, int tag_id, Compiler::RegisteredBindingType type, bool is_local, Compiler::CompilerState* state, StringView context_name); // Returns the id of the binding.
+int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView* name, Compiler::RegisteredBindingType type, bool is_local, Compiler::CompilerState* state, StringView context_name); // Returns the id of the binding.
 
 // Wants the target to already have initialized arenas in it.
 void ProduceAST(Compiler::AST* target, Arena* tokens, Arena* token_values, Compiler::CompilerState* state);
@@ -538,6 +564,7 @@ void RegisterDirectives(Compiler::CompileTarget* target, Arena* tokens, Arena* t
 void RegisterMarkupBindings(Compiler::CompileTarget* target, Arena* markup_bindings, Arena* tokens, Arena* token_values, int flags = 0);
 
 #define DOM_ATTATCHMENT_NAME "dom_attatchment.cpp"
+#define ELEMENT_ID_HEADER_NAME "element_ids.h"
 void GenerateDOMAttatchment(FILE* dom_attatchment, Compiler::CompilerState* state, int flags = 0);
 
 // Scans the given dir recursively looking for .cmc and .cmp files

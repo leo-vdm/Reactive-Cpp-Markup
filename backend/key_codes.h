@@ -1,0 +1,263 @@
+// Note(Leo): Same mapping as microsoft (https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes)
+//            gets translated for other platforms.
+
+#define K_LMB       ((uint8_t)1)
+#define K_RMB       ((uint8_t)2)
+#define K_CANCEL    ((uint8_t)3)
+#define K_MMB       ((uint8_t)4)
+#define K_MX1       ((uint8_t)5)
+#define K_MX2       ((uint8_t)6)
+#define K_BACKSPACE ((uint8_t)8)
+#define K_TAB       ((uint8_t)9)
+
+#define K_CLEAR     ((uint8_t)12)
+#define K_ENTER     ((uint8_t)13)
+#define K_SHIFT     ((uint8_t)16)
+#define K_CONTROL   ((uint8_t)17)
+#define K_ALT       ((uint8_t)18)
+#define K_PAUSE     ((uint8_t)19)
+#define K_CAPS      ((uint8_t)20)
+#define K_ESCAPE    ((uint8_t)27)
+#define K_SPACE     ((uint8_t)32)
+#define K_PAGE_UP   ((uint8_t)33)
+#define K_PAGE_DOWN ((uint8_t)34)
+#define K_END       ((uint8_t)35)
+#define K_HOME      ((uint8_t)36)
+#define K_ARROW_L   ((uint8_t)37)
+#define K_ARROW_U   ((uint8_t)38)
+#define K_ARROW_R   ((uint8_t)39)
+#define K_ARROW_D   ((uint8_t)40)
+#define K_SELECT    ((uint8_t)41)
+#define K_PRINT     ((uint8_t)42)
+#define K_EXECUTE   ((uint8_t)43)
+#define K_PRNT_SCRN ((uint8_t)44)
+#define K_INSERT    ((uint8_t)45)
+#define K_DELETE    ((uint8_t)46)
+#define K_HELP      ((uint8_t)47)
+#define K_0         ((uint8_t)48)
+#define K_1         ((uint8_t)49)
+#define K_2         ((uint8_t)50)
+#define K_3         ((uint8_t)51)
+#define K_4         ((uint8_t)52)
+#define K_5         ((uint8_t)53)
+#define K_6         ((uint8_t)54)
+#define K_7         ((uint8_t)55)
+#define K_8         ((uint8_t)56)
+#define K_9         ((uint8_t)57)
+
+#define K_A         ((uint8_t)65)
+#define K_B         ((uint8_t)66)
+#define K_C         ((uint8_t)67)
+#define K_D         ((uint8_t)68)
+#define K_E         ((uint8_t)69)
+#define K_F         ((uint8_t)70)
+#define K_G         ((uint8_t)71)
+#define K_H         ((uint8_t)72)
+#define K_I         ((uint8_t)73)
+#define K_J         ((uint8_t)74)
+#define K_K         ((uint8_t)75)
+#define K_L         ((uint8_t)76)
+#define K_M         ((uint8_t)77)
+#define K_N         ((uint8_t)78)
+#define K_O         ((uint8_t)79)
+#define K_P         ((uint8_t)80)
+#define K_Q         ((uint8_t)81)
+#define K_R         ((uint8_t)82)
+#define K_S         ((uint8_t)83)
+#define K_T         ((uint8_t)84)
+#define K_U         ((uint8_t)85)
+#define K_V         ((uint8_t)86)
+#define K_W         ((uint8_t)87)
+#define K_X         ((uint8_t)88)
+#define K_Y         ((uint8_t)89)
+#define K_Z         ((uint8_t)90)
+#define K_WIN_L     ((uint8_t)91)
+#define K_WIN_R     ((uint8_t)92)
+#define K_APP       ((uint8_t)93)
+
+#define K_SLEEP     ((uint8_t)95)
+#define K_NUMPAD_0  ((uint8_t)96)
+#define K_NUMPAD_1  ((uint8_t)97)
+#define K_NUMPAD_2  ((uint8_t)98)
+#define K_NUMPAD_3  ((uint8_t)99)
+#define K_NUMPAD_4  ((uint8_t)100)
+#define K_NUMPAD_5  ((uint8_t)101)
+#define K_NUMPAD_6  ((uint8_t)102)
+#define K_NUMPAD_7  ((uint8_t)103)
+#define K_NUMPAD_8  ((uint8_t)104)
+#define K_NUMPAD_9  ((uint8_t)105)
+#define K_MULTIPLY  ((uint8_t)106)
+#define K_ADD       ((uint8_t)107)
+#define K_SEPERATOR ((uint8_t)108)
+#define K_SUBTRACT  ((uint8_t)109)
+#define K_DECIMAL   ((uint8_t)110)
+#define K_DIVIDE    ((uint8_t)111)
+#define K_F1        ((uint8_t)112)
+#define K_F2        ((uint8_t)113)
+#define K_F3        ((uint8_t)114)
+#define K_F4        ((uint8_t)115)
+#define K_F5        ((uint8_t)116)
+#define K_F6        ((uint8_t)117)
+#define K_F7        ((uint8_t)118)
+#define K_F8        ((uint8_t)119)
+#define K_F9        ((uint8_t)120)
+#define K_F10       ((uint8_t)121)
+#define K_F11       ((uint8_t)122)
+#define K_F12       ((uint8_t)123)
+#define K_F13       ((uint8_t)124)
+#define K_F14       ((uint8_t)125)
+#define K_F15       ((uint8_t)126)
+#define K_F16       ((uint8_t)127)
+#define K_F17       ((uint8_t)128)
+#define K_F18       ((uint8_t)129)
+#define K_F19       ((uint8_t)130)
+#define K_F20       ((uint8_t)131)
+#define K_F21       ((uint8_t)132)
+#define K_F22       ((uint8_t)133)
+#define K_F23       ((uint8_t)134)
+#define K_F24       ((uint8_t)135)
+
+#define K_SHIFT_L   ((uint8_t)160)
+#define K_SHIFT_R   ((uint8_t)161)
+#define K_CONTROL_L ((uint8_t)162)
+#define K_CONTROL_R ((uint8_t)163)
+#define K_ALT_L     ((uint8_t)164)
+#define K_ALT_R     ((uint8_t)165)
+
+#define K_SEMICOLON ((uint8_t)186)
+#define K_EQUALS    ((uint8_t)187)
+#define K_COMMA     ((uint8_t)188)
+#define K_MINUS     ((uint8_t)189)
+#define K_PERIOD    ((uint8_t)190)
+#define K_SLASH     ((uint8_t)191)
+#define K_TILDE     ((uint8_t)192)
+
+#define K_BRACKET_L ((uint8_t)219)
+#define K_BACKSLASH ((uint8_t)220)
+#define K_BRACKET_R ((uint8_t)221)
+#define K_HYPHEN    ((uint8_t)222)
+
+extern uint8_t KEYCODE_TRANSLATIONS[255];
+
+#if PLATFORM_LINUX && KEYCODE_TRANSLATION_IMPL
+
+// Translations of X11 keycodes to our keycodes.
+// Note(Leo): This seems to be an ok thing to do according to https://renenyffenegger.ch/notes/hardware/keyboard
+//            Where it seems that X uses key codes that come from the kernel, i.e. they've already been transaleted 
+//            to "general" codes rather than a set of keyboard specific scan codes.
+//            See also cat /usr/share/X11/xkb/keycodes/evdev
+uint8_t KEYCODE_TRANSLATIONS[255] = {};
+
+void PlatformInitKeycodeTranslations()
+{
+
+    KEYCODE_TRANSLATIONS[49] = K_TILDE;
+    KEYCODE_TRANSLATIONS[10] = K_0;
+    KEYCODE_TRANSLATIONS[11] = K_1;
+    KEYCODE_TRANSLATIONS[12] = K_2;
+    KEYCODE_TRANSLATIONS[13] = K_3;
+    KEYCODE_TRANSLATIONS[14] = K_4;
+    KEYCODE_TRANSLATIONS[15] = K_5;
+    KEYCODE_TRANSLATIONS[16] = K_6;
+    KEYCODE_TRANSLATIONS[17] = K_7;
+    KEYCODE_TRANSLATIONS[18] = K_8;
+    KEYCODE_TRANSLATIONS[19] = K_9;
+    KEYCODE_TRANSLATIONS[20] = K_MINUS;
+    KEYCODE_TRANSLATIONS[21] = K_EQUALS;
+    KEYCODE_TRANSLATIONS[22] = K_BACKSPACE;
+    
+    KEYCODE_TRANSLATIONS[23] = K_TAB;
+    KEYCODE_TRANSLATIONS[24] = K_Q;
+    KEYCODE_TRANSLATIONS[25] = K_W;
+    KEYCODE_TRANSLATIONS[26] = K_E;
+    KEYCODE_TRANSLATIONS[27] = K_R;
+    KEYCODE_TRANSLATIONS[28] = K_T;
+    KEYCODE_TRANSLATIONS[29] = K_Y;
+    KEYCODE_TRANSLATIONS[30] = K_U;
+    KEYCODE_TRANSLATIONS[31] = K_I;
+    KEYCODE_TRANSLATIONS[32] = K_O;
+    KEYCODE_TRANSLATIONS[33] = K_P;
+    KEYCODE_TRANSLATIONS[34] = K_BRACKET_L;
+    KEYCODE_TRANSLATIONS[35] = K_BRACKET_R;
+    KEYCODE_TRANSLATIONS[51] = K_BACKSLASH;
+    KEYCODE_TRANSLATIONS[36] = K_ENTER;
+    
+    KEYCODE_TRANSLATIONS[66] = K_CAPS;
+    KEYCODE_TRANSLATIONS[38] = K_A;
+    KEYCODE_TRANSLATIONS[39] = K_S;
+    KEYCODE_TRANSLATIONS[40] = K_D;
+    KEYCODE_TRANSLATIONS[41] = K_F;
+    KEYCODE_TRANSLATIONS[42] = K_G;
+    KEYCODE_TRANSLATIONS[43] = K_H;
+    KEYCODE_TRANSLATIONS[44] = K_J;
+    KEYCODE_TRANSLATIONS[45] = K_K;
+    KEYCODE_TRANSLATIONS[46] = K_L;
+    KEYCODE_TRANSLATIONS[47] = K_SEMICOLON;
+    KEYCODE_TRANSLATIONS[48] = K_HYPHEN;
+    
+    KEYCODE_TRANSLATIONS[50] = K_SHIFT_L;
+    KEYCODE_TRANSLATIONS[52] = K_Z;
+    KEYCODE_TRANSLATIONS[53] = K_X;
+    KEYCODE_TRANSLATIONS[54] = K_C;
+    KEYCODE_TRANSLATIONS[55] = K_V;
+    KEYCODE_TRANSLATIONS[56] = K_B;
+    KEYCODE_TRANSLATIONS[57] = K_N;
+    KEYCODE_TRANSLATIONS[58] = K_M;
+    KEYCODE_TRANSLATIONS[59] = K_COMMA;
+    KEYCODE_TRANSLATIONS[60] = K_PERIOD;
+    KEYCODE_TRANSLATIONS[61] = K_SLASH;
+    KEYCODE_TRANSLATIONS[62] = K_SHIFT_R;
+    
+    KEYCODE_TRANSLATIONS[64] =  K_ALT_L;
+    KEYCODE_TRANSLATIONS[37] =  K_CONTROL_L;
+    KEYCODE_TRANSLATIONS[65] =  K_SPACE;
+    KEYCODE_TRANSLATIONS[105] = K_CONTROL_R;
+    KEYCODE_TRANSLATIONS[108] = K_ALT_R;
+    KEYCODE_TRANSLATIONS[133] = K_WIN_L;
+    KEYCODE_TRANSLATIONS[134] = K_WIN_R;
+    
+    KEYCODE_TRANSLATIONS[9] =  K_ESCAPE;
+    KEYCODE_TRANSLATIONS[67] = K_F1;
+    KEYCODE_TRANSLATIONS[68] = K_F2;
+    KEYCODE_TRANSLATIONS[69] = K_F3;
+    KEYCODE_TRANSLATIONS[70] = K_F4;
+    KEYCODE_TRANSLATIONS[71] = K_F5;
+    KEYCODE_TRANSLATIONS[72] = K_F6;
+    KEYCODE_TRANSLATIONS[73] = K_F7;
+    KEYCODE_TRANSLATIONS[74] = K_F8;
+    KEYCODE_TRANSLATIONS[75] = K_F9;
+    KEYCODE_TRANSLATIONS[76] = K_F10;
+    KEYCODE_TRANSLATIONS[95] = K_F11;
+    KEYCODE_TRANSLATIONS[96] = K_F12;
+    
+    KEYCODE_TRANSLATIONS[107] = K_PRNT_SCRN;
+    //KEYCODE_TRANSLATIONS[78]  = K_SCROLL_LCK;
+    KEYCODE_TRANSLATIONS[127] = K_PAUSE;
+    
+    KEYCODE_TRANSLATIONS[118] = K_INSERT;
+    KEYCODE_TRANSLATIONS[110] = K_HOME;
+    KEYCODE_TRANSLATIONS[112] = K_PAGE_UP;
+    KEYCODE_TRANSLATIONS[119] = K_DELETE;
+    KEYCODE_TRANSLATIONS[115] = K_END;
+    KEYCODE_TRANSLATIONS[117] = K_PAGE_DOWN;
+    
+    KEYCODE_TRANSLATIONS[111] = K_ARROW_U;
+    KEYCODE_TRANSLATIONS[113] = K_ARROW_L;
+    KEYCODE_TRANSLATIONS[116] = K_ARROW_D;
+    KEYCODE_TRANSLATIONS[114] = K_ARROW_R;
+    
+    KEYCODE_TRANSLATIONS[191] = K_F13;
+    KEYCODE_TRANSLATIONS[192] = K_F14;
+    KEYCODE_TRANSLATIONS[193] = K_F15;
+    KEYCODE_TRANSLATIONS[194] = K_F16;
+    KEYCODE_TRANSLATIONS[195] = K_F17;
+    KEYCODE_TRANSLATIONS[196] = K_F18;
+    KEYCODE_TRANSLATIONS[197] = K_F19;
+    KEYCODE_TRANSLATIONS[198] = K_F20;
+    KEYCODE_TRANSLATIONS[199] = K_F21;
+    KEYCODE_TRANSLATIONS[200] = K_F22;
+    KEYCODE_TRANSLATIONS[201] = K_F23;
+    KEYCODE_TRANSLATIONS[202] = K_F24;
+}
+
+#endif

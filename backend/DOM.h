@@ -3,7 +3,6 @@
 
 #include "arena.h"
 #include "arena_string.h"
-
 #include "file_system.h"
 
 
@@ -16,6 +15,8 @@
 #define cache_valid() (uint64_t)(1 << 0)
 #define is_hovered() (uint64_t)(1 << 1)
 #define is_hidden() (uint64_t)(1 << 2)
+#define is_clicked() (uint64_t)(1 << 3)
+#define is_focusable() (uint64_t)(1 << 4)
 
 // Aligns the given pointer to where the type wants it to start in memory
 // Note(Leo): GCC doesnt need decltype inside of alignof but msvc does and will error otherwise
@@ -35,7 +36,8 @@
 
 // Index of a pointer from a base pointer calculated using the size of type
 #define index_of(ptr_offset, ptr_base, type) ((((uintptr_t)ptr_offset) - ((uintptr_t)ptr_base)) / sizeof(type))
-// Element Flags //
+
+typedef uint8_t VirtualKeyCode;
 
 #define FontHandle uint16_t
 
@@ -51,6 +53,8 @@ struct PageSwitchRequest
     int file_id;
 };
 
+struct Element;
+
 struct DOM
 {
     Arena* static_cstrings;
@@ -64,6 +68,10 @@ struct DOM
     Arena* attributes;
 
     Arena* bound_vars;
+    Arena* events;
+    uint32_t event_count;
+    uint32_t max_events;
+    uint32_t last_event; // Used to keep track of where the last event was popped from
 /*    
     Arena* styles;
     Arena* selectors;
@@ -71,6 +79,8 @@ struct DOM
     Arena* changed_que;
     
     Arena* frame_arena; // Composted every frame
+    
+    Element* focused_element;
     
     PageSwitchRequest switch_request;
 };
@@ -81,7 +91,36 @@ struct ElementMaster
     DOM* master_dom;
 };
 
+enum class EventType
+{
+    NONE,
+    KEY_DOWN,
+    KEY_REPEAT,
+    KEY_UP,
+    FOCUSED,
+    DE_FOCUSED,
+};
 
+struct Event
+{
+    EventType type;
+    union
+    {
+        struct
+        {
+            uint32_t key_char;   // UTF 32 char this key represents (indicated by the os)
+            VirtualKeyCode code; // The physical key on the keyboard
+        } Key;
+        struct
+        {
+            Element* target;
+        } Focused;
+        struct
+        {
+            Element* target;
+        } DeFocused;
+    };
+};
 
 struct Runtime
 {
@@ -178,6 +217,8 @@ ON_CLICK,
 THIS_ELEMENT, // For binding an element to a variable
 CONDITION,
 LOOP,
+ON_FOCUS,
+FOCUSABLE,
 };
 
 struct attr_comp_id_body 
@@ -186,6 +227,11 @@ struct attr_comp_id_body
 };
 
 struct attr_on_click_body
+{
+    int binding_id;
+};
+
+struct attr_on_focus_body
 {
     int binding_id;
 };
@@ -222,7 +268,6 @@ struct attr_custom_body : attr_text_like_body
     int name_length;
 };
 
-
 // Marks an attribute as having been initialized (for attributes that need initialization in the runtime evaluator)
 #define AttributeInitilized (uint32_t)(1 << 0)
 
@@ -244,6 +289,7 @@ struct Attribute
         attr_text_like_body Text;
         attr_custom_body Custom;
         attr_on_click_body OnClick;
+        attr_on_focus_body OnFocus;
         attr_this_body This;
         attr_condition_body Condition;
         attr_loop_body Loop;
@@ -391,6 +437,7 @@ struct Element
     uint64_t flags;
     
     int id;
+    int global_id; // From the Id attribute.
     int context_index; // For keeping track of which index in an each element spawned this element.
     ElementType type;
     ClickState click_state;
@@ -549,10 +596,6 @@ void MergeStyles(InFlightStyle* main, Style* style);
 // Set the members of this style to the defaults.
 void DefaultStyle(InFlightStyle* target);
 
-void CalculateStyles(DOM* dom);
-void BuildRenderQue(DOM* dom);
-void Draw(DOM* dom);
-
 // Tells the program master to switch the page of the specified DOM to the specified one
 // Flags may tell the master whether to delete the curernt DOM or keep it and save the state
 void SwitchPage(DOM* dom, int id, int flags = 0);
@@ -572,8 +615,15 @@ void* AllocPage(DOM* dom, int size, int file_id);
 
 void* AllocComponent(DOM* dom, int size, int file_id);
 
+Event* PushEvent(DOM* dom);
+Event* PopEvent(DOM* dom);
+
+// Route an event to a component object to be handled
+void RouteEvent(void* master, Event* event);
+
+Element* GetFocused(DOM* dom);
+
 // Runtime Function Definitions //
-void LoadFromBin(char* file_path, Runtime* runtime);
 
 LoadedFileHandle* GetFileFromId(int id);
 LoadedFileHandle* GetFileFromName(const char* name);

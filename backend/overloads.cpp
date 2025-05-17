@@ -23,6 +23,14 @@ inline ArenaString* make_string(std::string arg, Arena* strings)
     return created;
 }
 
+// Overload to allow ArenaString
+inline ArenaString* make_string(ArenaString* arg, Arena* strings)
+{
+    ArenaString* created = CreateString(strings);
+    Append(created, arg);
+    return created;
+}
+
 // Default supported cases from std::to_string
 inline ArenaString* make_string(int arg, Arena* strings)
 {

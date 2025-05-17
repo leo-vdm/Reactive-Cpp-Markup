@@ -14,6 +14,11 @@ class test_component : Component
     void on_count_changed(){
         count += 10;
     }
+    
+    void OnEvent(DOM* dom, Event* event)
+    {
+        
+    }
 };
 </code>
 <root>

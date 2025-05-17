@@ -12,7 +12,7 @@ enum class SimdLevel
 
 static SimdLevel SUPPORTED_SIMD;
 // Note(Leo): SIMD_WIDTH is the width of simd registers in 32 bit floats
-// So SSE2 which is 128 bits would be 4 wide
+//            So SSE2 which is 128 bits would be 4 wide
 static unsigned int SIMD_WIDTH;
 
 #if defined(__ARM_NEON)

@@ -13,6 +13,7 @@ void print_attribute(Attribute* attribute, Arena* bindings_arena);
 void print_ast(AST* ast);
 void print_styles(LocalStyles* glob_styles);
 void register_to_dom_attatchment(FILE* dom_attatchment, char* added_file_name);
+void register_element_ids(FILE* ids_header, Arena* ids_arena, char* file_name);
 
 void cleanup_sources(SplitFileNames* target)
 {
@@ -33,12 +34,15 @@ AST init_ast(Arena* master_arena)
     *values_arena = CreateArena(sizeof(char)*100000, sizeof(char)); 
     Arena* templates_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
     *templates_arena = CreateArena(sizeof(RegisteredTemplate)*200, sizeof(RegisteredTemplate));
+    Arena* element_ids_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
+    *element_ids_arena = CreateArena(sizeof(ElementId)*500, sizeof(ElementId));
     
     created.tags = tags_arena;
     created.attributes = attributes_arena;
     created.registered_bindings = bindings_arena;
     created.values = values_arena;
     created.templates = templates_arena;
+    created.element_ids = element_ids_arena;
     return created;
 }
 
@@ -49,6 +53,7 @@ void reset_ast(AST* ast)
     ResetArena(ast->registered_bindings);
     ResetArena(ast->values);
     ResetArena(ast->templates);
+    ResetArena(ast->element_ids);
     
     ast->file_id = 0;
 }
@@ -120,7 +125,6 @@ void add_main(ArenaString* string, int file_id, const char* used_template)
     DeAllocScratch(comp_main);
 }
 
-
 int main(int argc, char* argv[])
 {
     // Initialize scratch arena
@@ -174,11 +178,25 @@ int main(int argc, char* argv[])
     char* dom_attatchment_name_temp = Flatten(dom_attatchment_name);
     remove(dom_attatchment_name_temp);
     FILE* dom_attatchment = fopen(dom_attatchment_name_temp, "w");
-    
+    DeAllocScratch(dom_attatchment_name_temp);
     fprintf(dom_attatchment, DOM_ATTATCHMENT_INCLUDES);
+    
+    // Re-make Element ID header.
+    ArenaString* ids_header_name = CreateString(strings);
+    Append(ids_header_name, build_dir);
+    Append(ids_header_name, "/");
+    Append(ids_header_name, ELEMENT_ID_HEADER_NAME);
+    
+    char* ids_header_name_temp = Flatten(ids_header_name);
+    remove(ids_header_name_temp);
+    FILE* ids_header = fopen(ids_header_name_temp, "w");
+    DeAllocScratch(ids_header_name_temp);
     
     ArenaString* main_calls = CreateString(strings);
     Append(main_calls, COMP_MAIN_FN_TEMPLATE);
+    
+    ArenaString* event_calls = CreateString(strings);
+    Append(event_calls, COMP_EVENT_FN_TEMPLATE);
     
     while(curr->file_name)
     {
@@ -223,6 +241,9 @@ int main(int argc, char* argv[])
         Tokenize(markup_source, tokens_arena, token_values_arena);
         ProduceAST(&target, tokens_arena, token_values_arena, &state);
         
+        // register the element ids from this file to the IDS header
+        register_element_ids(ids_header, target.element_ids, comp_name);
+        
         ResetArena(tokens_arena);
         ResetArena(token_values_arena);
         
@@ -235,7 +256,8 @@ int main(int argc, char* argv[])
         
         RegisterDirectives(&generated_code, tokens_arena, token_values_arena, &state, is_component());
         RegisterMarkupBindings(&generated_code, target.registered_bindings, tokens_arena, token_values_arena, is_component());
-    
+        
+
         fclose(component_code);
         
         // Create the name for the output binary
@@ -256,6 +278,8 @@ int main(int argc, char* argv[])
         
         // Add the method the DOM calls to instance the component
         add_main(main_calls, comp_id, CALL_COMP_MAIN_FN_TEMPLATE);
+        // Add the method the DOM calls when an event is routed to this comp
+        add_main(event_calls, comp_id, CALL_COMP_EVENT_FN_TEMPLATE);
         
         
         fclose(style_source);
@@ -282,6 +306,8 @@ int main(int argc, char* argv[])
     // Close off the component mains
     Append(main_calls, CLOSE_MAIN_CALL_TEMLATE);
     
+    Append(event_calls, CLOSE_MAIN_CALL_TEMLATE);
+    
     
     // Find All .cmp files
     ResetArena(&source_search_result);
@@ -292,6 +318,9 @@ int main(int argc, char* argv[])
     
     // Open page mains
     Append(main_calls, PAGE_MAIN_FN_TEMPLATE);
+    
+    ArenaString* frame_calls = CreateString(strings);
+    Append(frame_calls, PAGE_FRAME_FN_TEMPLATE);
     
     while(curr->file_name)
     {
@@ -336,6 +365,9 @@ int main(int argc, char* argv[])
         Tokenize(markup_source, tokens_arena, token_values_arena);
         ProduceAST(&target, tokens_arena, token_values_arena, &state);
         
+        // register the element ids from this file to the IDS header
+        register_element_ids(ids_header, target.element_ids, page_name);
+        
         ResetArena(tokens_arena);
         ResetArena(token_values_arena);
         
@@ -371,6 +403,9 @@ int main(int argc, char* argv[])
         // Add the method the DOM calls when switching to this page
         add_main(main_calls, page_id, CALL_PAGE_MAIN_FN_TEMPLATE);
         
+        // Add the method the runtime calls each frame for this page
+        add_main(frame_calls, page_id, CALL_PAGE_FRAME_FN_TEMPLATE);
+        
         fclose(style_source);
         fclose(markup_source);
         
@@ -395,16 +430,23 @@ int main(int argc, char* argv[])
     // Close off the page mains
     Append(main_calls, CLOSE_MAIN_CALL_TEMLATE);
     
+    Append(frame_calls, CLOSE_MAIN_CALL_TEMLATE);
+    
     // Generate DOM attatchment
     GenerateDOMAttatchment(dom_attatchment, &state);
     
     // Add main calls to dom attatchment
-    
     char* flattened_main_calls = Flatten(main_calls);
-    
     fprintf(dom_attatchment, flattened_main_calls);
     
+    char* flattened_frame_calls = Flatten(frame_calls);
+    fprintf(dom_attatchment, flattened_frame_calls);
+    
+    char* flattened_event_calls = Flatten(event_calls);
+    fprintf(dom_attatchment, flattened_event_calls);
+    
     fclose(dom_attatchment);
+    fclose(ids_header);
     
     return 0;
 }
@@ -444,4 +486,16 @@ void register_to_dom_attatchment(FILE* dom_attatchment, char* added_file_name)
     #define DOM_ATTATCHMENT_CODE_INCLUDE "#ifndef %s_MACRO\n#include \"%s.cpp\"\n#endif\n"
     fprintf(dom_attatchment, DOM_ATTATCHMENT_CODE_INCLUDE, added_file_name, added_file_name);
     
+}
+
+void register_element_ids(FILE* ids_header, Arena* ids_arena, char* file_name)
+{
+    ElementId* curr_id = (ElementId*)ids_arena->mapped_address;
+    while(curr_id->id)
+    {
+        #define ELEMENT_ID_DEFINITION "#define %.*s_%s_GLOBAL_ID %d\n"
+        fprintf(ids_header, ELEMENT_ID_DEFINITION, curr_id->name.len, curr_id->name.value, file_name, curr_id->id);
+        
+        curr_id++;
+    }
 }

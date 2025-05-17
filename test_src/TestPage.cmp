@@ -8,26 +8,32 @@ public:
     void PageMain(DOM* dom){
         printf("Hello from the test page!\n");
         count = 0;
-	printf("Count is %d\n", count);
+	printf("Special id is %d\n", EID(special, TestPage));
         
     }
+
+    void OnFrame(DOM* dom)
+    {
+    
+    }
  
-    void OnClickButton(){ 
+    void OnClickButton()
+    { 
         count += 1;
-	printf("Test Page Count is now %d\n", count);
+	   printf("Test Page Count is now %d\n", count);
     }
 };
 
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title">This isnt the bronx!</hdiv>
-	<hdiv class="img_container">
+	<hdiv class="title">This is the second page</hdiv>
+	<vdiv class="img_container">
 		<img src="thumbs_up.jpg"></img>
 		<img src="thumbs_up.jpg"></img>
-	</hdiv>
+	</vdiv>
 	<test_component></test_component>
-	<vdiv class="footer" onclick="{e->OnClickButton()}">
+	<vdiv id="special" class="footer" onclick="{e->OnClickButton()}">
 		Test Count: {count}
 	</vdiv>
 </vdiv>

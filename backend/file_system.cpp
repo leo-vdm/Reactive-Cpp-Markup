@@ -41,6 +41,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     while(curr_tag->tag_id != 0)
     {
         added_tag.tag_id = curr_tag->tag_id;
+        added_tag.global_id = curr_tag->global_id;
         added_tag.first_attribute_index = get_index(saved_tree->attributes, curr_tag->first_attribute);
         added_tag.num_attributes = curr_tag->num_attributes;
         
@@ -85,6 +86,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         {
             added_tag = {};
             added_tag.tag_id = curr_tag->tag_id;
+            added_tag.global_id = curr_tag->global_id;
             added_tag.first_attribute_index = get_index(saved_tree->attributes, curr_tag->first_attribute);
             added_tag.num_attributes = curr_tag->num_attributes;
             
@@ -137,6 +139,9 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
             case(AttributeType::ON_CLICK):
                 added_attribute.OnClick.binding_id = curr_attribute->OnClick.binding_id;
                 break;
+            case(AttributeType::ON_FOCUS):
+                added_attribute.OnFocus.binding_id = curr_attribute->OnFocus.binding_id;
+                break;
             case(AttributeType::THIS_ELEMENT):
                 added_attribute.This.binding_id = curr_attribute->This.binding_id;
                 break;
@@ -153,6 +158,10 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
                 added_attribute.Loop.array_binding = curr_attribute->Loop.array_binding;
                 added_attribute.Loop.length_binding = curr_attribute->Loop.length_binding;
                 added_attribute.Loop.template_id = curr_attribute->Loop.template_id;
+                break;
+            }
+            case(AttributeType::FOCUSABLE):
+            {
                 break;
             }
             case(AttributeType::CUSTOM):
@@ -241,7 +250,7 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
 }
 
-#define debug_load 1
+#define debug_load 0
 // Note(Leo): We cannot acces values to print for debugging until the end of the FN since thats when the values get read in.
 LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attributes, Arena* styles, Arena* selectors, Arena* values)
 {
@@ -303,6 +312,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
         
         added_tag->type = read_tag.type;
         added_tag->tag_id = read_tag.tag_id;
+        added_tag->global_id = read_tag.global_id;
         added_tag->first_attribute = get_pointer(base_attribute, read_tag.first_attribute_index, Attribute);
         added_tag->num_attributes = read_tag.num_attributes;
         
@@ -384,6 +394,15 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
             case(AttributeType::ON_CLICK):
             {
                 added_attribute->OnClick.binding_id = read_attribute.OnClick.binding_id;
+                break;
+            }
+            case(AttributeType::ON_FOCUS):
+            {
+                added_attribute->OnFocus.binding_id = read_attribute.OnFocus.binding_id;
+                break;
+            }
+            case(AttributeType::FOCUSABLE):
+            {
                 break;
             }
             case(AttributeType::THIS_ELEMENT):

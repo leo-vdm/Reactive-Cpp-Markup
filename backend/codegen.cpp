@@ -32,7 +32,7 @@ void reset_bound_vars();
 #define VAR_UPDATED_FN_TEMPLATE "bound_var_changed(%d);\n"
  
 #define PAGE_MAIN_STUB_FN_TEMPLATE "void page_main_%d(DOM* dom, int file_id, void** d_void_target){\nvoid* allocated = AllocPage(dom, sizeof(%s), file_id);\n((%s*)allocated)->PageMain(dom);\n*(d_void_target) = allocated;\n}\n"
-#define PAGE_MAIN_STUB_FN_HEADER_TEMPLATE "void page_main_%d(DOM* dom, int file_id);\n"
+#define PAGE_FRAME_STUB_FN_TEMPLATE "void page_frame_%d(DOM* dom, void* d_void){\n\t((%s*)d_void)->OnFrame(dom);\n}\n"
 
 ///////////////////////////////
 //// Component Definitions ////
@@ -40,6 +40,7 @@ void reset_bound_vars();
 
 // Args: File id, component name x 2
 #define COMP_MAIN_STUB_FN_TEMPLATE "void comp_main_%d(DOM* dom, int file_id, void** d_void_target){\nvoid* allocated = AllocComponent(dom, sizeof(%s), file_id);\n((%s*)allocated)->CompMain(dom);\n*(d_void_target) = allocated;\n}\n"
+#define COMP_EVENT_STUB_FN_TEMPLATE "void comp_event_%d(DOM* dom, Event* event, void* d_void){\n((%s*)d_void)->OnEvent(dom, event);\n}\n"
 
 /////////////////////////////////////
 //// DOM Attatchment Definitions ////
@@ -48,9 +49,6 @@ void reset_bound_vars();
 #define REGISTER_BINDINGS_SUBSCRIBER_DOM_TEMPLATE "\nvoid register_binding_subscriptions(Runtime* runtime) {\n"
 
 #define CALL_BINDINGS_SUBSCRIBER_FN_TEMPLATE "register_binding_subscriptions_%d(runtime);\n"
-
-
-// New Stuff
 
 // Args are comp name * 2
 #define DEFINE_SELF_TEMPLATE "#define %s_MACRO 1"
@@ -66,8 +64,8 @@ void reset_bound_vars();
 
 // Args: stub name, array type name, var/fn name
 #define BINDING_ARR_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* a_void, Arena* strings, int index)\n{\nreturn make_string(((%.*s*)a_void + index)->%s, strings);\n}\n"
-#define BINDING_ARR_VOID_STUB_TEMPLATE "\nvoid %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s)d_void; %s;\n}\n"
-#define BINDING_ARR_BOOL_STUB_TEMPLATE "\nbool %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s)d_void; %s;\n}\n"
+#define BINDING_ARR_VOID_STUB_TEMPLATE "\nvoid %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s*)d_void; %s;\n}\n"
+#define BINDING_ARR_BOOL_STUB_TEMPLATE "\nbool %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s*)d_void; %s;\n}\n"
 #define BINDING_ARR_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* a_void, int index, void* ptr_void)\n{\n((%.*s*)a_void + index)->%s = ptr_void;\n}\n"
 #define BINDING_ARR_PTR_STUB_TEMPLATE "\nvoid* %s(void* a_void, int index)\n{\nreturn (void*)((%.*s*)a_void + index)->%s;\n}\n"
 #define BINDING_ARR_INT_STUB_TEMPLATE "\nint %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void;\nauto e = (%s)d_void;\n %s;\n}\n"
@@ -178,10 +176,12 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
     if(flags & is_component())
     {
         fprintf(target->code, COMP_MAIN_STUB_FN_TEMPLATE, target->file_id, target->file_name, target->file_name);
+        fprintf(target->code, COMP_EVENT_STUB_FN_TEMPLATE, target->file_id, target->file_name);
     }
     else
     {
         fprintf(target->code, PAGE_MAIN_STUB_FN_TEMPLATE, target->file_id, target->file_name, target->file_name);
+        fprintf(target->code, PAGE_FRAME_STUB_FN_TEMPLATE, target->file_id, target->file_name);
     }
     
 }
@@ -259,10 +259,10 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
                 fprintf(target->code, BINDING_ARR_VOID_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
                 break;
             case(RegisteredBindingType::VOID_PTR):
-                fprintf(target->code, BINDING_ARR_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
+                fprintf(target->code, BINDING_ARR_VOID_PTR_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, terminated_binding_name);
                 break;
             case(RegisteredBindingType::BOOL_RET):
-                fprintf(target->code, BINDING_ARR_VOID_PTR_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, terminated_binding_name);
+                fprintf(target->code, BINDING_ARR_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
                 break;
             case(RegisteredBindingType::PTR_RET):
                 fprintf(target->code, BINDING_ARR_PTR_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, terminated_binding_name);
@@ -326,7 +326,7 @@ DirectiveType get_directive_from_name(StringView* name)
     return result;
 }
 
-// Note(LEO): Null terminated names only!!!
+// Note(Leo): Null terminated names only!!!
 DirectiveType get_directive_from_name(char* name)
 {
     std::string name_string;

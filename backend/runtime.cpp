@@ -242,6 +242,8 @@ void SwitchPage(DOM* dom, int id, int flags)
     ResetArena(dom->pointer_arrays);
     ResetArena(dom->elements);
     ResetArena(dom->attributes);
+    ResetArena(dom->events);
+    dom->focused_element = NULL;
     
     InstancePage(dom, id);    
 }
@@ -516,40 +518,14 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                     InstanceTemplate(dom, element, element->Each.array_ptr, curr_attribute->Loop.template_id, i);
                 }
                 
-                printf("Built the looped thing\n");
-                
                 break;
             }
             case(AttributeType::ON_CLICK):
             {
-                if((element->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
+                if((element->flags & is_clicked()) == 0)
                 {
-                    element->click_state = ClickState::NONE;
                     break;
                 }
-                else if(controls->mouse_left_state == MouseState::DOWN_THIS_FRAME)
-                {
-                    element->click_state = ClickState::MOUSE_DOWN;
-                    break;
-                }
-                else if(controls->mouse_left_state == MouseState::DOWN && element->click_state == ClickState::MOUSE_DOWN)
-                {
-                    element->click_state = ClickState::MOUSE_DOWN;
-                    break;
-                }
-                else if(controls->mouse_left_state == MouseState::DOWN) // Mouse is down but didnt start down on this element
-                {
-                    element->click_state = ClickState::NONE;
-                    break;
-                }
-                else if(element->click_state == ClickState::NONE)
-                {
-                    element->click_state = ClickState::NONE;
-                    break;
-                }
-
-                // This element must have had mouse down and now gotten mouse up all while being hovered
-                assert(controls->mouse_left_state == MouseState::UP_THIS_FRAME && element->click_state == ClickState::MOUSE_DOWN && element->flags & is_hovered()); 
                 assert(curr_attribute->OnClick.binding_id);
                 
                 BoundExpression* binding = GetBoundExpression(curr_attribute->OnClick.binding_id);
@@ -613,6 +589,19 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 {
                     element->flags &= ~is_hidden();
                 }
+                
+                break;
+            }
+            case(AttributeType::ON_FOCUS):
+            case(AttributeType::FOCUSABLE):
+            {
+                if((element->flags & is_clicked()) == 0)
+                {
+                    break;
+                }
+                
+                dom->focused_element = element;
+                element->flags |= is_focusable();
                 
                 break;
             }
@@ -743,7 +732,7 @@ void RuntimeClearTemporal(DOM* target)
     ResetArena(target->frame_arena);
 }
 
-//  Returns whether the element would like to captures any scrolling from the curent frame.
+//  Returns whether the element would like to capture any scrolling from the curent frame.
 //  The deepest element in the tree that is hovered by the mouse and has clipped content will be the
 //  one to capture the scroll
 bool should_capture_scroll(PlatformControlState* controls, Element* target)
@@ -803,8 +792,8 @@ void scroll_element(vec2 scroll_dir, Element* target)
     }
 }
 
-    // Note(Leo): When a scrolled div shrinks down past a point it was scrolled too the scrollables will be negative, 
-    //            we autoscroll back to the legal region
+// Note(Leo): When a scrolled div shrinks down past a point it was scrolled too the scrollables will be negative, 
+//            we autoscroll back to the legal region
 void sanitize_scrollable(Element* target)
 {
     if(!target->last_sizing)
@@ -846,9 +835,87 @@ void sanitize_scrollable(Element* target)
     }
 }
 
+void update_click_state(Element* target, PlatformControlState* controls)
+{
+    target->flags &= ~is_clicked();
+    
+    if((target->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target->click_state = ClickState::MOUSE_DOWN;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN && target->click_state == ClickState::MOUSE_DOWN)
+    {
+        target->click_state = ClickState::MOUSE_DOWN;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN) // Mouse is down but didnt start down on this element
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    else if(target->click_state == ClickState::NONE)
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    
+    target->flags = target->flags | is_clicked();
+    // This element must have had mouse down and now gotten mouse up all while being hovered
+    assert(controls->mouse_left_state == MouseState::UP_THIS_FRAME && target->click_state == ClickState::MOUSE_DOWN && target->flags & is_hovered()); 
+                
+}
+
+void focus_element(DOM* dom, Element* old_focused)
+{
+    Element* new_focused = dom->focused_element;
+    
+    if(old_focused)
+    {
+        Event* de_focus_event = PushEvent(dom);
+        de_focus_event->type = EventType::DE_FOCUSED;
+        de_focus_event->DeFocused.target = old_focused;
+    }
+    
+    if(dom->focused_element)
+    {
+        Attribute* focussed_binding = GetAttribute(new_focused, AttributeType::ON_FOCUS);
+        if(focussed_binding) // Element has an OnFocus binding
+        {
+            assert(focussed_binding->OnFocus.binding_id);
+            
+            BoundExpression* binding = GetBoundExpression(focussed_binding->OnClick.binding_id);
+            assert(binding->type == BoundExpressionType::VOID_RET);
+            assert(new_focused->master);
+            
+            if(binding->context == BindingContext::GLOBAL)
+            {
+                binding->stub_void((void*)new_focused->master);
+            }
+            else
+            {
+                binding->arr_stub_void((void*)new_focused->context_master, (void*)new_focused->master, new_focused->context_index);
+            }
+        }
+        if(new_focused->flags & is_focusable()) // Element has the focusable property
+        {
+          Event* focus_event = PushEvent(dom);
+          focus_event->type = EventType::FOCUSED;
+          focus_event->Focused.target = new_focused;    
+        }
+    }
+}
+
 Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height)
 {
     // Note(Leo): Page root element is always at the first address of the dom
+    Element* old_focused = dom->focused_element;
+    
     Element* root_element = (Element*)dom->elements->mapped_address;
     assert(!root_element->parent && !root_element->next_sibling); // Root cant have a parent or siblings
     
@@ -859,7 +926,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         SwitchPage(dom, dom->switch_request.file_id, dom->switch_request.flags);
         dom->switch_request = {};
     }
-    
+      
     Element* scroll_capturer = NULL; // The current deepest element asking to capture scroll
     
     Element* curr_element = root_element;
@@ -877,6 +944,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         if(curr_element->first_child && curr_element->flags ^ is_hidden())
         {
             curr_element = curr_element->first_child;
+            update_click_state(curr_element, controls);
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -890,6 +958,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         if(curr_element->next_sibling)
         {
             curr_element = curr_element->next_sibling;
+            update_click_state(curr_element, controls);
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -908,6 +977,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
             if(curr_element->next_sibling)
             {
                 curr_element = curr_element->next_sibling;
+                update_click_state(curr_element, controls);
                 runtime_evaluate_attributes(dom, controls, curr_element);
                 
                 sanitize_scrollable(curr_element);
@@ -926,6 +996,13 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     {
         scroll_element(controls->scroll_dir, scroll_capturer);
     }
+    
+    if(old_focused != dom->focused_element)
+    {
+        focus_element(dom, old_focused);
+    }
+
+    call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);
     
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
     //            will never underestimate so its ok.

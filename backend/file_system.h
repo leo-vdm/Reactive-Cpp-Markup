@@ -34,6 +34,7 @@ struct SavedTag
 {
     Compiler::TagType type;
     int tag_id; // Given by parser
+    int global_id; 
     
     int first_attribute_index;
     int num_attributes;
@@ -51,6 +52,11 @@ struct SavedTemplate
 };
 
 struct saved_attr_on_click_body
+{
+    int binding_id;
+};
+
+struct saved_attr_on_focus_body
 {
     int binding_id;
 };
@@ -101,6 +107,7 @@ struct SavedAttribute
         saved_attr_text_like_body Text;
         saved_attr_custom_body Custom;
         saved_attr_on_click_body OnClick;
+        saved_attr_on_focus_body OnFocus;
         saved_attr_this_body This;
         saved_attr_condition_body Condition;
         saved_attr_loop_body Loop;

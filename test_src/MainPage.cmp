@@ -1,8 +1,6 @@
 <code>
 #usecomp "test_component.cmc"
 
-char* test = "Hello my string";
-
 #include "platform.h"
 
 struct test_struct
@@ -16,20 +14,77 @@ public:
     int mycolor;
     int count;
     void* my_element;
-    const char* my_var;
     
     test_struct* things;
     int things_len;
     
-    void PageMain(DOM* dom){
+    ArenaString* userInput;
+    
+    void PageMain(DOM* dom)
+    {
         printf("Hello from page main!\n");
         count = 0;
-        my_var = test;
+
         printf("Count is %d\n", count);
         should_show = false;
         my_element = NULL;
         things_len = 3;
         things = (test_struct*)malloc(things_len*sizeof(test_struct));
+        memset(things, 0, things_len*sizeof(test_struct));
+        
+        userInput = CreateString(dom->strings);
+    }
+    
+    void OnFrame(DOM* dom)
+    {
+        Event* curr_event = PopEvent(dom);
+        while(curr_event)
+        {
+            switch(curr_event->type)
+            {
+                case(EventType::FOCUSED):
+                {
+                    if(curr_event->Focused.target->global_id == EID(mine, MainPage))
+                    {
+                        printf("Got specialized focus!\n");
+                    
+                    }
+                    printf("Got focus!\n");
+                    break;
+                }
+                case(EventType::DE_FOCUSED):
+                {
+                    printf("Lost focus!\n");
+                    break;
+                }
+                case(EventType::KEY_DOWN):
+                {
+                    Element* focused = GetFocused(dom);
+                    if(focused && focused->global_id == EID(mine, MainPage))
+                    {
+                        handleUserInput(curr_event);
+                    }
+                    printf("Char: %c Code: %d Event Type: %d\n", (char)curr_event->Key.key_char, curr_event->Key.code, (int)curr_event->type);
+                    break;
+                }
+                default:
+                {
+                    break;
+                }
+            }
+            curr_event = PopEvent(dom);
+        }
+    }
+
+    void handleUserInput(Event* in)
+    {
+        if(!(char)in->Key.key_char)
+        {
+            return;
+        }
+    
+        char added_char = (char)in->Key.key_char;
+        Append(userInput, &added_char, 1);
     }
 
     void onSwitchPage()
@@ -39,7 +94,8 @@ public:
  
     bool should_show;
  
-    void on_count_changed(){ 
+    void countChanged()
+    { 
         should_show = !should_show;
         count += 1;
     	printf("Count is now %d\n", count);
@@ -48,21 +104,29 @@ public:
     	   Element* image_element = (Element*)my_element;
     	   image_element->Image.handle = RenderplatformGetImage("thumbs_up.jpg");
     	}
+    	things[1].test_number = count % 2;
+    }
+    
+    void onFocusTitle()
+    {
+        printf("Focused the new thing!\n");
     }
 };
 
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title">Incredible Gallery</hdiv>
+	<hdiv class="title" onfocus="{e->onFocusTitle()}" id="mine">Incredible Gallery {userInput}</hdiv>
 	<hdiv class="img_container" condition="{return e->should_show;}">
-		<img this="{my_element}" src="texture.png"></img>
+		<img this="{my_element}" src="texture.png" focusable></img>
 		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>
 	</hdiv>
 	<each loop="{things;return e->things_len;test_struct}">
-	   This is a loooooped text! {{test_number}}
+        <hdiv condition="{{return a[index].test_number == 0;}}">
+	       This is a loooooped text! {{test_number}}
+        </hdiv> 
 	</each>
-	<vdiv class="footer" onclick="{e->on_count_changed()}">
+	<vdiv class="footer" onclick="{e->countChanged()}">
 		Count: {count}
 	</vdiv>
 </vdiv>

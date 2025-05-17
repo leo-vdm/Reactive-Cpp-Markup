@@ -1,5 +1,6 @@
 #if defined(__linux__) && !defined(_WIN32)
 #define INSTRUMENT_IMPLEMENTATION 1
+#define KEYCODE_TRANSLATION_IMPL 1
 #include "platform.h"
 #include <stdio.h>
 #include <iostream>
@@ -22,6 +23,23 @@ const char* linux_required_vk_extensions[] = {VK_E_KHR_SURFACE_NAME, VK_E_KHR_XL
 #define Button6 6
 #define Button7 7
 
+struct linux_platform_state
+{
+    Arena master_arena;  
+    Arena* windows;
+    Arena* pointer_arrays;
+    Arena* search_results;
+    Arena* search_result_values;
+
+    Arena* runtime_master_arena;
+    
+    PlatformWindow* first_window;
+    
+    VirtualKeyboard keyboard_state;
+};
+
+linux_platform_state platform;
+
 PlatformWindow* linux_create_window(Arena* windows_arena)
 {
     #define WINDOW_WIDTH 800
@@ -43,7 +61,7 @@ PlatformWindow* linux_create_window(Arena* windows_arena)
     created_window->window_gc = XCreateGC(x_display, x_created_window, 0, 0);
     created_window->width = WINDOW_WIDTH;
     created_window->height = WINDOW_HEIGHT;
-    
+    created_window->controls.keyboard_state = &platform.keyboard_state;
     
     linux_vk_create_window_surface(created_window, x_display);
     
@@ -107,7 +125,7 @@ void linux_process_window_events(PlatformWindow* target_window)
             {
                 if(x_event.xdestroywindow.window == target_window->window_handle)
                 {
-                return_value = return_value | QUIT_WINDOW;
+                    return_value = return_value | QUIT_WINDOW;
                 }
                 break;
             }
@@ -134,15 +152,37 @@ void linux_process_window_events(PlatformWindow* target_window)
             case(KeyPress):
             {
                 int key_code = x_event.xkey.keycode;
+                VirtualKeyCode translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+                
                 KeySym x_key = XLookupKeysym(&(x_event.xkey), 0);
                 char* key_char = XKeysymToString(x_key);
-                printf("Keycode down: %d, Char: %c\n", key_code, *key_char);
+                int char_len = strlen(key_char);
+                
+                // Can only fit chars that fit into uint32                 
+                if(char_len > 4)
+                {
+                    return;
+                }
+                Event* added = PushEvent((DOM*)target_window->window_dom);
+                added->type = EventType::KEY_DOWN;
+                added->Key.code = translated_keycode;
+                
+                memcpy(&added->Key.key_char, key_char, char_len*sizeof(char));
+                
+                target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::DOWN;
+                
                 break;
             }
             case(KeyRelease):
             {
                 int key_code = x_event.xkey.keycode;
-                printf("Keycode up: %d", key_code);
+                VirtualKeyCode translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+            
+                Event* added = PushEvent((DOM*)target_window->window_dom);
+                added->type = EventType::KEY_UP;
+                added->Key.code = translated_keycode;
+                
+                target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::UP;
                 break;
             }
             case(ButtonPress):
@@ -265,18 +305,6 @@ FileSearchResult* linux_find_image_resources(Arena* search_results_arena, Arena*
     return first;
 }
 
-struct linux_platform_state
-{
-    Arena master_arena;  
-    Arena* windows;
-    Arena* pointer_arrays;
-    Arena* search_results;
-    Arena* search_result_values;
-
-    Arena* runtime_master_arena;
-    
-    PlatformWindow* first_window;
-};
 
 void linux_destroy_window(Arena* windows_arena, PlatformWindow* window)
 {
@@ -287,7 +315,12 @@ void linux_destroy_window(Arena* windows_arena, PlatformWindow* window)
     DeAlloc(windows_arena, window);
 }
 
-linux_platform_state platform;
+KeyState GetKeyState(uint8_t key_code)
+{
+    assert(key_code < VIRTUAL_KEY_COUNT);
+    
+    return (KeyState)platform.keyboard_state.keys[key_code]; 
+}
 
 int main()
 {   
@@ -316,6 +349,7 @@ int main()
     x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
     
     InitializeFontPlatform(&(platform.master_arena), 0);
+    PlatformInitKeycodeTranslations();
     
     FILE* default_font = linux_open_relative_file_path("resources/fonts/default.ttf", "rb");
     FontPlatformLoadFace("platform_default_font.ttf", default_font);
