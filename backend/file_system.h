@@ -127,6 +127,7 @@ struct FileSearchResult
 {
     char* file_path; // Full path built by the search
     char* file_name; // Substring of the full path containing only the file name
+    FILE* file;
 };
 
 struct BodyTemplate

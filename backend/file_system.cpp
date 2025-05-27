@@ -587,7 +587,7 @@ void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const
     FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult), zero());
 }
 
-#elif defined(__linux__) && !defined(_WIN32)
+#elif defined(__linux__) && !defined(_WIN32) && !defined(__ANDROID__)
 #include <dirent.h>
 void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, const char* file_extension)
 {
@@ -646,11 +646,9 @@ void search_dir_r(Arena* results, Arena* result_values, const char* dir_ref, con
 void SearchDir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension)
 {
     search_dir_r(results, result_values, dir_name, file_extension);
-    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult));
-    
-    // Note(Leo): this step only needs to happen because arenas dont clear allocated memory, otherwise this could be removed
-    memset(end, 0, sizeof(FileSearchResult));
+    FileSearchResult* end = (FileSearchResult*)Alloc(results, sizeof(FileSearchResult), zero());
 }
 
 
+#elif defined(__ANDROID__)
 #endif

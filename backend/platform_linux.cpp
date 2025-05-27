@@ -284,6 +284,15 @@ FileSearchResult* linux_find_markup_binaries(Arena* search_results_arena, Arena*
     FileSearchResult* first = (FileSearchResult*)search_results_arena->mapped_address;
     
     DeAllocScratch(working_dir);
+    
+    // Open all the files
+    FileSearchResult* curr = first;
+    while(curr->file_path)
+    {
+        curr->file = fopen(curr->file_path, "rb");
+        curr++;
+    }
+    
     return first;
 }
 

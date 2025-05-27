@@ -176,8 +176,10 @@ struct bvec3
 
 struct PushConstants
 {
-    vec2 screen_size;
-    int32_t shape_count;
+    alignas(8) vec2 screen_size;
+    alignas(4) int32_t shape_count;
+    alignas(4) bool invert_horizontal_axis;
+    alignas(4) bool invert_vertical_axis;
 };
 
 struct SpecializationData 

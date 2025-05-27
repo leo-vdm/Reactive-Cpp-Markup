@@ -1,4 +1,4 @@
-
+#include "DOM.h"
 #define EID(name, file) name ##_ ##file ##_GLOBAL_ID
 
 void register_binding_subscriptions(Runtime* runtime);

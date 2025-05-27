@@ -1,8 +1,11 @@
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #define VK_USE_PLATFORM_WIN32_KHR 1
 #endif
-#if defined(__linux__) && !defined(_WIN32) 
+#if defined(__linux__) && !defined(_WIN32)  && !defined(__ANDROID__)
 #define VK_USE_PLATFORM_XLIB_KHR 1 
+#endif
+#if defined(__ANDROID__)
+#define VK_USE_PLATFORM_ANDROID_KHR 1
 #endif
 
 #define VK_NO_PROTOTYPES 1
@@ -51,6 +54,13 @@ struct vk_atlas_texture
     uvec3 dimensions;
 };
 
+enum class ScreenOrientation
+{
+    ZERO,
+    NINETY,
+    TWO_SEVENTY
+};
+
 struct VulkanRenderPlatform 
 {
     VkLibrary vk_library;
@@ -96,6 +106,10 @@ struct VulkanRenderPlatform
     Arena* image_atlas_tiles;
     Arena* image_handles;
     Arena* vk_binary_data;
+    
+    #if PLATFORM_ANDROID
+    ScreenOrientation orientation;
+    #endif
 };
 
 VulkanRenderPlatform rendering_platform;
@@ -137,6 +151,8 @@ PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
 PFN_vkCreateXlibSurfaceKHR vkCreateXlibSurfaceKHR;
 #elif PLATFORM_WINDOWS
 PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+#elif PLATFORM_ANDROID
+PFN_vkCreateAndroidSurfaceKHR vkCreateAndroidSurfaceKHR;
 #endif
 
 // Device fn's
@@ -251,6 +267,12 @@ bool vk_get_hook_address()
         {
             return false;
         }
+    #elif PLATFORM_ANDROID
+        rendering_platform.vk_library = dlopen("libvulkan.so", RTLD_NOW);
+        if(!rendering_platform.vk_library)
+        {
+            return false;
+        }
     #elif PLATFORM_WINDOWS
         rendering_platform.vk_library = (HMODULE)LoadLibrary(TEXT("vulkan-1.dll"));
         if(!rendering_platform.vk_library)
@@ -304,6 +326,8 @@ bool vk_get_instance_procs()
     
     #if PLATFORM_LINUX
         VK_INSTANCE_LEVEL_FUNCTION(vkCreateXlibSurfaceKHR);
+    #elif PLATFORM_ANDROID
+        VK_INSTANCE_LEVEL_FUNCTION(vkCreateAndroidSurfaceKHR);
     #elif PLATFORM_WINDOWS
         VK_INSTANCE_LEVEL_FUNCTION(vkCreateWin32SurfaceKHR);
     #endif
@@ -750,8 +774,24 @@ VkExtent2D vk_pick_swapchain_extent(VkSurfaceKHR surface, int window_width, int 
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rendering_platform.vk_physical_device, surface, &capabilities);
     
     VkExtent2D picked_extent;
-    picked_extent.width = window_width;
-    picked_extent.height = window_height;
+    // Note(Leo): Swap width and height when the device wants to be rotated
+    if(capabilities.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+        capabilities.currentTransform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+    {
+        picked_extent.width = window_height;
+        picked_extent.height = window_width;
+        #if PLATFORM_ANDROID
+        rendering_platform.orientation = capabilities.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ? ScreenOrientation::NINETY : ScreenOrientation::TWO_SEVENTY;
+        #endif
+    }
+    else
+    {
+        picked_extent.width = window_width;
+        picked_extent.height = window_height;
+        #if PLATFORM_ANDROID
+        rendering_platform.orientation = ScreenOrientation::ZERO;
+        #endif
+    }
     
     if(picked_extent.width > capabilities.maxImageExtent.width)
     {
@@ -780,6 +820,12 @@ bool vk_create_swapchain(VkSurfaceKHR surface, int window_width, int widow_heigh
     VkSwapchainCreateInfoKHR create_info = rendering_platform.vk_swapchain_settings;
     
     create_info.surface = surface;
+    
+    #if PLATFORM_ANDROID
+    VkSurfaceCapabilitiesKHR capabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(rendering_platform.vk_physical_device, surface, &capabilities);
+    create_info.preTransform = capabilities.currentTransform;
+    #endif
     
     create_info.imageExtent = vk_pick_swapchain_extent(surface, window_width, widow_height);
     
@@ -1288,6 +1334,11 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     PushConstants constants = {};
     constants.screen_size = { (float)window->width, (float)window->height };
     constants.shape_count = shape_count;
+    
+    #if PLATFORM_ANDROID
+    constants.invert_horizontal_axis = rendering_platform.orientation == ScreenOrientation::NINETY;
+    constants.invert_vertical_axis = rendering_platform.orientation == ScreenOrientation::TWO_SEVENTY;
+    #endif
 
     vkCmdPushConstants(buffer, rendering_platform.vk_combined_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &constants);
     
@@ -1301,9 +1352,17 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     
     // Note(Leo): + Render tile - 1 so that we will always round up the result
     assert(window->width && window->height);
+    #if PLATFORM_ANDROID
+    int width = rendering_platform.orientation != ScreenOrientation::ZERO ? window->height : window->width;
+    int height = rendering_platform.orientation != ScreenOrientation::ZERO ? window->width : window->height;
+    #else
+    int width = window->width;
+    int height = window->height;
+    #endif
+    
     uint32_t render_tile_size = (uint32_t)rendering_platform.render_tile_size;
-    uint32_t horizontal_tiles = (window->width + render_tile_size - 1) / render_tile_size;
-    uint32_t vertical_tiles = (window->height + render_tile_size - 1) / render_tile_size;
+    uint32_t horizontal_tiles = (width + render_tile_size - 1) / render_tile_size;
+    uint32_t vertical_tiles = (height + render_tile_size - 1) / render_tile_size;
     
     vkCmdDispatch(buffer, horizontal_tiles, vertical_tiles, 1);
     
@@ -2436,7 +2495,6 @@ void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_modu
 
 #endif
 
-
 #if PLATFORM_LINUX
 #include <X11/Xlib.h>
 
@@ -2450,6 +2508,74 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display)
     VkResult error;
     
     error = vkCreateXlibSurfaceKHR(rendering_platform.vk_instance, &surface_info, NULL, &(window->vk_window_surface));
+    
+    if(error)
+    {
+        window->vk_window_surface = {};
+        printf("Error creating window surface!\n");
+    }
+    
+    if(!rendering_platform.vk_logical_device_initialized)
+    {
+        if(!vk_initialize_logical_device(window->vk_window_surface, required_vk_device_extensions, sizeof(required_vk_device_extensions)/sizeof(char**)))
+        {
+            printf("Failed to init logical device!\n");
+        }
+    }
+    
+    if(!vk_create_swapchain(window->vk_window_surface, window->width, window->height, &window->vk_window_swapchain))
+    {
+        printf("Failed to create window swapchain\n");
+    }
+    
+    window->vk_first_image = vk_create_swapchain_image_views(window->vk_window_swapchain);
+    if(!window->vk_first_image)
+    {
+        printf("Failed to create image views for window swapchain!\n");
+    }
+    
+    if(!rendering_platform.vk_graphics_pipeline_initialized)
+    {
+        vk_late_initialize();
+    }
+    
+    if(!vk_create_command_buffer(&(window->vk_command_buffer)))
+    {
+        printf("Failed to create command buffer\n");
+    }
+    
+    if(!vk_create_sync_objects(window))
+    {
+        printf("Failed to create sync objects!\n");
+    }
+        
+    if(!vk_create_staging_buffer(WINDOW_STAGING_SIZE, window))
+    {
+        printf("Failed to create a staging buffer!\n");
+    }
+    
+    if(!vk_create_input_buffer(window))
+    {
+        printf("Failed to create window input buffer!\n");
+    }
+    
+    if(!vk_create_combined_descriptor(window))
+    {
+        printf("Failed to create window descriptors!\n");
+    }
+}
+#endif
+
+#if PLATFORM_ANDROID
+//#include <android_native_app_glue.h>
+
+void android_vk_create_window_surface(PlatformWindow* window)
+{
+    VkAndroidSurfaceCreateInfoKHR  surface_info = {};
+    surface_info.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+    
+    surface_info.window = window->window_handle;
+    VkResult error = vkCreateAndroidSurfaceKHR(rendering_platform.vk_instance, &surface_info, NULL, &(window->vk_window_surface));
     
     if(error)
     {

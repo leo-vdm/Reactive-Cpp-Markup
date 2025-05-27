@@ -1,9 +1,10 @@
-#include "arena.h"
 #include <string.h>
 #include <cassert>
 
 #include <stdio.h>
 #include <iostream>
+#include "arena.h"
+
 #define page_size 4095
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)

@@ -1,4 +1,3 @@
-#include "arena.h"
 #include <vulkan/vulkan.h>
 #include "DOM.h"
 #include "graphics_types.h"
@@ -32,13 +31,6 @@ enum class MouseState
     DOWN_THIS_FRAME, // The mouse has switched from being up last frame to now being down
 };
 
-enum class MouseWheelDir
-{
-    NONE,
-    UP,
-    DOWN,
-};
-
 enum class KeyState
 {
     UP,
@@ -57,8 +49,21 @@ struct PlatformControlState
     MouseState mouse_middle_state;
     MouseState mouse_right_state;
     vec2 scroll_dir;
-    vec2 cursor_pos;
-    vec2 cursor_delta;
+    // Note(Leo): On touch screen we want multiple cursors, one for each touch point/finger but for mice we only have 1
+    union
+    {
+        vec2 cursor_pos;
+        vec2 cursor_positions[5]; 
+    };
+    
+    // Note(Leo): A delta for each cursor
+    union
+    {
+        vec2 cursor_delta;
+        vec2 cursor_deltas[5];
+    };
+    
+    uint8_t cursor_count;
     
     // Note(Leo): Keyboard state is shared by all windows but only the active window gets                                 
     //            key press events
@@ -128,7 +133,7 @@ struct PlatformWindow : shared_window
 
 void win32_vk_create_window_surface(PlatformWindow* window, HMODULE windows_module_handle);
 
-#elif defined(__linux__) && !defined(_WIN32)
+#elif defined(__linux__) && !defined(_WIN32) && !defined(__ANDROID__)
 
 #define PLATFORM_LINUX 1
 
@@ -163,6 +168,23 @@ struct PlatformWindow : shared_window
 };
 
 void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display);
+#elif defined(__ANDROID__)
+#define PLATFORM_ANDROID 1
+
+#include <dlfcn.h>
+//#include <android_native_app_glue.h>
+#include <android/native_window_jni.h>
+#include <android/asset_manager_jni.h>
+#include "key_codes.h"
+
+#define VkLibrary void*
+#define PlatformGetProcAddress(module, name) dlsym( module, name)
+
+struct PlatformWindow : shared_window
+{
+    ANativeWindow* window_handle;
+};
+void android_vk_create_window_surface(PlatformWindow* window);
 
 #endif
 
@@ -176,6 +198,7 @@ void vk_window_resized(PlatformWindow* window);
 #define VK_E_KHR_METAL_SURFACE_NAME "VK_EXT_metal_surface"
 #define VK_E_KHR_XLIB_SURFACE_NAME  "VK_KHR_xlib_surface"
 #define VK_E_KHR_WAYLAND_SURFACE_NAME "VK_KHR_wayland_surface"
+#define VK_E_KHR_ANDROID_SURFACE_NAME "VK_KHR_android_surface"
 
 struct VulkanSupportedExtensions
 {
@@ -185,6 +208,7 @@ struct VulkanSupportedExtensions
     bool VK_E_KHR_METAL_SURFACE;
     bool VK_E_KHR_XLIB_SURFACE;
     bool VK_E_KHR_WAYLAND_SURFACE;
+    bool VK_E_KHR_ANDROID_SURFACE;
 };
 
 #define VULKAN_APPLICATION_NAME "TemporaryApplicationName"
@@ -287,7 +311,7 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
 
 bool PointInsideBounds(const bounding_box bounds, const vec2 point);
 
-#define USING_INSTREMENTATION 1
+#define USING_INSTREMENTATION 0
 // Instrumentation related stuff
 #if !INDCLUDED_INSTREMENTATION && USING_INSTREMENTATION  
 #define INDCLUDED_INSTREMENTATION 1
@@ -349,8 +373,8 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
     #endif
     
 #else
-    #define BEGIN_TIMED_BLOCK() (void)0
-    #define END_TIMED_BLOCK() (void)0
+    #define BEGIN_TIMED_BLOCK(a) (void)0
+    #define END_TIMED_BLOCK(a) (void)0
     #define SetupInstrumentation() (void)0
     #define DUMP_TIMINGS (void)0
 #endif

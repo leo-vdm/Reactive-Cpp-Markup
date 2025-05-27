@@ -194,6 +194,7 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             float x = GET_X_LPARAM(l_param);
             float y = GET_Y_LPARAM(l_param);
 
+            curr_processed_window->controls.cursor_delta = {x - curr_processed_window->controls.cursor_pos.x, y - curr_processed_window->controls.cursor_pos.y}    
             curr_processed_window->controls.cursor_pos = {x, y};
 
             break;
@@ -298,6 +299,15 @@ FileSearchResult* win32_find_markup_binaries(Arena* search_results_arena, Arena*
     SearchDir(search_results_arena, search_result_values_arena, working_dir, ".bin");
     
     DeAllocScratch(working_dir);
+    
+    // Open all the files
+    FileSearchResult* curr = first;
+    while(curr->file_path)
+    {
+        curr->file = fopen(curr->file_path, "rb");
+        curr++;
+    }
+    
     return first;
 }
 

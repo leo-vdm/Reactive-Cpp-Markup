@@ -1,10 +1,8 @@
-#include "arena.h"
-#include "DOM.h"
+#include <map>
 #include "dom_attatchment.h"
 #include "file_system.h"
 #include "compiler.h"
 #include "platform.h"
-#include <map>
 
 std::map<int, LoadedFileHandle*> file_id_map = {};
 std::map<std::string, LoadedFileHandle*> file_name_map = {};
@@ -137,7 +135,9 @@ int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
     while(curr->file_path)
     {
         printf("Found binary \"%s\"\n", curr->file_name);
-        FILE* bin_file = fopen(curr->file_path, "rb");
+        //FILE* bin_file = fopen(curr->file_path, "rb");
+        // Note(Leo): Files should be opened with "rb" options
+        FILE* bin_file = curr->file;
         
         LoadedFileHandle* loaded_bin = (LoadedFileHandle*)Alloc(runtime.loaded_files, sizeof(LoadedFileHandle));
         *loaded_bin = LoadPage(bin_file, runtime.loaded_tags, runtime.loaded_templates, runtime.loaded_attributes, runtime.loaded_styles, runtime.loaded_selectors, runtime.static_combined_values);
@@ -601,7 +601,10 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 }
                 
                 dom->focused_element = element;
-                element->flags |= is_focusable();
+                if(curr_attribute->type == AttributeType::FOCUSABLE)
+                {
+                    element->flags |= is_focusable();
+                }
                 
                 break;
             }

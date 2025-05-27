@@ -1,6 +1,4 @@
-#include "arena.h"
 #include "platform.h"
-#include "DOM.h"
 
 struct shaping_context 
 {
