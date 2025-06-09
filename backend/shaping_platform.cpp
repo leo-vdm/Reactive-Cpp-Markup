@@ -1008,7 +1008,7 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     // we unpack its children. To do that we have to get its corresponding element from the dom, which is done by using the
     // elemet_id that was gotten when we unpacked it.
     // When we unpack its children they are converted to layout elements and contiguously allocated onto the layout_element_arena. 
-    // We also add the number if children that root had onto the unpacked count which serves as a running tally of how many
+    // We also add the number of children that root had onto the unpacked count which serves as a running tally of how many
     // children weve allocated and converted but have not called unpack on. We continue doing this until we have unpacked
     // all children.
     while(unpacked_count)

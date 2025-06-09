@@ -28,6 +28,8 @@ layout( push_constant ) uniform constants
 {
 	vec2 screen_size;
 	int shape_count;
+	bool invert_horizontal_axis;
+	bool invert_vertical_axis;
 } PushConstants;
 
 float individual_corner_box_aa(vec2 centre_position, vec2 measurements, vec4 radii)
@@ -60,26 +62,33 @@ bool point_inside_bounds(vec4 box, vec2 point)
 
 void main()
 {
+    vec2 global_coord = PushConstants.invert_horizontal_axis || PushConstants.invert_vertical_axis ? gl_GlobalInvocationID.yx : gl_GlobalInvocationID.xy;
+
     ivec2 pixel_coord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 screen_size = PushConstants.invert_horizontal_axis  || PushConstants.invert_vertical_axis ? PushConstants.screen_size.yx : PushConstants.screen_size.xy; 
     
-    if(float(pixel_coord.x) > PushConstants.screen_size.x || float(pixel_coord.y) > PushConstants.screen_size.y)
+    
+    if(float(pixel_coord.x) > screen_size.x || float(pixel_coord.y) > screen_size.y)
     {
         return;
     }
     
     vec4 pixel_color = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 
+    pixel_coord = PushConstants.invert_horizontal_axis ? ivec2(PushConstants.screen_size.y - pixel_coord.x, pixel_coord.y) : pixel_coord;
+    pixel_coord = PushConstants.invert_vertical_axis ? ivec2(pixel_coord.x, PushConstants.screen_size.x - pixel_coord.y) : pixel_coord;
+
     #pragma unroll 1
     for(int i = 0; i < PushConstants.shape_count; i++)
     {
         combined_instance curr = instances[i];
         
-        if(!point_inside_bounds(curr.bounds, gl_GlobalInvocationID.xy))
+        if(!point_inside_bounds(curr.bounds, global_coord))
         {
             continue;
         }
         
-        vec3 sampled_coord = vec3((gl_GlobalInvocationID.xy - curr.shape_position) / curr.shape_size, 0.0f);
+        vec3 sampled_coord = vec3((global_coord - curr.shape_position) / curr.shape_size, 0.0f);
         sampled_coord *= vec3(curr.sample_size, 0.0f);
         sampled_coord += curr.sample_position;
         
@@ -94,7 +103,7 @@ void main()
         }
         else
         {
-            vec2 coordT = gl_GlobalInvocationID.xy - (PushConstants.screen_size / 2.0f);
+            vec2 coordT = global_coord - (PushConstants.screen_size / 2.0f);
             vec2 shapeT = curr.shape_position - (PushConstants.screen_size / 2.0f); 
             
             vec2 sidesT = curr.shape_size / 2.0f;

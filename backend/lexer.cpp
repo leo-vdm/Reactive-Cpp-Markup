@@ -379,65 +379,6 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena)
     last_token->body.value = NULL;
 }
 
-Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char* src, int src_length)
-{
-    #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
-    
-    Token* first_token = (Token*)tokens_arena->next_address;
-    
-    char* curr_char = src;
-    char* boundary = src + sizeof(char)*src_length;
-    
-    while(curr_char < boundary)
-    {
-        Token* new_token;
-        switch(*curr_char)
-        {
-            case('('):
-                new_token = push_token();
-                new_token->type = TokenType::OPEN_PARENTHESIS;
-                break;
-            case(')'):
-                new_token = push_token();
-                new_token->type = TokenType::CLOSE_PARENTHESIS;
-                break;
-            case('='):
-                new_token = push_token();
-                new_token->type = TokenType::EQUALS;
-                break;
-            case(','):
-                new_token = push_token();
-                new_token->type = TokenType::COMMA;
-                break;
-            case(':'):
-                new_token = push_token();
-                new_token->type = TokenType::COLON;
-            case('\0'): // Skip whitespaces/newlines
-                break;
-            case('\n'):
-                new_token = push_token();
-                new_token->type = TokenType::NEW_LINE;
-                break;
-            case(' '):
-                break;
-            case('\t'):
-                break;
-            default: // FN declerations, var declerations, type declerations etc.
-                new_token = push_token();
-                new_token->type = TokenType::TEXT;
-                curr_char += aggregate_text(curr_char, boundary, token_values_arena, new_token, "()=,:\0\n \t");
-
-                break;
-        }
-    }
-    
-    Token* last_token = push_token();
-    last_token->type = TokenType::END; // Mark the EOF with a token.
-    last_token->body.value = NULL;
-    
-    return first_token;
-}
-
 Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* directive_token)
 {
     #define push_token() (Token*)Alloc(tokens_arena, sizeof(Token))
@@ -497,8 +438,6 @@ Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Token* 
     
     return first_token;
 }
-
-
 
 // Suited for tokenizing attributes/bindings
 int aggregate_text(char* start_char, char* max_char, Arena* values_arena, Token* concerned_token, const char* stop_chars)

@@ -105,6 +105,7 @@ enum class AndroidEventType
     MOUSE_MOVE,
     GESTURE,
     KEYBOARD_VISIBILITY,
+    TOUCH,
 };
 
 enum class MouseButton
@@ -137,7 +138,7 @@ struct android_event
         struct
         {
             MouseButton button;
-            KeyState action;   
+            KeyState action;
         } MouseButton;
         struct
         {
@@ -149,6 +150,15 @@ struct android_event
             float x_pos;
             float y_pos;
         } MouseMove;
+        struct
+        {
+            vec2 cursors[5];
+            int cursor_count;
+        } Gesture;
+        struct
+        {
+            KeyState action;
+        } Touch;
     };
 };
 
@@ -274,7 +284,7 @@ Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1soft_1key(JNIEnv 
     uint32_t buffer_len = (uint32_t)strlen(entered_string);
     
     // Note(Leo): The soft keyboard doesnt send individual events, it sends collected whole pieces of text
-    //            we simulate each char as a virtual key press for convieniece.
+    //            we simulate each char as a virtual key press for convienience.
     while(buffer_len)
     {
         uint32_t codepoint = 0;
@@ -357,6 +367,46 @@ Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1mouse_1move(JNIEn
     android_unlock(&platform.events_mutex);
 }
 
+JNIEXPORT void JNICALL
+Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1gesture(JNIEnv *env, jclass clazz, jint pointer_count, jfloat x0, jfloat y0, jfloat x1, jfloat y1, jfloat x2, jfloat y2, jfloat x3, jfloat y3, jfloat x4, jfloat y4)
+{
+    if(!platform.window_ready)
+    {
+        return;
+    }
+
+    while(!android_lock(&platform.events_mutex)){;}
+    
+    android_event* added = (android_event*)Alloc(platform.platform_events[1], sizeof(android_event));
+    added->Gesture.cursors[0] = {(float)x0, (float)y0};
+    added->Gesture.cursors[1] = {(float)x1, (float)y1};
+    added->Gesture.cursors[2] = {(float)x2, (float)y2};
+    added->Gesture.cursors[3] = {(float)x3, (float)y3};
+    added->Gesture.cursors[4] = {(float)x4, (float)y4};
+    added->Gesture.cursor_count = (int)pointer_count;
+    
+    added->type = AndroidEventType::GESTURE;
+    
+    android_unlock(&platform.events_mutex);
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1touch(JNIEnv *env, jclass clazz, jint action)
+{
+    if(!platform.window_ready)
+    {
+        return;
+    }
+
+    while(!android_lock(&platform.events_mutex)){;}
+    
+    android_event* added = (android_event*)Alloc(platform.platform_events[1], sizeof(android_event));
+    added->type = AndroidEventType::TOUCH;
+    added->Touch.action = (KeyState)action;
+    
+    android_unlock(&platform.events_mutex);
+}
+
 }
 
 void android_show_soft_keyboard()
@@ -425,6 +475,12 @@ void android_update_control_state()
     else if(platform.window.controls.mouse_left_state == MouseState::UP_THIS_FRAME)
     {
         platform.window.controls.mouse_left_state =  MouseState::UP;
+        
+        platform.window.controls.cursor_positions[0] = { 0.0f, 0.0f };
+        platform.window.controls.cursor_positions[1] = { 0.0f, 0.0f };
+        platform.window.controls.cursor_positions[2] = { 0.0f, 0.0f };
+        platform.window.controls.cursor_positions[3] = { 0.0f, 0.0f };
+        platform.window.controls.cursor_positions[4] = { 0.0f, 0.0f };
     }
     
     if(platform.window.controls.mouse_middle_state == MouseState::DOWN_THIS_FRAME)
@@ -445,7 +501,12 @@ void android_update_control_state()
         platform.window.controls.mouse_right_state = MouseState::UP;
     }
     
-    platform.window.controls.scroll_dir = { 0.0, 0.0 };
+    platform.window.controls.scroll_dir = { 0.0f, 0.0f };
+    platform.window.controls.cursor_deltas[0] = { 0.0f, 0.0f };
+    platform.window.controls.cursor_deltas[1] = { 0.0f, 0.0f };
+    platform.window.controls.cursor_deltas[2] = { 0.0f, 0.0f };
+    platform.window.controls.cursor_deltas[3] = { 0.0f, 0.0f };
+    platform.window.controls.cursor_deltas[4] = { 0.0f, 0.0f };
 }
 
 void android_search_dir(Arena* results, Arena* result_values, const char* dir_name, const char* file_extension)
@@ -520,6 +581,8 @@ void android_process_window_events()
             }
             case(AndroidEventType::MOUSE_MOVE):
             {
+                platform.window.controls.cursor_source = CursorSource::MOUSE;
+            
                 float current_x = platform.window.controls.cursor_pos.x;
                 float current_y = platform.window.controls.cursor_pos.y;
                 platform.window.controls.cursor_delta = {curr_event->MouseMove.x_pos - current_x, curr_event->MouseMove.y_pos - current_y};
@@ -530,20 +593,93 @@ void android_process_window_events()
             }
             case(AndroidEventType::MOUSE_SCROLL):
             {
+                platform.window.controls.cursor_source = CursorSource::MOUSE;
                 platform.window.controls.scroll_dir = {curr_event->MouseScroll.x_axis, curr_event->MouseScroll.y_axis};
+                
+                break;
+            }
+            case(AndroidEventType::MOUSE_BUTTON):
+            {
+                platform.window.controls.cursor_source = CursorSource::MOUSE;
+            
+                MouseState action;
+                
+                if(curr_event->MouseButton.action == KeyState::UP)
+                {
+                    action = MouseState::UP_THIS_FRAME;
+                }
+                else
+                {
+                    action = MouseState::DOWN_THIS_FRAME;
+                }
+            
+                switch(curr_event->MouseButton.button)
+                {
+                    case(MouseButton::LEFT):
+                    {
+                        platform.window.controls.mouse_left_state = action;
+                        break;
+                    }
+                    case(MouseButton::RIGHT):
+                    {
+                        platform.window.controls.mouse_right_state = action;
+                        break;
+                    }
+                    case(MouseButton::MIDDLE):
+                    {
+                        platform.window.controls.mouse_middle_state = action;
+                        break;
+                    }                    
+                }
                 
                 break;
             }
             case(AndroidEventType::KEYBOARD_VISIBILITY):
             {
-                if(curr_event->KeyboardVisibility.soft_keyboard_shown)
+                Event* added = PushEvent((DOM*)platform.window.window_dom);
+                added->type = EventType::VIRTUAL_KEYBOARD;
+                added->VirtualKeyboard.isShown = curr_event->KeyboardVisibility.soft_keyboard_shown;
+        
+                break;
+            }
+            case(AndroidEventType::TOUCH):
+            {
+                platform.window.controls.cursor_source = CursorSource::TOUCH;
+                
+                MouseState action;
+                
+                if(curr_event->Touch.action == KeyState::UP)
                 {
-                    
+                    action = MouseState::UP_THIS_FRAME;
                 }
                 else
                 {
-                
+                    action = MouseState::DOWN_THIS_FRAME;
                 }
+                
+                platform.window.controls.mouse_left_state = action;
+                
+                break;
+            }
+            case(AndroidEventType::GESTURE):
+            {
+                platform.window.controls.cursor_source = CursorSource::TOUCH;
+            
+                for(int i = 0; i < curr_event->Gesture.cursor_count; i++)
+                {
+                    vec2 old = platform.window.controls.cursor_positions[i];
+                    platform.window.controls.cursor_positions[i] = curr_event->Gesture.cursors[i];
+                    
+                    // Note(Leo): Only give a deltas for actual cursor moves, otherwise we would detect the user placing
+                    //            their finger somewhere as a move which sucks
+                    if((old.x == 0.0f && old.y == 0.0f) || platform.window.controls.mouse_left_state != MouseState::DOWN)
+                    {
+                        continue;
+                    }
+                    platform.window.controls.cursor_deltas[i] = {curr_event->Gesture.cursors[i].x - old.x, curr_event->Gesture.cursors[i].y - old.y};
+                }
+                
+                platform.window.controls.cursor_count = (uint8_t)curr_event->Gesture.cursor_count;
                 
                 break;
             }
@@ -639,7 +775,17 @@ uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepo
     return 0;
 }
 
-
+void PlatformShowVirtualKeyboard(bool should_show)
+{
+    if(should_show)
+    {
+        android_show_soft_keyboard();
+    }
+    else
+    {
+        android_hide_soft_keyboard();
+    }
+}
 
 void* android_main(void* arguments)
 {
@@ -746,6 +892,7 @@ void* android_main(void* arguments)
         
         android_process_window_events();
     
+        
         if(platform.window.flags)
         {
             if(platform.window.flags & RESIZED_WINDOW)

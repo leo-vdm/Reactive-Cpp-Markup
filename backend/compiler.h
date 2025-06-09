@@ -533,8 +533,6 @@ void TokenizeCode(FILE* src, Arena* tokens_arena, Arena* token_values_arena);
 
 Compiler::Token* TokenizeDirective(Arena* tokens_arena, Arena* token_values_arena, Compiler::Token* directive_token);
 
-// For the code inside markup bindings
-Compiler::Token* TokenizeBindingCode(Arena* tokens_arena, Arena* token_values_arena, char* src, int src_length);
 
 // Parser Functions
 Compiler::TagType GetTagFromName(StringView* name);

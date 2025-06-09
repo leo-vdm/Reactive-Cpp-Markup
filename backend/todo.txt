@@ -1,0 +1,15 @@
+Things that need to be done:
+1. Add the absolute/relative display modes. Absolute is in relation to the root, relative is in relation to the parent.
+   Maybe a 'fixed' mode aswell to mimic HTML which is in relation to screen coordinates. Note that fixed can be used
+   to mimic absolute and vice versa with a little math and layoutelement inspection, maybe we only need one? 
+2. ArenaString needs an insert function
+3. Need to add buffer swapping for the renderque arena since we want to be able to reference the sized elements
+   in the next frame. Should also add dom methods for easily searching glyphs at a position to find a clicked glyph
+   (mostly for textbox to be able to function)
+4. Add the pointer passing mechanic/ a method for components to see their attributes and use custom attributes as 
+   arguments.
+5. Add self closing tags.
+6. Finish the InputBox implementation
+7. Change the onFocus callback to a focusChanged callback that gives a bool saying whether the element has become
+   focused or been defocused.
+8. Debug linux weirdness with image tiles showing neighbouring pixels. Potential rounding error?

@@ -379,6 +379,42 @@ void merge_element_type_style(ElementType type, bool is_hovered, int file_id, In
     FreeString(selector);
 }
 
+void update_click_state(Element* target, PlatformControlState* controls)
+{
+    target->flags &= ~is_clicked();
+    
+    if((target->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN_THIS_FRAME)
+    {
+        target->click_state = ClickState::MOUSE_DOWN;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN && target->click_state == ClickState::MOUSE_DOWN)
+    {
+        target->click_state = ClickState::MOUSE_DOWN;
+        return;
+    }
+    else if(controls->mouse_left_state == MouseState::DOWN) // Mouse is down but didnt start down on this element
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    else if(target->click_state == ClickState::NONE)
+    {
+        target->click_state = ClickState::NONE;
+        return;
+    }
+    
+    target->flags = target->flags | is_clicked();
+    // This element must have had mouse down and now gotten mouse up all while being hovered
+    assert(controls->mouse_left_state == MouseState::UP_THIS_FRAME && target->click_state == ClickState::MOUSE_DOWN && target->flags & is_hovered()); 
+    
+}
+
 // Note(Leo): Called for every element every frame!!!!!!
 void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Element* element)
 {
@@ -386,7 +422,8 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
     if(element->last_sizing)
     {
         // Element is hovered
-        if(PointInsideBounds(element->last_sizing->bounds, controls->cursor_pos))
+        if(controls->cursor_pos.x != 0.0f && controls->cursor_pos.y != 0.0f &&
+            PointInsideBounds(element->last_sizing->bounds, controls->cursor_pos))
         {
             element->flags = element->flags | is_hovered(); 
         }
@@ -395,6 +432,8 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
             element->flags &= ~is_hovered(); 
         }
     }
+    
+    update_click_state(element, controls);
     
     merge_element_type_style(element->type, element->flags & is_hovered(), ((ElementMaster*)element->master)->file_id, &element->working_style);
 
@@ -775,7 +814,7 @@ void scroll_element(vec2 scroll_dir, Element* target)
     float scrollable_right = (target->last_sizing->position.x + MAX(target->last_sizing->sizing.width.current, target->last_sizing->sizing.width.desired.size)) - (target->last_sizing->bounds.x + target->last_sizing->bounds.width);
     scrollable_right -= target->scroll.x;
     
-        
+    
     if(scroll_dir.y > 0.0f && scrollable_top > 0.0f)
     {
         target->scroll.y -= MIN(scroll_dir.y, scrollable_top);
@@ -836,42 +875,6 @@ void sanitize_scrollable(Element* target)
     {
         target->scroll.x -= -1.0f * scrollable_right;
     }
-}
-
-void update_click_state(Element* target, PlatformControlState* controls)
-{
-    target->flags &= ~is_clicked();
-    
-    if((target->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
-    {
-        target->click_state = ClickState::NONE;
-        return;
-    }
-    else if(controls->mouse_left_state == MouseState::DOWN_THIS_FRAME)
-    {
-        target->click_state = ClickState::MOUSE_DOWN;
-        return;
-    }
-    else if(controls->mouse_left_state == MouseState::DOWN && target->click_state == ClickState::MOUSE_DOWN)
-    {
-        target->click_state = ClickState::MOUSE_DOWN;
-        return;
-    }
-    else if(controls->mouse_left_state == MouseState::DOWN) // Mouse is down but didnt start down on this element
-    {
-        target->click_state = ClickState::NONE;
-        return;
-    }
-    else if(target->click_state == ClickState::NONE)
-    {
-        target->click_state = ClickState::NONE;
-        return;
-    }
-    
-    target->flags = target->flags | is_clicked();
-    // This element must have had mouse down and now gotten mouse up all while being hovered
-    assert(controls->mouse_left_state == MouseState::UP_THIS_FRAME && target->click_state == ClickState::MOUSE_DOWN && target->flags & is_hovered()); 
-                
 }
 
 void focus_element(DOM* dom, Element* old_focused)
@@ -947,7 +950,6 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         if(curr_element->first_child && curr_element->flags ^ is_hidden())
         {
             curr_element = curr_element->first_child;
-            update_click_state(curr_element, controls);
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -961,7 +963,6 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         if(curr_element->next_sibling)
         {
             curr_element = curr_element->next_sibling;
-            update_click_state(curr_element, controls);
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -980,7 +981,6 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
             if(curr_element->next_sibling)
             {
                 curr_element = curr_element->next_sibling;
-                update_click_state(curr_element, controls);
                 runtime_evaluate_attributes(dom, controls, curr_element);
                 
                 sanitize_scrollable(curr_element);
@@ -995,9 +995,20 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         }
     }
     
-    if(scroll_capturer)
+    if(scroll_capturer && controls->cursor_source == CursorSource::MOUSE)
     {
         scroll_element(controls->scroll_dir, scroll_capturer);
+    }
+    // Note(Leo): Touch scrolls when 1 pointer is down and is moving.
+    // Todo(Leo): This should change when we add dragging since drag and scroll are mutally exclusive.
+    else if(scroll_capturer && controls->cursor_source == CursorSource::TOUCH && controls->cursor_count == 1
+            && (controls->mouse_left_state == MouseState::DOWN || controls->mouse_left_state == MouseState::DOWN_THIS_FRAME))
+    {
+        // Todo(Leo): Should this have some type of deadzone?
+        
+        vec2 scroll_dir = controls->cursor_delta;
+    
+        scroll_element(scroll_dir, scroll_capturer);
     }
     
     if(old_focused != dom->focused_element)
@@ -1005,7 +1016,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         focus_element(dom, old_focused);
     }
 
-    call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);
+    call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);    
     
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
     //            will never underestimate so its ok.

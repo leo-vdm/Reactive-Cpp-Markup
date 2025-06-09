@@ -6,12 +6,11 @@
 
 ArenaString* CreateString(Arena* arena)
 {
-    ArenaString* new_string = (ArenaString*)Alloc(arena, sizeof(StringBlock));
+    ArenaString* new_string = (ArenaString*)Alloc(arena, sizeof(StringBlock), zero());
     
     new_string->parent_arena = arena;
-    new_string->head = (StringBlock*)Alloc(arena, sizeof(StringBlock));
+    new_string->head = (StringBlock*)Alloc(arena, sizeof(StringBlock), zero());
     new_string->head->fill_level = 0;
-    new_string->head->next = NULL;
     new_string->tail = new_string->head;
     new_string->length = 0;
     
@@ -25,7 +24,6 @@ ArenaString* CreateString(Arena* arena)
 
 void FreeString(ArenaString* freed_string)
 {
-
     if(freed_string)
     {   
         if(!freed_string->head)
@@ -53,6 +51,101 @@ void FreeString(ArenaString* freed_string)
 #define is_full(StringBlock_ptr) StringBlock_ptr->fill_level >= STRING_BLOCK_BODY_SIZE
 #define block_size(StrinBlock_ptr) STRING_BLOCK_BODY_SIZE
 
+void Remove(ArenaString* target, int index, int count)
+{
+    assert(target);
+    assert(target->length > index + count);
+    if(target->length < (index + count) || !count)
+    {
+        return;
+    }
+ 
+    StringBlock* starting_block = NULL;
+    StringBlock* ending_block = NULL;
+    
+    int curr_index = 0;
+    StringBlock* curr = target->head;
+    while(curr)
+    {
+        if((curr_index + (int)curr->fill_level) >= index)
+        {
+            starting_block = curr;
+            break;
+        }
+        curr_index += (int)curr->fill_level;
+        
+        curr = curr->next;
+    }
+    
+    assert(starting_block);
+    
+    int end_index = index + count;
+    
+    // Note(Leo): Removed part is contained entirely inside of startblock
+    if((curr_index + starting_block->fill_level) >= end_index)
+    {
+        // Note(Leo): Manual copy since memcpy doesnt like overlapping copies
+        int local_index = index - curr_index;
+        char* dst = &starting_block->content[local_index];
+        char* src = &starting_block->content[local_index + count];
+        int copy_count = starting_block->fill_level - (local_index + count);
+        
+        for(int i = 0; i < copy_count; i++)
+        {
+            dst[i] = src[i];
+        }
+        
+        starting_block->fill_level -= count;
+        target->length -= count;
+        
+        return;
+    }
+    
+    // Note(Leo): Removed part has parts contained in both startingblock and endingblock
+    int starting_block_index = index - curr_index;
+    StringBlock* prev = NULL;
+    while(curr)
+    {
+        if((curr_index + (int)curr->fill_level) >= end_index)
+        {
+            ending_block = curr;
+            break;
+        }
+        curr_index += (int)curr->fill_level;
+        
+        StringBlock* old = curr;
+        
+        // Note(Leo): This block is entirely removed so de-allocate it 
+        if(old != starting_block)
+        {
+            assert(prev); // This shouldve been initialized by here
+            prev->next = curr->next;
+            DeAlloc(target->parent_arena, old);
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+    assert(ending_block);
+    
+    // Remove content at end of startingblock
+    starting_block->fill_level -= starting_block->fill_level - starting_block_index;
+    
+    // Note(Leo): Manual copy since memcpy doesnt like overlapping copies
+    int ending_block_index = end_index - curr_index;
+    char* dst = &ending_block->content[0];
+    char* src = &ending_block->content[ending_block_index];
+    int copy_count = ending_block->fill_level - ending_block_index;
+    
+    for(int i = 0; i < copy_count; i++)
+    {
+        dst[i] = src[i];
+    }
+    
+    ending_block->fill_level -= ending_block_index;
+    
+    target->length -= count;
+}
+
 void Append(ArenaString* target, const char* c_string)
 {
     char* curr_char = (char*)c_string;
@@ -63,10 +156,8 @@ void Append(ArenaString* target, const char* c_string)
     {
         if(is_full(working_block))
         {   
-            working_block->next = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock));
+            working_block->next = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock), zero());
             working_block = working_block->next;
-            working_block->next = NULL; // TODO(Leo): This is stupid, Arena should zero allocated memory by default and have optional flags
-            working_block->fill_level = 0;
             target->tail = working_block;
             
         }
@@ -85,10 +176,8 @@ void Append(ArenaString* target, const char* source_buffer, int length)
     {
         if(is_full(working_block))
         {
-            working_block->next = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock));
+            working_block->next = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock), zero());
             working_block = working_block->next;
-            working_block->next = NULL; // TODO(Leo): This is stupid, Arena should zero allocated memory by default and have optional flags
-            working_block->fill_level = 0;
             target->tail = working_block;
         }
         working_block->content[working_block->fill_level] = *(source_buffer + i);

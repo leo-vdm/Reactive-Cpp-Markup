@@ -1,7 +1,8 @@
 #include <cstddef>
 #include <cstdint>
 #pragma once
-struct FreeBlock {
+struct FreeBlock
+{
     FreeBlock* next_free;
 };
 
@@ -19,7 +20,8 @@ struct Arena
 #endif 
         
     // alloc_size must be larger than the size of freeblock! (>=8 bytes)    
-    Arena(void* position, int size, int alloc_size, uint64_t flags){
+    Arena(void* position, int size, int alloc_size, uint64_t flags)
+    {
         this->mapped_address = (uintptr_t)position;
         this->next_address = (uintptr_t)position;
         this->size = size;

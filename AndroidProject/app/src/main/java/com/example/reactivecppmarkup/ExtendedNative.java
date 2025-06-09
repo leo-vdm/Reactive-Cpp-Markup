@@ -47,7 +47,6 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
         }
     }
 
-
     public static native void android_bootstrap(ExtendedNative activity, AssetManager manager);
     public static native void android_set_surface(Surface surface);
     public static native void android_window_changed(int width, int height);
@@ -62,6 +61,9 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
     public static native void android_on_mouse_button(int button, int action);
     public static native void android_on_mouse_scroll(float x_axis, float y_axis);
     public static native void android_on_mouse_move(float x, float y);
+
+    public static native void android_on_gesture(int pointer_count, float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4);
+    public static native void android_on_touch(int action);
 
 
     static
@@ -101,7 +103,6 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
 
         if(isSoftKeyboardShown)
         {
-            //Log.d("Vulkan Tutorials", "Thing!");
             return super.dispatchKeyEvent(event);
         }
 
@@ -109,16 +110,39 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
         return true;
     }
 
+    public void touch_cursor_positions(MotionEvent motion)
+    {
+        int pointer_count = motion.getPointerCount();
+
+        // Note(Leo): We only support 5 touch points here since thats what the platform layer also supports
+        float[] x_positions = new float[5];
+        float[] y_positions = new float[5];
+
+        if(pointer_count > 5)
+        {
+            pointer_count = 5;
+        }
+
+        for(int i = 0; i < pointer_count; i++)
+        {
+            x_positions[i] = motion.getX(i);
+            y_positions[i] = motion.getY(i);
+        }
+
+        android_on_gesture(pointer_count, x_positions[0], y_positions[0], x_positions[1], y_positions[1], x_positions[2], y_positions[2], x_positions[3], y_positions[3], x_positions[4], y_positions[4]);
+    }
+
     @Override
     public boolean dispatchTouchEvent(MotionEvent motion)
     {
-        Log.d("Vulkan tutorials", "Touch event");
 
         switch(motion.getAction())
         {
             case(MotionEvent.ACTION_DOWN):
             {
+                touch_cursor_positions(motion);
 
+                android_on_touch(1);
                 break;
             }
             case(MotionEvent.ACTION_POINTER_DOWN):
@@ -128,16 +152,14 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
             }
             case(MotionEvent.ACTION_MOVE):
             {
-                int pointer_count = motion.getPointerCount();
-                for(int i = 0; i < pointer_count; i++)
-                {
-                    Log.d("Vulkan Tutorials", String.format("Pointer: %d Pos (x: %f, y: %f)", i, motion.getX(i), motion.getY(i)));
-                }
+                touch_cursor_positions(motion);
                 break;
             }
             case(MotionEvent.ACTION_UP):
             {
+                touch_cursor_positions(motion);
 
+                android_on_touch(0);
                 break;
             }
             case(MotionEvent.ACTION_POINTER_UP):

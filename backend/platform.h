@@ -37,6 +37,12 @@ enum class KeyState
     DOWN,
 };
 
+enum class CursorSource
+{
+    MOUSE,
+    TOUCH
+};
+
 #define VIRTUAL_KEY_COUNT 255
 struct VirtualKeyboard
 {
@@ -48,6 +54,7 @@ struct PlatformControlState
     MouseState mouse_left_state;
     MouseState mouse_middle_state;
     MouseState mouse_right_state;
+    CursorSource cursor_source;
     vec2 scroll_dir;
     // Note(Leo): On touch screen we want multiple cursors, one for each touch point/finger but for mice we only have 1
     union
@@ -102,6 +109,8 @@ struct shared_window
 };
 
 KeyState GetKeyState(uint8_t key_code);
+
+void PlatformShowVirtualKeyboard(bool should_show);
 
 extern float SCROLL_MULTIPLIER;
 
@@ -175,10 +184,14 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display);
 //#include <android_native_app_glue.h>
 #include <android/native_window_jni.h>
 #include <android/asset_manager_jni.h>
+#include <android/log.h>
 #include "key_codes.h"
 
 #define VkLibrary void*
 #define PlatformGetProcAddress(module, name) dlsym( module, name)
+
+#undef printf()
+#define printf(...) __android_log_print(ANDROID_LOG_INFO, "RCM", __VA_ARGS__);
 
 struct PlatformWindow : shared_window
 {

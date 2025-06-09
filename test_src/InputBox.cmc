@@ -1,0 +1,91 @@
+<code>
+#include "platform.h"
+
+struct InputBox : Component
+{
+    ArenaString* content;
+    bool is_focused;
+    bool show_watermark;
+    int cursor_pos;
+
+    void CompMain(DOM* dom)
+    {
+        content = CreateString(dom->strings);
+    }
+    
+    void OnEvent(DOM* dom, Event* event)
+    {
+        switch(event->type)
+        {
+            // Note(Leo): We only get key events if we are focused
+            case(EventType::KEY_DOWN):
+            {
+                user_input(event);
+            
+                break;
+            }
+            // Note(Leo): We only have 1 focusable element here so we dont bother checking an ID
+            case(EventType::FOCUSED):
+            {
+                is_focused = true;
+                break;
+            }
+            case(EventType::DE_FOCUSED):
+            {
+                is_focused = false;
+                break;
+            }
+            default:
+            {
+                break;
+            }
+        }
+    }
+    
+    
+    void user_input(Event* in)
+    {
+        if(in->Key.code == K_BACKSPACE)
+        {
+            
+            return;
+        }
+        
+        if(!in->Key.key_char)
+        {
+            return;
+        }
+        
+        // Todo(Leo): Properly convert the UTF-32 codepoint to UTF-8 instead of just grabbing the first byte
+        char added_char = (char)in->Key.key_char;
+        Append(content, &added_char, 1);
+    }
+};
+</code>
+<root>
+<vdiv focusable>
+	<hdiv condition="{return e->content->length > 0 && e->is_focused}">
+		{content}
+	</hdiv>
+	<hdiv condition="{return e->content->length == 0 && e->is_focused}">
+        Enter some text...
+	</hdiv>
+	<hdiv condition="{return !e->is_focused}">
+        Click to focus!
+	</hdiv>
+</vdiv>
+
+</root>
+
+<style>
+root, vdiv, hdiv {
+	margin: grow, grow;
+	width: fit;
+	height: fit;
+}
+
+hdiv!hover {
+	color: 12, 12, 12;
+}
+
+</style>

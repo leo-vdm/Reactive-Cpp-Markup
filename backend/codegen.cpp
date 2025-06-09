@@ -169,7 +169,7 @@ void RegisterDirectives(CompileTarget* target, Arena* tokens, Arena* token_value
         }
         eat();
     }
-    // Add zerod expr as stopping point
+    // Add zero-ed expr as stopping point
     Alloc(target->bound_expressions, sizeof(BindingExpression), zero());
     
     // Add the method the dom calls when instancing this component/page

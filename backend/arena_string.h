@@ -48,3 +48,5 @@ void Append(ArenaString* target, const char* source_buffer, int length);
 // The source ArenaString block is automatically de-allocated so that source is fully consumed.
 void Append(ArenaString* target, ArenaString* source, int flags = 0);
 
+// Remove count chars starting at index
+void Remove(ArenaString* target, int index, int count = 0);

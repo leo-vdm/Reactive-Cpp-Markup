@@ -1,5 +1,6 @@
 <code>
 #usecomp "test_component.cmc"
+#usecomp "InputBox.cmc"
 
 #include "platform.h"
 
@@ -8,9 +9,8 @@ struct test_struct
     int test_number;
 };
 
-class MainPage : Page
+struct MainPage : Page
 {    
-public:
     int mycolor;
     int count;
     void* my_element;
@@ -24,9 +24,8 @@ public:
     {
         printf("Hello from page main!\n");
         count = 0;
-
-        printf("Count is %d\n", count);
-        should_show = false;
+        
+        should_show = true;
         my_element = NULL;
         things_len = 3;
         things = (test_struct*)malloc(things_len*sizeof(test_struct));
@@ -37,9 +36,19 @@ public:
     
     void OnFrame(DOM* dom)
     {
+        Element* focused = GetFocused(dom);
+        
         Event* curr_event = PopEvent(dom);
         while(curr_event)
         {
+            if(focused && focused->master != this)
+            {
+                RouteEvent(focused->master, curr_event);
+                curr_event = PopEvent(dom);
+                continue;
+                printf("Routing event!");
+            }
+        
             switch(curr_event->type)
             {
                 case(EventType::FOCUSED):
@@ -59,7 +68,7 @@ public:
                 }
                 case(EventType::KEY_DOWN):
                 {
-                    Element* focused = GetFocused(dom);
+                    //Element* focused = GetFocused(dom);
                     if(focused && focused->global_id == EID(mine, MainPage))
                     {
                         handleUserInput(curr_event);
@@ -97,13 +106,15 @@ public:
     void countChanged()
     { 
         should_show = !should_show;
-        count += 1;
+        count++;
+        
     	printf("Count is now %d\n", count);
     	if(my_element)
     	{
     	   Element* image_element = (Element*)my_element;
     	   image_element->Image.handle = RenderplatformGetImage("thumbs_up.jpg");
     	}
+    	
     	things[1].test_number = count % 2;
     }
     
@@ -116,11 +127,12 @@ public:
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title" onfocus="{e->onFocusTitle()}" id="mine">Incredible Gallery {userInput}</hdiv>
+	<hdiv class="title" onfocus="{e->onFocusTitle()}" id="mine">Image Gallery {userInput}</hdiv>
 	<hdiv class="img_container" condition="{return e->should_show;}">
 		<img this="{my_element}" src="texture.png" focusable></img>
 		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>
 	</hdiv>
+	<InputBox></InputBox>
 	<each loop="{things;return e->things_len;test_struct}">
         <hdiv condition="{{return a[index].test_number == 0;}}">
 	       This is a loooooped text! {{test_number}}
@@ -145,6 +157,14 @@ footer {
 	width: fit;
 	margin: grow, grow, grow;
 	color: 120, 120, 120;
+	corners: 20px, 20px, 20px, 20px;
+}
+
+footer!hover {
+	priority: 2;
+	margin: grow, grow, grow;
+	color: 160, 160, 160;
+	corners: 20px, 20px, 20px, 20px;
 }
 
 title {

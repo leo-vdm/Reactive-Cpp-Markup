@@ -4,9 +4,6 @@
 #include "file_system.h"
 #include "arena.h"
 #include "arena_string.h"
-
-
-
 #pragma once
 
 // flag for page_switch to save dom state
@@ -100,6 +97,7 @@ enum class EventType
     KEY_UP,
     FOCUSED,
     DE_FOCUSED,
+    VIRTUAL_KEYBOARD, // Mostly used for mobile
 };
 
 struct Event
@@ -120,6 +118,10 @@ struct Event
         {
             Element* target;
         } DeFocused;
+        struct
+        {
+            bool isShown;
+        } VirtualKeyboard;
     };
 };
 
