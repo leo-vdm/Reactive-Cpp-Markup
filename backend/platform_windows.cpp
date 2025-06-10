@@ -194,7 +194,7 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             float x = GET_X_LPARAM(l_param);
             float y = GET_Y_LPARAM(l_param);
 
-            curr_processed_window->controls.cursor_delta = {x - curr_processed_window->controls.cursor_pos.x, y - curr_processed_window->controls.cursor_pos.y}    
+            curr_processed_window->controls.cursor_delta = {x - curr_processed_window->controls.cursor_pos.x, y - curr_processed_window->controls.cursor_pos.y};
             curr_processed_window->controls.cursor_pos = {x, y};
 
             break;

@@ -135,6 +135,7 @@ enum class RegisteredBindingType
     BOOL_RET,
     PTR_RET,
     INT_RET,
+    VOID_BOOL_RET,
 };
 
 enum class BindingContext

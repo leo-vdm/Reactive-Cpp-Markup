@@ -41,33 +41,43 @@ struct MainPage : Page
         Event* curr_event = PopEvent(dom);
         while(curr_event)
         {
-            if(focused && focused->master != this)
-            {
-                RouteEvent(focused->master, curr_event);
-                curr_event = PopEvent(dom);
-                continue;
-                printf("Routing event!");
-            }
-        
             switch(curr_event->type)
             {
                 case(EventType::FOCUSED):
                 {
+                    if(curr_event->Focused.target->master != this)
+                    {
+                        RouteEvent(curr_event->Focused.target->master, curr_event);
+                        break;
+                    }
+                    
                     if(curr_event->Focused.target->global_id == EID(mine, MainPage))
                     {
                         printf("Got specialized focus!\n");
-                    
                     }
+                    
                     printf("Got focus!\n");
                     break;
                 }
                 case(EventType::DE_FOCUSED):
                 {
+                    if(curr_event->DeFocused.target->master != this)
+                    {
+                        RouteEvent(curr_event->DeFocused.target->master, curr_event);
+                        break;
+                    }
+                
                     printf("Lost focus!\n");
                     break;
                 }
                 case(EventType::KEY_DOWN):
                 {
+                    if(focused && focused->master != this)
+                    {
+                        RouteEvent(focused->master, curr_event);
+                        break;
+                    }
+                   
                     //Element* focused = GetFocused(dom);
                     if(focused && focused->global_id == EID(mine, MainPage))
                     {
@@ -78,6 +88,11 @@ struct MainPage : Page
                 }
                 default:
                 {
+                    if(focused && focused->master != this)
+                    {
+                        RouteEvent(focused->master, curr_event);
+                        break;
+                    }   
                     break;
                 }
             }
@@ -118,16 +133,23 @@ struct MainPage : Page
     	things[1].test_number = count % 2;
     }
     
-    void onFocusTitle()
+    void onFocusTitle(bool isFocused)
     {
-        printf("Focused the new thing!\n");
+        if(isFocused)
+        {
+            printf("Focused the new thing!\n");
+        }
+        else
+        {
+            printf("Defocused the new thing!\n");
+        }
     }
 };
 
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title" onfocus="{e->onFocusTitle()}" id="mine">Image Gallery {userInput}</hdiv>
+	<hdiv class="title" onfocus="{e->onFocusTitle(arg0)}" id="mine">Image Gallery {userInput}</hdiv>
 	<hdiv class="img_container" condition="{return e->should_show;}">
 		<img this="{my_element}" src="texture.png" focusable></img>
 		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>

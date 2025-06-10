@@ -507,6 +507,7 @@ struct Page : ElementMaster
 
 // Types of bound functions
 typedef void (*SubscribedStubVoid)(void*); 
+typedef void (*SubscribedStubVoidBool)(void*, bool); 
 typedef ArenaString* (*SubscribedStubString)(void*, Arena*);
 typedef bool (*SubscribedStubBool)(void*); 
 typedef void (*SubscribedStubPointer)(void*, void*); // For feeding pointers to the user
@@ -515,6 +516,7 @@ typedef int (*SubscribedStubInt)(void*);
 
 typedef ArenaString* (*ArrSubscribedStubString)(void*, Arena*, int);
 typedef void (*ArrSubscribedStubVoid)(void*, void*, int);
+typedef void (*ArrSubscribedStubVoidBool)(void*, void*, int, bool);
 typedef bool (*ArrSubscribedStubBool)(void*, void*, int);
 typedef void (*ArrSubscribedStubPointer)(void*, int, void*); // For feeding pointers to the user
 typedef void* (*ArrSubscribedStubGetPointer)(void*, int); // For getting pointers from the user
@@ -529,6 +531,7 @@ enum class BoundExpressionType
     BOOL_RET,
     PTR_RET,
     INT_RET,
+    VOID_BOOL_RET,
 };
 
 struct BoundExpression 
@@ -541,6 +544,7 @@ struct BoundExpression
     {
         // Globals //
         SubscribedStubVoid stub_void;
+        SubscribedStubVoidBool stub_void_bool;
         SubscribedStubString stub_string;
         SubscribedStubPointer stub_ptr;
         SubscribedStubBool stub_bool;
@@ -549,6 +553,7 @@ struct BoundExpression
         
         // Locals //
         ArrSubscribedStubVoid arr_stub_void;
+        ArrSubscribedStubVoidBool arr_stub_void_bool;
         ArrSubscribedStubString arr_stub_string;
         ArrSubscribedStubPointer arr_stub_ptr;
         ArrSubscribedStubBool arr_stub_bool;
@@ -559,6 +564,7 @@ struct BoundExpression
 };
 
 BoundExpression* register_bound_expr(SubscribedStubVoid fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubVoidBool fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubString fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubBool fn, int id);
@@ -566,6 +572,7 @@ BoundExpression* register_bound_expr(SubscribedStubGetPointer fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubInt fn, int id);
 
 BoundExpression* register_bound_expr(ArrSubscribedStubVoid fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubVoidBool fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubString fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubPointer fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubBool fn, int id);

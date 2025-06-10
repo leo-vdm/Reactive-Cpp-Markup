@@ -112,6 +112,9 @@ KeyState GetKeyState(uint8_t key_code);
 
 void PlatformShowVirtualKeyboard(bool should_show);
 
+// Returns the number of bytes that were consumed
+uint32_t PlatformConsumeUTF8ToUTF32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length);
+
 extern float SCROLL_MULTIPLIER;
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
@@ -174,6 +177,7 @@ struct PlatformWindow : shared_window
     PlatformWindow* next_window;
     Window window_handle;
     GC window_gc;
+    XIC window_input_context;
 };
 
 void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display);

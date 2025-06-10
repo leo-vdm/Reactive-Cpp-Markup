@@ -1,8 +1,8 @@
+#if PLATFORM_ANDROID
 #include <jni.h>
 #include <string>
 #define KEYCODE_TRANSLATION_IMPL 1
 #include "platform.h"
-#if PLATFORM_ANDROID
 #include <android/log.h>
 //#include <android_native_app_glue.h>
 #include <pthread.h>
@@ -164,7 +164,7 @@ struct android_event
 
 void* android_main(void* args);
 void initialize_window();
-uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length); // Returns the number of bytes consumed
+//uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length); // Returns the number of bytes consumed
 
 extern "C"
 {
@@ -288,7 +288,7 @@ Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1soft_1key(JNIEnv 
     while(buffer_len)
     {
         uint32_t codepoint = 0;
-        uint32_t consumed = android_consume_utf8_to_utf32(curr_char, &codepoint, buffer_len);
+        uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
         
         // Hit some type of invalid codepoint
         if(!consumed)
@@ -727,7 +727,7 @@ FileSearchResult* android_find_image_resources(Arena* search_results_arena, Aren
     
     return first;
 }
-
+/*
 // Returns the number of bytes that were consumed
 uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length)
 {
@@ -774,7 +774,7 @@ uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepo
     
     return 0;
 }
-
+*/
 void PlatformShowVirtualKeyboard(bool should_show)
 {
     if(should_show)

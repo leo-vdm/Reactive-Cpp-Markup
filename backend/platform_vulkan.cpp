@@ -10,7 +10,7 @@
 
 #define VK_NO_PROTOTYPES 1
 #define STB_IMAGE_IMPLEMENTATION 1
-#include "stb_image.h"
+#include "third_party/stbi/stb_image.h"
 
 #include <chrono>
 

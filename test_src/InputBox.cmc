@@ -27,12 +27,28 @@ struct InputBox : Component
             // Note(Leo): We only have 1 focusable element here so we dont bother checking an ID
             case(EventType::FOCUSED):
             {
+                #if PLATFORM_ANDROID
+                    PlatformShowVirtualKeyboard(true);
+                #endif
+                            
                 is_focused = true;
                 break;
             }
             case(EventType::DE_FOCUSED):
             {
+                #if PLATFORM_ANDROID
+                    // Todo(Leo): Do we need to do this?
+                    PlatformShowVirtualKeyboard(false);
+                #endif
                 is_focused = false;
+                break;
+            }
+            case(EventType::VIRTUAL_KEYBOARD):
+            {
+                #if PLATFORM_ANDROID
+                    is_focused = false;
+                #endif
+                
                 break;
             }
             default:
@@ -44,11 +60,37 @@ struct InputBox : Component
     
     
     void user_input(Event* in)
-    {
-        if(in->Key.code == K_BACKSPACE)
+    {   
+        switch(in->Key.code)
         {
-            
-            return;
+            case(K_BACKSPACE):
+            {
+                if(!content->length)
+                {
+                    return;
+                }
+                Remove(content, content->length - 1, 1);
+                return;
+            }
+            case(K_SHIFT):
+            case(K_SHIFT_R):
+            case(K_SHIFT_L):
+            case(K_WIN_L):
+            case(K_WIN_R):
+            case(K_ALT_L):
+            case(K_ALT_R):
+            case(K_ESCAPE):
+            case(K_ENTER):
+            case(K_CAPS):
+            case(K_TAB):
+            {
+                
+                return;
+            }
+            default:
+            {
+                break;
+            }
         }
         
         if(!in->Key.key_char)

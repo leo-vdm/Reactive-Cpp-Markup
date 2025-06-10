@@ -883,9 +883,30 @@ void focus_element(DOM* dom, Element* old_focused)
     
     if(old_focused)
     {
-        Event* de_focus_event = PushEvent(dom);
-        de_focus_event->type = EventType::DE_FOCUSED;
-        de_focus_event->DeFocused.target = old_focused;
+        Attribute* focussed_binding = GetAttribute(old_focused, AttributeType::ON_FOCUS);
+        if(focussed_binding)
+        {
+            assert(focussed_binding->OnFocus.binding_id);
+            
+            BoundExpression* binding = GetBoundExpression(focussed_binding->OnClick.binding_id);
+            assert(binding->type == BoundExpressionType::VOID_BOOL_RET);
+            assert(old_focused->master);
+            
+            if(binding->context == BindingContext::GLOBAL)
+            {
+                binding->stub_void_bool((void*)old_focused->master, false);
+            }
+            else
+            {
+                binding->arr_stub_void_bool((void*)old_focused->context_master, (void*)old_focused->master, old_focused->context_index, false);
+            }
+        }
+        if(old_focused->flags & is_focusable()) // Element has the focusable property
+        {
+            Event* de_focus_event = PushEvent(dom);
+            de_focus_event->type = EventType::DE_FOCUSED;
+            de_focus_event->DeFocused.target = old_focused;
+        }
     }
     
     if(dom->focused_element)
@@ -896,23 +917,23 @@ void focus_element(DOM* dom, Element* old_focused)
             assert(focussed_binding->OnFocus.binding_id);
             
             BoundExpression* binding = GetBoundExpression(focussed_binding->OnClick.binding_id);
-            assert(binding->type == BoundExpressionType::VOID_RET);
+            assert(binding->type == BoundExpressionType::VOID_BOOL_RET);
             assert(new_focused->master);
             
             if(binding->context == BindingContext::GLOBAL)
             {
-                binding->stub_void((void*)new_focused->master);
+                binding->stub_void_bool((void*)new_focused->master, true);
             }
             else
             {
-                binding->arr_stub_void((void*)new_focused->context_master, (void*)new_focused->master, new_focused->context_index);
+                binding->arr_stub_void_bool((void*)new_focused->context_master, (void*)new_focused->master, new_focused->context_index, true);
             }
         }
         if(new_focused->flags & is_focusable()) // Element has the focusable property
         {
-          Event* focus_event = PushEvent(dom);
-          focus_event->type = EventType::FOCUSED;
-          focus_event->Focused.target = new_focused;    
+            Event* focus_event = PushEvent(dom);
+            focus_event->type = EventType::FOCUSED;
+            focus_event->Focused.target = new_focused;    
         }
     }
 }
@@ -1022,4 +1043,51 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     //            will never underestimate so its ok.
     int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
     return ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
+}
+
+// Returns the number of bytes that were consumed
+uint32_t PlatformConsumeUTF8ToUTF32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length)
+{
+    if(buffer_length < 1)
+    {
+        return 0;
+    }
+    
+    if((utf8_buffer[0] & 0b10000000) == 0) 
+    {
+        *codepoint = (utf8_buffer[0] & 0b01111111);
+        return 1;
+    }
+    else if((utf8_buffer[0] & 0b11100000) == 0b11000000)
+    {
+        if(buffer_length < 2)
+        {
+            return 0;
+        }
+        
+        *codepoint = (utf8_buffer[0] & 0b00011111) << 6 | (utf8_buffer[1] & 0b00111111);
+        return 2;
+    }
+    else if((utf8_buffer[0] & 0b11110000) == 0b11100000)
+    {
+        if(buffer_length < 3)
+        {
+            return 0;
+        }
+        
+        *codepoint = (utf8_buffer[0] & 0b00001111) << 12 | (utf8_buffer[1] & 0b00111111) << 6 | (utf8_buffer[2] & 0b00111111);
+        return 3;
+    }
+    else
+    {
+        if(buffer_length < 4)
+        {
+            return 0;
+        }
+        
+        *codepoint = (utf8_buffer[0] & 0b00000111) << 18 | (utf8_buffer[1] & 0b00111111) << 12 | (utf8_buffer[2] & 0b00111111) << 6 | (utf8_buffer[3] & 0b00111111);
+        return 4;
+    }
+    
+    return 0;
 }

@@ -719,7 +719,7 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
             }
             case(AttributeType::ON_FOCUS):
             {
-                new_attribute->Condition.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, RegisteredBindingType::VOID_RET, is_local, state, parent_tag->context_name);
+                new_attribute->Condition.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, RegisteredBindingType::VOID_BOOL_RET, is_local, state, parent_tag->context_name);
                 break;
             }
             case(AttributeType::ID):

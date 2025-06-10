@@ -3,8 +3,8 @@
 #include FT_FREETYPE_H
 #include <limits.h>
 
-#include "harfbuzz/harfbuzz-10.1.0/src/hb.h"
-#include "harfbuzz/harfbuzz-10.1.0/src/hb-ft.h"
+#include "third_party/harfbuzz/harfbuzz-11.2.1/src/hb.h"
+#include "third_party/harfbuzz/harfbuzz-11.2.1/src/hb-ft.h"
 
 #define DEFAULT_FACE_SIZE_PIXELS 150
 #define CACHE_SIZE_GLYPHS 2000

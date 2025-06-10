@@ -57,6 +57,7 @@ void reset_bound_vars();
 // Args: stub name, comp/page class name, var/fn name
 #define BINDING_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* d_void, Arena* strings)\n{\nreturn make_string(((%s*)d_void)->%s, strings);\n}\n"
 #define BINDING_VOID_STUB_TEMPLATE "\nvoid %s(void* d_void)\n{\nauto e = (%s*)d_void;\n%s;\n}\n"
+#define BINDING_VOID_BOOL_STUB_TEMPLATE "\nvoid %s(void* d_void, bool arg0)\n{\nauto e = (%s*)d_void;\n%s;\n}\n"
 #define BINDING_BOOL_STUB_TEMPLATE "\nbool %s(void* d_void)\n{\nauto e = (%s*)d_void;\n%s;\n}\n"
 #define BINDING_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* d_void, void* ptr_void)\n{\n((%s*)d_void)->%s = ptr_void;\n}\n"
 #define BINDING_PTR_STUB_TEMPLATE "\nvoid* %s(void* d_void)\n{\nreturn (void*)((%s*)d_void)->%s;\n}\n"
@@ -65,6 +66,7 @@ void reset_bound_vars();
 // Args: stub name, array type name, var/fn name
 #define BINDING_ARR_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* a_void, Arena* strings, int index)\n{\nreturn make_string(((%.*s*)a_void + index)->%s, strings);\n}\n"
 #define BINDING_ARR_VOID_STUB_TEMPLATE "\nvoid %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s*)d_void; %s;\n}\n"
+#define BINDING_ARR_VOID_BOOL_STUB_TEMPLATE "\nvoid %s(void* a_void, void* d_void, int index, bool arg0)\n{\nauto a = (%.*s*)a_void; auto e = (%s*)d_void; %s;\n}\n"
 #define BINDING_ARR_BOOL_STUB_TEMPLATE "\nbool %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void; auto e = (%s*)d_void; %s;\n}\n"
 #define BINDING_ARR_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* a_void, int index, void* ptr_void)\n{\n((%.*s*)a_void + index)->%s = ptr_void;\n}\n"
 #define BINDING_ARR_PTR_STUB_TEMPLATE "\nvoid* %s(void* a_void, int index)\n{\nreturn (void*)((%.*s*)a_void + index)->%s;\n}\n"
@@ -246,6 +248,9 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
             case(RegisteredBindingType::INT_RET):
                 fprintf(target->code, BINDING_INT_STUB_TEMPLATE, curr_expr->eval_fn_name, target->file_name, terminated_binding_name);
                 break;
+            case(RegisteredBindingType::VOID_BOOL_RET):
+                fprintf(target->code, BINDING_VOID_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name);
+                break;
             }
         }
         else if(curr_binding->context == BindingContext::LOCAL)
@@ -270,9 +275,11 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
             case(RegisteredBindingType::INT_RET):
                 fprintf(target->code, BINDING_ARR_INT_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
                 break;
+            case(RegisteredBindingType::VOID_BOOL_RET):
+                fprintf(target->code, BINDING_ARR_VOID_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
+                break;
             }
         }
-        
         
         curr_binding++;
         curr_expr++;

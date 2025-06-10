@@ -54,8 +54,9 @@ void FreeString(ArenaString* freed_string)
 void Remove(ArenaString* target, int index, int count)
 {
     assert(target);
-    assert(target->length > index + count);
-    if(target->length < (index + count) || !count)
+    assert(target->length >= index + count);
+    assert(index >= 0 && count > 0);
+    if(target->length < (index + count) || !count || count <= 0 || index < 0)
     {
         return;
     }

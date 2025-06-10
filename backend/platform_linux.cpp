@@ -13,6 +13,7 @@
 Display* x_display = {};
 Visual* x_visual = {};
 XDefaultValues x_defaults = {};
+XIM x_input_method = {};
 Atom x_wm_delete_message = {};
 
 float SCROLL_MULTIPLIER; 
@@ -47,6 +48,14 @@ PlatformWindow* linux_create_window(Arena* windows_arena)
     
     Window x_created_window = {};
     x_created_window = XCreateWindow(x_display, x_defaults.default_root_window, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, 0, InputOutput, x_visual, 0, 0);
+    XMapRaised(x_display, x_created_window);
+    XSync(x_display, false);
+    
+    assert(x_input_method);
+    
+    XIC xic = XCreateIC(x_input_method, XNInputStyle, XIMPreeditNothing | XIMStatusNothing, XNClientWindow, x_created_window, XNFocusWindow, x_created_window, NULL);
+    // Note(Leo): Asking window manager to give keyboard focus to this new window
+    XSetICFocus(xic);
     
     XSelectInput(x_display, x_created_window, ExposureMask | KeyPressMask | KeyReleaseMask | PointerMotionMask | ButtonPressMask | ButtonReleaseMask  | StructureNotifyMask);
     
@@ -62,6 +71,7 @@ PlatformWindow* linux_create_window(Arena* windows_arena)
     created_window->width = WINDOW_WIDTH;
     created_window->height = WINDOW_HEIGHT;
     created_window->controls.keyboard_state = &platform.keyboard_state;
+    created_window->window_input_context = xic;
     
     linux_vk_create_window_surface(created_window, x_display);
     
@@ -118,7 +128,14 @@ void linux_process_window_events(PlatformWindow* target_window)
     int return_value = 0;
     while(XPending(x_display))
     {
-        XNextEvent(x_display, & x_event);
+        XNextEvent(x_display, &x_event);
+        
+        // Note(Leo): IME's may want some keystrokes to not be sent which is what this filters for
+        if(XFilterEvent(&x_event, None) == true)
+        {
+            continue;
+        }
+        
         switch(x_event.type)
         {
             case(DestroyNotify):
@@ -151,32 +168,108 @@ void linux_process_window_events(PlatformWindow* target_window)
             */
             case(KeyPress):
             {
-                int key_code = x_event.xkey.keycode;
-                VirtualKeyCode translated_keycode = KEYCODE_TRANSLATIONS[key_code];
-                
-                KeySym x_key = XLookupKeysym(&(x_event.xkey), 0);
-                char* key_char = XKeysymToString(x_key);
-                int char_len = strlen(key_char);
-                
-                // Can only fit chars that fit into uint32                 
-                if(char_len > 4)
+                // Note(Leo):remove the control modifier since it makes stuff return control codes
+                x_event.xkey.state &= ~ControlMask;
+            
+                // Note(Leo): 100 is an arbitrary size
+                #define TEXT_BUFF_SIZE 100
+                char* key_text = (char*)AllocScratch(sizeof(char)*TEXT_BUFF_SIZE);
+                Status status;
+                KeySym keysym = NoSymbol;
+                int text_len = Xutf8LookupString(target_window->window_input_context, &x_event.xkey, key_text, TEXT_BUFF_SIZE - 1, &keysym, &status);
+                if(text_len < 0)
                 {
-                    return;
+                    text_len = 0;
                 }
+                
+                int key_code = x_event.xkey.keycode;
+                VirtualKeyCode translated_keycode = 0; 
+                if(key_code < sizeof(KEYCODE_TRANSLATIONS))
+                {
+                    translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+                }
+                
+                // We didnt find a translation
+                if(!translated_keycode)
+                {
+                    translated_keycode = K_UNMAPPED;
+                }
+            
+                uint32_t buffer_len = (uint32_t)text_len;
+                char* curr_char = key_text;
+                
+                // Note(Leo): If a key only has 1 utf8 char in it then we send the char with they keystroke event.
+                //            However for keys that are multi char we assume they are IME events and so we sepereate the
+                //            text and key event. We send the keystroke event first with no codepoint then all the chars
+                //            as individual K_VIRTUAL keystrokes with a utf8 char in each.
+                //            This is mostly for consistency with the android layer which does something similiar.
+                
                 Event* added = PushEvent((DOM*)target_window->window_dom);
                 added->type = EventType::KEY_DOWN;
                 added->Key.code = translated_keycode;
                 
-                memcpy(&added->Key.key_char, key_char, char_len*sizeof(char));
+                if(buffer_len)
+                {
+                    uint32_t codepoint = 0;
+                    uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
+                
+                    buffer_len -= consumed;
+                    curr_char += consumed;
+                    
+                    if(!buffer_len)
+                    {
+                        added->Key.key_char = codepoint;
+                    }
+                    else
+                    {
+                        added = PushEvent((DOM*)target_window->window_dom);
+                        added->type = EventType::KEY_DOWN;
+                        added->Key.code = K_VIRTUAL;
+                        added->Key.key_char = codepoint;
+                    }
+                }
+                
+                while(buffer_len)
+                {
+                    uint32_t codepoint = 0;
+                    uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
+                
+                    // Hit some type of invalid codepoint
+                    if(!consumed)
+                    {
+                        buffer_len -= 1;
+                        curr_char += 1;
+                        continue;
+                    }
+                    
+                    added = PushEvent((DOM*)target_window->window_dom);
+                    added->type = EventType::KEY_DOWN;
+                    added->Key.code = K_VIRTUAL;
+                    added->Key.key_char = codepoint;
+                    
+                    buffer_len -= consumed;
+                    curr_char += consumed;
+                }
                 
                 target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::DOWN;
+                DeAllocScratch(key_text);
                 
                 break;
             }
             case(KeyRelease):
             {
                 int key_code = x_event.xkey.keycode;
-                VirtualKeyCode translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+                VirtualKeyCode translated_keycode = 0; 
+                if(key_code < sizeof(KEYCODE_TRANSLATIONS))
+                {
+                    translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+                }
+                
+                // We didnt find a translation
+                if(!translated_keycode)
+                {
+                    translated_keycode = K_UNMAPPED;
+                }
             
                 Event* added = PushEvent((DOM*)target_window->window_dom);
                 added->type = EventType::KEY_UP;
@@ -339,6 +432,7 @@ int main()
     
     SCROLL_MULTIPLIER = 30;
     
+    setlocale(LC_ALL, "");
     x_display = XOpenDisplay(NULL);
     
     if(!x_display)
@@ -356,6 +450,16 @@ int main()
     x_defaults.default_depth = XDefaultDepth(x_display, default_screen);
     x_defaults.default_root_window = XDefaultRootWindow(x_display);
     x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
+    
+    // Note(Leo): Input system was adapted from this https://gist.github.com/baines/5a49f1334281b2685af5dcae81a6fa8a
+    x_input_method = XOpenIM(x_display, 0, 0, 0);
+    
+    if(!x_input_method)
+    {
+        // fallback to internal input method
+        XSetLocaleModifiers("@im=none");
+        x_input_method = XOpenIM(x_display, 0, 0, 0);
+    }
     
     InitializeFontPlatform(&(platform.master_arena), 0);
     PlatformInitKeycodeTranslations();

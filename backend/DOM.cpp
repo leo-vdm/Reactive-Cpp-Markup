@@ -47,6 +47,7 @@ BoundExpression* register_bound_expr( fn_type fn, int id)                       
 }
 
 bound_expr(BindingContext::GLOBAL, SubscribedStubVoid, BoundExpressionType::VOID_RET, stub_void);
+bound_expr(BindingContext::GLOBAL, SubscribedStubVoidBool, BoundExpressionType::VOID_BOOL_RET, stub_void_bool);
 bound_expr(BindingContext::GLOBAL, SubscribedStubString, BoundExpressionType::ARENA_STRING, stub_string);
 bound_expr(BindingContext::GLOBAL, SubscribedStubPointer, BoundExpressionType::VOID_PTR, stub_ptr);
 bound_expr(BindingContext::GLOBAL, SubscribedStubBool, BoundExpressionType::BOOL_RET, stub_bool);
@@ -54,6 +55,7 @@ bound_expr(BindingContext::GLOBAL, SubscribedStubGetPointer, BoundExpressionType
 bound_expr(BindingContext::GLOBAL, SubscribedStubInt, BoundExpressionType::INT_RET, stub_int);
 
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubVoid, BoundExpressionType::VOID_RET, arr_stub_void);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubVoidBool, BoundExpressionType::VOID_BOOL_RET, arr_stub_void_bool);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubString, BoundExpressionType::ARENA_STRING, arr_stub_string);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubPointer, BoundExpressionType::VOID_PTR, arr_stub_ptr);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubBool, BoundExpressionType::BOOL_RET, arr_stub_bool);
