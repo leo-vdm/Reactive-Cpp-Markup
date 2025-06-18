@@ -49,7 +49,6 @@ void FreeString(ArenaString* freed_string)
 }
 
 #define is_full(StringBlock_ptr) StringBlock_ptr->fill_level >= STRING_BLOCK_BODY_SIZE
-#define block_size(StrinBlock_ptr) STRING_BLOCK_BODY_SIZE
 
 void Remove(ArenaString* target, int index, int count)
 {
@@ -303,4 +302,109 @@ void Flatten(ArenaString* string, char* target_buffer, int length)
     }
     
     return;
+}
+
+void Insert(ArenaString* target, const char* source, int index)
+{
+    int source_len = strlen(source);
+    Insert(target, source, source_len, index);
+}
+
+void Insert(ArenaString* target, const char* source, int length, int index)
+{
+    assert(target && source);
+    if(index > target->length)
+    {
+        assert(0);
+        return;
+    }
+
+    StringBlock* starting_block = target->head;
+    int curr_index = 0;
+    while(curr_index < index)
+    {
+        assert(starting_block);
+        if((curr_index + starting_block->fill_level) >= index)
+        {
+            break;
+        }
+
+        curr_index += starting_block->fill_level;
+        starting_block = starting_block->next;
+    }
+    
+    int local_index = index - curr_index;
+    // We can copy directly into this block
+    if((length + starting_block->fill_level) < STRING_BLOCK_BODY_SIZE)
+    {
+        // There is text we need to move out of the way first
+        if(starting_block->fill_level > local_index && starting_block->fill_level)
+        {
+            int copy_count = starting_block->fill_level - local_index;
+            char* dst = &starting_block->content[local_index + length];
+            char* src = &starting_block->content[local_index];
+            
+            // Note(Leo): Use a temp buffer otherwise we might write over sections we want to read
+            char* temp = (char*)AllocScratch(copy_count*sizeof(char));
+            memcpy(temp, src, copy_count);
+            memcpy(dst, temp, copy_count);
+            DeAllocScratch(temp);
+        }
+        
+        starting_block->fill_level += length;
+        memcpy(&starting_block->content[local_index], source, length);
+        target->length += length;
+        return;
+    }
+    // Need to allocate new blocks
+    
+    int remaining_buffer = length;
+    
+    char* curr_src = (char*)source;
+    // There is text we need to move out of the way first
+    if(starting_block->fill_level > local_index && starting_block->fill_level)
+    {
+        int copy_count = starting_block->fill_level - local_index;
+        StringBlock* new_block = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock), zero());
+        char* dst = &new_block->content[0];
+        char* src = &starting_block->content[local_index];
+            
+        memcpy(dst, src, copy_count);
+        new_block->fill_level = copy_count;
+        starting_block->fill_level -= copy_count;
+        new_block->next = starting_block->next;
+        starting_block->next = new_block;
+        
+        copy_count = STRING_BLOCK_BODY_SIZE - starting_block->fill_level;
+        copy_count = copy_count < remaining_buffer ? copy_count : remaining_buffer;
+        remaining_buffer -= copy_count;
+        
+        memcpy(&starting_block->content[local_index], curr_src, copy_count);
+        curr_src += copy_count;
+        starting_block->fill_level += copy_count;
+    }
+    
+    // Start allocationg new blocks
+    StringBlock* curr = starting_block;
+    while(remaining_buffer)
+    {
+        StringBlock* new_block = (StringBlock*)Alloc(target->parent_arena, sizeof(StringBlock), zero());
+        new_block->next = curr->next;
+        curr->next = new_block;
+        curr = new_block;
+        
+        int copy_count = remaining_buffer > STRING_BLOCK_BODY_SIZE ? STRING_BLOCK_BODY_SIZE : remaining_buffer;
+        
+        memcpy(&new_block->content[0], curr_src, copy_count);
+        curr_src += copy_count;
+        remaining_buffer -= copy_count;
+        curr->fill_level = copy_count;
+    }
+    
+    target->length += length;
+}
+
+void Insert(ArenaString* target, ArenaString* src, int index)
+{
+    
 }

@@ -6,6 +6,10 @@ struct shaping_context
     uint32_t glyph_count;
     uint32_t image_tile_count;
     
+    // Note(Leo): These are included in elmement count so the non-manual/relative elements is elements minus these
+    uint32_t manual_element_count;
+    uint32_t relative_element_count;
+    
     Arena* shape_arena;
     Arena* layout_element_arena;
     Arena* final_renderque;
@@ -309,7 +313,6 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
     LayoutElement* target = parent->children + parent->child_count; 
     LayoutElement* curr_child = parent->children;
     
-    // Todo(Leo): Is this correct?
     while(curr_child < target)
     {
         MeasurementType width_type = curr_child->sizing.width.desired.type;
@@ -458,11 +461,11 @@ void grow_parent_axis(LayoutElement* parent_element, LayoutElement* child_elemen
     //            If they have % values still to calculate those will be done in the third pass and the child will be clipped then 
     if(child->desired.type == MeasurementType::GROW || child->desired.type == MeasurementType::PERCENT)
     {
-        if(additive_dir)
+        if(additive_dir && child_element->display != DisplayType::RELATIONAL && child_element->display != DisplayType::MANUAL)
         {
             parent->current += child->current + margin_size;
         }
-        else // Note(Leo): display type manual can do this branch aswell when its implemented
+        else
         {
             parent->current = MAX(parent->current, child->current + margin_size);
         }
@@ -470,7 +473,7 @@ void grow_parent_axis(LayoutElement* parent_element, LayoutElement* child_elemen
     else
     {
         assert(child->desired.type == MeasurementType::PIXELS);
-        if(additive_dir)
+        if(additive_dir && child_element->display != DisplayType::RELATIONAL && child_element->display != DisplayType::MANUAL)
         {
             parent->current += child->desired.size + margin_size;
         }
@@ -574,7 +577,7 @@ void shape_second_pass(shaping_context* context, LayoutElement* parent)
     }
     
     size_parent_axis(parent, false); // Width sizing
-    size_parent_axis(parent, true); // Height sizing
+    size_parent_axis(parent, true);  // Height sizing
     
 }
 
@@ -729,8 +732,11 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
         // Adding element widths to the parent accumulation
         if(dir == LayoutDirection::HORIZONTAL)
         {
-            // Widths add together for a horiontal layout
-            p_width_accumulated += accumulate_child_axis(&children[i].sizing.width);
+            // Widths add together for a horiontal layout (Accept the manual placed elements)
+            if(children[i].display != DisplayType::RELATIONAL && children[i].display != DisplayType::MANUAL)
+            {
+                p_width_accumulated += accumulate_child_axis(&children[i].sizing.width);
+            }
 
             // For a horizontal layout height-grow elements get all the remaining space in the height of their parent
             // but that is an individual quantity for each of them to calculate
@@ -744,8 +750,11 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             // but that is an individual quantity for each of them to calculate
             p_width_accumulated = 0.0f;
             
-            // Heights add together for a vertical layout
-            p_height_accumulated += accumulate_child_axis(&children[i].sizing.height);
+            // Heights add together for a vertical layout (Accept the manual placed elements)
+            if(children[i].display != DisplayType::RELATIONAL && children[i].display != DisplayType::MANUAL)
+            {
+                p_height_accumulated += accumulate_child_axis(&children[i].sizing.height);
+            }
         }
         
         // Elements with grow sized measures need to get revisited.
@@ -765,7 +774,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             }
             
             // Widths need to be summed together in horizontal layouts to find the remaining space in the parent
-            if(dir == LayoutDirection::HORIZONTAL)
+            if(dir == LayoutDirection::HORIZONTAL && children[i].display != DisplayType::RELATIONAL && children[i].display != DisplayType::MANUAL)
             {
                 // Only add the min-width if desired isnt defined yet 
                 if(children[i].sizing.width.desired.type == MeasurementType::GROW)
@@ -810,7 +819,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             }
             
             // Heights need to be summed together in vertical layouts to find the remaining space in the parent
-            if(dir == LayoutDirection::VERTICAL)
+            if(dir == LayoutDirection::VERTICAL && children[i].display != DisplayType::RELATIONAL && children[i].display != DisplayType::MANUAL)
             {
                 if(children[i].sizing.height.desired.type == MeasurementType::GROW)
                 {
@@ -821,7 +830,7 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
             }
             else // In a horizontal layout we can immediately grow height measures
             {
-                assert(dir == LayoutDirection::HORIZONTAL);
+                assert(dir == LayoutDirection::HORIZONTAL || children[i].display == DisplayType::RELATIONAL || children[i].display == DisplayType::MANUAL);
                 
                 // height-grow space in a horizontal layout is the remaining space above/below the element
                 float child_size = accumulate_child_axis(&children[i].sizing.height);
@@ -1021,6 +1030,15 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
         
         shape_first_pass(&context, curr_element);
         
+        if(curr_element->display == DisplayType::RELATIONAL)
+        {
+            context.relative_element_count++;
+        }
+        else if(curr_element->display == DisplayType::MANUAL)
+        {
+            context.manual_element_count++;
+        }
+        
         curr_element++;
         unpacked_count--;
     }
@@ -1041,8 +1059,21 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     // Note(Leo): Leave space for alignment
     void* final_pass_memory = Alloc(context.shape_arena, (element_count + 1)*sizeof(LayoutElement*));
     Arena final_pass_visit = CreateArenaWith(align_mem(final_pass_memory, LayoutElement*), element_count*sizeof(LayoutElement*), sizeof(LayoutElement*));
+
+    // Note(Leo): Due to the nature of us adding items to the renderque in a breadth first manner there is an interweave issue
+    //            with elements that use relative or manual display. Elements have their subtrees draw calls intermixed
+    //            with the draws of their sibling's subtrees which is fine usually since elements dont overlap, accept they can
+    //            when manual/relative are used. The deffered que fixes this by allowing all the manual element's siblings to have
+    //            fully drawn their subtrees before drawing its own which fixes the weaving issue. 
+    void* relative_pass_memory = Alloc(context.shape_arena, (context.relative_element_count + 1)*sizeof(LayoutElement*));
+    Arena relative_pass_visit = CreateArenaWith(align_mem(relative_pass_memory, LayoutElement*), context.relative_element_count*sizeof(LayoutElement*), sizeof(LayoutElement*));
+    LayoutElement** relative_elements = (LayoutElement**)relative_pass_visit.mapped_address; 
     
-    // Iterating forward from the root element in a depth first way.    
+    void* manual_pass_memory = Alloc(context.shape_arena, (context.manual_element_count + 1)*sizeof(LayoutElement*));
+    Arena manual_pass_visit = CreateArenaWith(align_mem(manual_pass_memory, LayoutElement*), context.manual_element_count*sizeof(LayoutElement*), sizeof(LayoutElement*));
+    LayoutElement** manual_elements = (LayoutElement**)manual_pass_visit.mapped_address; 
+    
+    // Iterating forward from the root element in a breadth first way.    
     // We shape all the elements of root then only push the ones inside of root's bounding box onto the stack of children.
     // Each time we visit a child we shape all of its elements and cull based on the bouding box of the child. 
     // This helps with not visiting elements that arent visible
@@ -1051,6 +1082,8 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     
     curr_element = *visit_elements;
     uint32_t visit_count = 1;
+    uint32_t deferred_relative_count = 0;
+    uint32_t deferred_manual_count = 0;
     
     // Setup the bounds for the root
     curr_element->bounds.x = 0;
@@ -1068,10 +1101,29 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     *final_renderque = CreateArenaWith(align_mem(final_renderque_memory, combined_instance), renderque_length*sizeof(combined_instance), sizeof(combined_instance));
     context.final_renderque = final_renderque;
     
-    while(visit_count)
+    while(visit_count || deferred_relative_count || deferred_manual_count)
     {
-        visit_count--;
-        curr_element = *visit_elements;
+        // Note(Leo): Only start grabbing from the deferred relative que once our visit que is exhausted, once deferred
+        //            relative is exhausted start grabbing from the manual que.
+        if(visit_count)
+        {
+            visit_count--;
+            curr_element = *visit_elements;
+            visit_elements++;
+        }
+        else if(deferred_relative_count)
+        {
+            deferred_relative_count--;
+            curr_element = *relative_elements;
+            relative_elements++;
+        }
+        else
+        {
+            deferred_manual_count--;
+            curr_element = *manual_elements;
+            manual_elements++;
+        }
+        
         shape_final_pass(&context, curr_element);
         
         switch(curr_element->type)
@@ -1130,28 +1182,59 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
         
         for(int i = 0; i < curr_element->child_count; i++)
         {
-            cursor_x += curr_element->children[i].sizing.width.margin1.size;
-            cursor_y += curr_element->children[i].sizing.height.margin1.size;
- 
-            curr_element->children[i].position.x = cursor_x;
-            curr_element->children[i].position.y = cursor_y;
-            
-            curr_element->children[i].bounds.x = cursor_x;
-            curr_element->children[i].bounds.y = cursor_y;
-            
+            if(curr_element->children[i].display == DisplayType::RELATIONAL)
+            {
+                curr_element->children[i].position.x = inner_bounds.x + curr_element->children[i].sizing.width.margin1.size;
+                curr_element->children[i].position.y = inner_bounds.y + curr_element->children[i].sizing.height.margin1.size;
+            }
+            else if(curr_element->children[i].display == DisplayType::MANUAL)
+            {
+                curr_element->children[i].position.x = curr_element->children[i].sizing.width.margin1.size;
+                curr_element->children[i].position.y = curr_element->children[i].sizing.height.margin1.size;
+            }
+            else
+            {
+                cursor_x += curr_element->children[i].sizing.width.margin1.size;
+                cursor_y += curr_element->children[i].sizing.height.margin1.size;
+                
+                curr_element->children[i].position.x = cursor_x;
+                curr_element->children[i].position.y = cursor_y;
+            }
+
+            curr_element->children[i].bounds.x = curr_element->children[i].position.x;
+            curr_element->children[i].bounds.y = curr_element->children[i].position.y;
             curr_element->children[i].bounds.width = curr_element->children[i].sizing.width.desired.size;
             curr_element->children[i].bounds.height = curr_element->children[i].sizing.height.desired.size;
-            
+ 
             // Note(Leo): boxes_intersect puts the intersection region as the new bounding box of the child
             // Only add elements to be visited if they will be visisble
             if(boxes_intersect(&inner_bounds, &curr_element->children[i].bounds, &curr_element->children[i].bounds))
             {
-                LayoutElement** added_visit = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
-                *added_visit = &curr_element->children[i];
-                visit_count++;
+                if(curr_element->children[i].display == DisplayType::RELATIONAL)
+                {
+                    LayoutElement** added_deferred = (LayoutElement**)Push(&relative_pass_visit, sizeof(LayoutElement*));
+                    *added_deferred = &curr_element->children[i];
+                    deferred_relative_count++;   
+                }
+                else if(curr_element->children[i].display == DisplayType::MANUAL)
+                {                
+                    LayoutElement** added_deferred = (LayoutElement**)Push(&manual_pass_visit, sizeof(LayoutElement*));
+                    *added_deferred = &curr_element->children[i];
+                    deferred_manual_count++;   
+                }
+                else
+                {
+                    LayoutElement** added_visit = (LayoutElement**)Push(&final_pass_visit, sizeof(LayoutElement*));
+                    *added_visit = &curr_element->children[i];
+                    visit_count++;
+                }
             }
             
-            if(dir == LayoutDirection::HORIZONTAL)
+            if(curr_element->children[i].display == DisplayType::RELATIONAL || curr_element->children[i].display == DisplayType::MANUAL)
+            {
+            
+            }
+            else if(dir == LayoutDirection::HORIZONTAL)
             {
                 // Need to move x over for the next element
                 cursor_x += curr_element->children[i].sizing.width.desired.size;
@@ -1173,7 +1256,6 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
             }
         }
         
-        visit_elements++;
     }
     
     return context.final_renderque;

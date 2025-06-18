@@ -164,12 +164,13 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
             {
                 break;
             }
+            case(AttributeType::TICKING):
+            {
+                break;
+            }
             case(AttributeType::CUSTOM):
             {
-                added_attribute.Custom.name_index = push_val_to_combined_arena(&combined_values_arena, curr_attribute->Custom.name, curr_attribute->Custom.name_length);
-                added_attribute.Custom.name_length = curr_attribute->Custom.name_length;
-                // Fill the shared parameters
-                goto text_like;
+                added_attribute.Args.binding_id = curr_attribute->Args.binding_id;
                 break;
             }
             default: // Text like attributes
@@ -197,6 +198,9 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
     
     while(curr_style->global_id != 0)
     {
+        // Note(Leo): If this fails it means youve forgotten a blocker and have read into a previous files styles.
+        assert((curr_style + 1)->global_id > curr_style->global_id || (curr_style + 1)->global_id == 0);
+        
         StringView style_name = {};
         // Grab the string view before writing to the font name members since they are all in a union
         memcpy(&style_name, &curr_style->font_name, sizeof(StringView));
@@ -387,9 +391,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
                 added_attribute->CompId.id = read_attribute.CompId.id;            
                 break;
             case(AttributeType::CUSTOM):
-                added_attribute->Custom.name = get_pointer(base_value, read_attribute.Custom.name_index, char);
-                added_attribute->Custom.name_length = read_attribute.Custom.name_length;
-                goto text_like;
+                added_attribute->Args.binding_id = read_attribute.Args.binding_id;
                 break;
             case(AttributeType::ON_CLICK):
             {
@@ -402,6 +404,10 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
                 break;
             }
             case(AttributeType::FOCUSABLE):
+            {
+                break;
+            }
+            case(AttributeType::TICKING):
             {
                 break;
             }

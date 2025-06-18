@@ -27,19 +27,28 @@ public:
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title">This is the second page</hdiv>
 	<vdiv class="img_container">
 		<img src="thumbs_up.jpg"></img>
 		<img src="thumbs_up.jpg"></img>
 	</vdiv>
 	<test_component></test_component>
 	<vdiv id="special" class="footer" onclick="{e->OnClickButton()}">
+	   <hdiv class="title">This is the second page</hdiv>
 		Test Count: {count}
 	</vdiv>
 </vdiv>
+<vdiv class="overlay">Pranked!</vdiv>
 </root>
 
 <style>
+
+overlay {
+    width: fit;
+    height: fit;
+    color: 120, 120, 120;
+    display: manual;
+    margin: grow, grow, grow, grow;
+}
 
 fill {
 	height: 150%;
@@ -55,10 +64,12 @@ footer {
 }
 
 title {
-	margin: grow, grow, 0px, 0px;
+	margin: 50px, 50px, 50px, 50px;
+	display: relative;
 	font_size: 70px;
 	width: fit;
 	height: fit;
+	color: 120, 0, 0;
 }
 
 img_container {

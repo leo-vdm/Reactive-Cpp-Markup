@@ -110,20 +110,8 @@ inline loaded_font_handle* platform_get_font(FontHandle handle)
     return ((loaded_font_handle*)(font_platform.loaded_fonts->mapped_address)) + (handle - 1);
 }
 
-void FontPlatformLoadFace(const char* font_name, FILE* font_file)
+void load_face_from_mem(const char* font_name, void* font_binary, uint64_t binary_length)
 {
-    assert(font_name && font_file);
-    if(!font_name || !font_file)
-    {
-        return;
-    }
-    
-    fseek(font_file, 0, SEEK_END);    
-    int binary_length = ftell(font_file);
-    rewind(font_file);
-    void* font_binary = Alloc(font_platform.font_binaries, binary_length * sizeof(char));
-    fread(font_binary, binary_length, 1, font_file);
-    
     loaded_font_handle* created_font = (loaded_font_handle*)Alloc(font_platform.loaded_fonts, sizeof(loaded_font_handle));
     
     int error;
@@ -151,6 +139,31 @@ void FontPlatformLoadFace(const char* font_name, FILE* font_file)
 
     font_platform.loaded_font_map->insert({ font_name, created_font });
 }
+
+void FontPlatformLoadFace(const char* font_name, FILE* font_file)
+{
+    assert(font_name && font_file);
+    if(!font_name || !font_file)
+    {
+        return;
+    }
+    
+    fseek(font_file, 0, SEEK_END);    
+    int binary_length = ftell(font_file);
+    rewind(font_file);
+    void* font_binary = Alloc(font_platform.font_binaries, binary_length * sizeof(char));
+    fread(font_binary, binary_length, 1, font_file);
+    load_face_from_mem(font_name, font_binary, static_cast<uint64_t>(binary_length));
+}
+
+void FontPlatformLoadFace(const char* font_name, PlatformFile* font_file)
+{
+    void* font_binary = Alloc(font_platform.font_binaries, font_file->len);
+    memcpy(font_binary, font_file->data, static_cast<size_t>(font_file->len));
+    
+    load_face_from_mem(font_name, font_binary, font_file->len);
+}
+
 
 // Note(Leo): Handle relies on fonts being allocated in an arena since the handle is their index
 // Note(Leo): Handle is index + 1 so that 0 can be "not found" and 1 is the first index.
@@ -277,9 +290,10 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
         hb_buffer_guess_segment_properties(font_platform.shaping_buffer);
             
         loaded_font_handle* used_font = platform_get_font(font_handle);
+        
+        assert(used_font);
         if(!used_font)
         {
-            assert(used_font);
             mark_end();
             return;
         }
@@ -323,7 +337,7 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
                 
                 // Go back and add line heights to all the glyphs
                 FontPlatformShapedGlyph* curr_glyph = line_first;
-                for(uint32_t j = 0; j < line_count; j++ )
+                for(uint32_t j = 0; j < line_count; j++)
                 {
                     assert(curr_glyph);
                     curr_glyph->placement_offsets.y += top_line_height; 
@@ -345,6 +359,17 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             }
             
             added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
+            
+            added_glyph->buffer_index = glyph_info[i].cluster;
+            
+            if((uint32_t)i + 1 < glyph_count)
+            {
+                added_glyph->run_length = glyph_info[i + 1].cluster - glyph_info[i].cluster;
+            }
+            else
+            {
+                added_glyph->run_length = buffer_length - glyph_info[i].cluster;
+            }
             
             if(!line_first)
             {
@@ -372,6 +397,7 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             // Note(Leo): Divide by 64 to convert back to pixel measurements from harfbuzz
             added_glyph->placement_offsets.x = cursor_x + (glyph_pos[i].x_offset / 64) + scaled_bearing_x;
             added_glyph->placement_offsets.y = cursor_y - (glyph_pos[i].y_offset / 64 + scaled_bearing_y);
+            added_glyph->base_line = cursor_y + top_line_height;
     
             added_glyph->placement_size.x = (float)added_glyph_raster_info->width * font_scale;
             added_glyph->placement_size.y = (float)added_glyph_raster_info->height * font_scale;

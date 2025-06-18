@@ -13,7 +13,12 @@ pushd build
 set dep_dir=..\backend\third_party
 set src_dir=..\backend
 
-cl /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /Zi /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\file_system.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
+:: Debug build
+cl /MP12 /Zi /Od /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
+
+:: Release build
+::cl /MP12 /O2t /GL /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
+
 IF %ERRORLEVEL% NEQ 0 (
 	echo:
 	echo Compile error...
@@ -51,7 +56,10 @@ IF %ERRORLEVEL% NEQ 0 (
 
 :: Building app
 pushd test_build
-cl /Zi /EHsc /c dom_attatchment.cpp /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include
+:: Debug build
+cl /MP12 /Zi /Od /EHsc /c dom_attatchment.cpp /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include
+:: Release build
+::cl /MP12 /O2t /GL /EHsc /c dom_attatchment.cpp /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include
 
 IF %ERRORLEVEL% NEQ 0 (
 	echo:

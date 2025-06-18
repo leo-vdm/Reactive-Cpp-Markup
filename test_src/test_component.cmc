@@ -6,8 +6,9 @@ class test_component : Component
     
     int count;
     
-    void CompMain(DOM* dom){
-	count = 2;
+    void CompMain(DOM* dom, CustomArgs* args)
+    {
+	   count = 2;
         printf("Count is at: %d\n", count);
     }
     

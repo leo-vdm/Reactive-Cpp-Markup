@@ -28,6 +28,7 @@ struct win32_platform_state
     PlatformWindow* first_window;
     
     VirtualKeyboard keyboard_state;
+    HCURSOR cursors[20]; // You REALLY shouldnt need more than this
 };
 win32_platform_state platform;
 
@@ -80,7 +81,7 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
     LRESULT result = 0;
     if(!curr_processed_window)
     {
-        result = DefWindowProcA(window_handle, message, w_param, l_param);
+        result = DefWindowProcW(window_handle, message, w_param, l_param);
         return result;
     }
     switch(message)
@@ -177,15 +178,19 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
         }
         case WM_CHAR:
         case WM_SYSCHAR:
+        case WM_IME_CHAR:
         {
             Event* added = last_event;
             if(!last_event)
             {
-                assert(0);
+                // An IME of some kind has sent this char.
                 added = PushEvent((DOM*)curr_processed_window->window_dom);
+                added->type = EventType::KEY_DOWN;
+                added->Key.code = K_VIRTUAL;
             }
             
-            added->Key.key_char = w_param;
+            PlatformConsumeUTF16ToUTF32((uint16_t*)&w_param, &added->Key.key_char, 4);
+            printf("Got char: %c, Encoding: %X\n", (char)w_param, added->Key.key_char);
             
             break;
         }
@@ -212,9 +217,18 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             curr_processed_window->controls.scroll_dir = {((float)HIWORD(w_param) / -120.0f) * SCROLL_MULTIPLIER, 0.0f };
             break;
         }
+        case WM_SETCURSOR:
+        {
+            if(LOWORD(l_param) == HTCLIENT)
+            {
+                SetCursor(platform.cursors[0]);
+                result = 1;
+            }
+            break;
+        }
         default:
         {
-            result = DefWindowProcA(window_handle, message, w_param, l_param);
+            result = DefWindowProcW(window_handle, message, w_param, l_param);
             break;
         }
     }
@@ -225,7 +239,7 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
 PlatformWindow* win32_create_window(Arena* windows_arena, const char* window_name)
 {
     PlatformWindow* created_window = (PlatformWindow*)Alloc(windows_arena, sizeof(PlatformWindow), zero());
-    created_window->window_handle = CreateWindowExA(0, WINDOWS_WINDOW_CLASS_NAME, window_name, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, win32_module_handle, 0);
+    created_window->window_handle = CreateWindowExW(0, (LPCWSTR)WINDOWS_WINDOW_CLASS_NAME, (LPCWSTR)window_name, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, win32_module_handle, 0);
     
     RECT rect;
     if(!GetWindowRect(created_window->window_handle, &rect))
@@ -292,6 +306,51 @@ FILE* win32_open_relative_file_path(const char* relative_path, const char* open_
     return opened;
 }
 
+PlatformFile PlatformOpenFile(const char* file_path, Arena* bin_arena)
+{
+    PlatformFile loaded = {};
+    
+    FILE* opened = win32_open_relative_file_path(file_path, "rb");
+    
+    if(!opened)
+    {
+        return loaded;
+    }
+    
+    fseek(opened, 0, SEEK_END);
+    uint64_t opened_size = ftell(opened);
+    fseek(opened, 0, SEEK_SET);
+    
+    if(bin_arena)
+    {
+        loaded.data = Alloc(bin_arena, sizeof(char)*opened_size);
+        loaded.data_arena = bin_arena;
+    }
+    else
+    {
+        loaded.data = malloc(opened_size);
+    }
+    
+    loaded.len = opened_size;
+    
+    fread(loaded.data, opened_size, 1, opened);
+    fclose(opened);
+    
+    return loaded;
+}
+
+void PlatformCloseFile(PlatformFile* file)
+{
+    if(file->data_arena)
+    {
+        DeAlloc(file->data_arena, file->data);
+    }
+    else
+    {
+        free(file->data);
+    }
+}
+
 FileSearchResult* win32_find_markup_binaries(Arena* search_results_arena, Arena* search_result_values_arena)
 {
     FileSearchResult* first = (FileSearchResult*)search_results_arena->next_address;
@@ -337,7 +396,7 @@ void win32_process_window_events(PlatformWindow* target_window)
     
     MSG message;
     int return_value = 0;
-    while(PeekMessageA(&message, target_window->window_handle, 0, 0, PM_REMOVE))
+    while(PeekMessageW(&message, target_window->window_handle, 0, 0, PM_REMOVE))
     { 
         TranslateMessage(&message);
         DispatchMessage(&message);
@@ -366,6 +425,12 @@ KeyState GetKeyState(uint8_t key_code)
 
 int main()
 {
+    SYSTEM_INFO sys_info = {};
+    GetSystemInfo(&sys_info);
+
+    WINDOWS_PAGE_SIZE = static_cast<uintptr_t>(sys_info.dwPageSize);
+    WINDOWS_PAGE_MASK = WINDOWS_PAGE_SIZE - 1;
+
     platform = {};
     InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
@@ -373,14 +438,18 @@ int main()
     SCROLL_MULTIPLIER = 30; 
     
     win32_module_handle = GetModuleHandleA(0);
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     
-    WNDCLASSA window_class = {};
+    WNDCLASSW window_class = {};
     window_class.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
     window_class.lpfnWndProc = win32_main_callback;
     window_class.hInstance = win32_module_handle;
-    window_class.lpszClassName = WINDOWS_WINDOW_CLASS_NAME;
+    window_class.lpszClassName = reinterpret_cast<LPCWSTR>(WINDOWS_WINDOW_CLASS_NAME);
     
-    window_class_atom = RegisterClassA(&window_class);
+    window_class_atom = RegisterClassW(&window_class);
+    
+    platform.cursors[0] = LoadCursor(NULL, IDC_ARROW);
+    
     
     InitializeFontPlatform(&(platform.master_arena), 0);
     
@@ -440,9 +509,15 @@ int main()
         fclose(opened);
         curr_image++;
     }
-
-    Arena* temp_renderque = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
-    *temp_renderque = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    
+    // Note(Leo): We use 1 renderque for all the windows then when we loop back we swap them so that we write into the 
+    //            other. This is done so we can safely access the sizing data of elements from the last frame.
+    Arena* renderques[2] = {};  
+    renderques[0] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    renderques[1] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    *renderques[0] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    *renderques[1] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    bool used_renderque = false;
     
     PlatformWindow* curr_window = platform.first_window;
     while(true)
@@ -451,10 +526,12 @@ int main()
         if(!curr_window)
         {
             curr_window = platform.first_window;
+            used_renderque = !used_renderque;
+            // Reset the arena we will use
+            ResetArena(renderques[used_renderque]);
         }
-           
+        
         win32_process_window_events(curr_window);
-        //print_input_state(curr_window);
         
         if(curr_window->flags)
         {
@@ -484,29 +561,30 @@ int main()
         }
 
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(renderques[used_renderque], (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
+        BEGIN_TIMED_BLOCK(DRAW_WINDOW);
         RenderplatformDrawWindow(curr_window, final_renderque);
-        ResetArena(temp_renderque);
+        END_TIMED_BLOCK(DRAW_WINDOW);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);
         
         curr_window = curr_window->next_window;
         END_TIMED_BLOCK(PLATFORM_LOOP);
         
-        //DUMP_TIMINGS();
+        DUMP_TIMINGS();
     }
     
     return 0;
 }
 
 
-#define PLACEHOLDER_WINDOW_NAME "PlaceholderName"
+#define PLACEHOLDER_WINDOW_NAME L"PlaceholderName"
 
 void PlatformRegisterDom(void* dom)
 {
-    PlatformWindow* created_window = win32_create_window(platform.windows, PLACEHOLDER_WINDOW_NAME);
+    PlatformWindow* created_window = win32_create_window(platform.windows, (char*)PLACEHOLDER_WINDOW_NAME);
     created_window->window_dom = dom;
     
     created_window->next_window = platform.first_window;

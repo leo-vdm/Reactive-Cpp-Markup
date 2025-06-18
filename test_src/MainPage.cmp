@@ -86,6 +86,17 @@ struct MainPage : Page
                     printf("Char: %c Code: %d Event Type: %d\n", (char)curr_event->Key.key_char, curr_event->Key.code, (int)curr_event->type);
                     break;
                 }
+                case(EventType::TICK):
+                {
+                    if(curr_event->Tick.target->master != this)
+                    {
+                        RouteEvent(curr_event->Tick.target->master, curr_event);
+                        break;
+                    }
+                    
+                    
+                    break;
+                }
                 default:
                 {
                     if(focused && focused->master != this)

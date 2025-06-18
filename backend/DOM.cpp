@@ -53,6 +53,7 @@ bound_expr(BindingContext::GLOBAL, SubscribedStubPointer, BoundExpressionType::V
 bound_expr(BindingContext::GLOBAL, SubscribedStubBool, BoundExpressionType::BOOL_RET, stub_bool);
 bound_expr(BindingContext::GLOBAL, SubscribedStubGetPointer, BoundExpressionType::PTR_RET, stub_get_ptr);
 bound_expr(BindingContext::GLOBAL, SubscribedStubInt, BoundExpressionType::INT_RET, stub_int);
+bound_expr(BindingContext::GLOBAL, SubscribedStubArgs, BoundExpressionType::ARG_RET, stub_args);
 
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubVoid, BoundExpressionType::VOID_RET, arr_stub_void);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubVoidBool, BoundExpressionType::VOID_BOOL_RET, arr_stub_void_bool);
@@ -61,6 +62,7 @@ bound_expr(BindingContext::LOCAL, ArrSubscribedStubPointer, BoundExpressionType:
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubBool, BoundExpressionType::BOOL_RET, arr_stub_bool);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubGetPointer, BoundExpressionType::PTR_RET, arr_stub_get_ptr);
 bound_expr(BindingContext::LOCAL, ArrSubscribedStubInt, BoundExpressionType::INT_RET, arr_stub_int);
+bound_expr(BindingContext::LOCAL, ArrSubscribedStubArgs, BoundExpressionType::ARG_RET, arr_stub_args);
 
 // Note(Leo): Expressions are stored in the expression arena as an array with their id as their index
 BoundExpression* GetBoundExpression(int id)
@@ -88,7 +90,7 @@ Attribute* GetAttribute(Element* element, AttributeType searched_type)
 
 void* AllocPage(DOM* dom, int size, int file_id)
 {
-    // Note(Leo): Need to use FreeSubtreeObject to ensure that this malloc'ed memory gets freed
+    // Note(Leo): Need to use FreeSubtreeObjects to ensure that this malloc'ed memory gets freed
     void* allocated = malloc(size);
     memset(allocated, 0, size);
     return allocated;
@@ -97,7 +99,7 @@ void* AllocPage(DOM* dom, int size, int file_id)
 
 void* AllocComponent(DOM* dom, int size, int file_id)
 {
-    // Note(Leo): Need to use FreeSubtreeObject to ensure that this malloc'ed memory gets freed
+    // Note(Leo): Need to use FreeSubtreeObjects to ensure that this malloc'ed memory gets freed
     void* allocated = malloc(size);
     memset(allocated, 0, size);
     return allocated;
@@ -192,9 +194,7 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
         }
         case(AttributeType::CUSTOM):
         {
-            added->Custom.name_value = converted_attribute->Custom.name;
-            added->Custom.name_length = converted_attribute->Custom.name_length;
-            goto text_like;
+            added->Args.binding_id = converted_attribute->Args.binding_id;
             break;
         }
         case(AttributeType::LOOP):
@@ -236,6 +236,7 @@ Element* tag_to_element(DOM* dom, Arena* element_arena, Compiler::Tag* converted
     // Note(Leo): We could probably just setup a const/global instance which gets memcpy'd instead of creating the default 
     //            style for every element but it might not be much faster anyway...
     DefaultStyle(&added->working_style);
+    DefaultStyle(&added->override_style);
     
     Attribute* prev_added_attribute = NULL;
     Attribute* curr_added_attribute; 
@@ -347,8 +348,31 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     }
     
     // Allocate and setup component
-    void* added_comp;
-    call_comp_main(target_dom, comp_bin->file_id, &added_comp);
+    void* added_comp = NULL;
+    
+    // Check for an args binding
+    Attribute* args_attribute = GetAttribute(parent, AttributeType::CUSTOM);
+    
+    CustomArgs args = {};
+    
+    if(args_attribute)
+    {
+        BoundExpression* binding = GetBoundExpression(args_attribute->Args.binding_id);
+        assert(binding->type == BoundExpressionType::ARG_RET);
+        assert(parent->master);
+        
+        if(binding->context == BindingContext::GLOBAL)
+        {
+            binding->stub_args((void*)parent->master, &args);
+        }
+        else
+        {
+            binding->arr_stub_args((void*)parent->context_master, (void*)parent->master, parent->context_index, &args);
+        }
+        
+    }
+
+    call_comp_main(target_dom, comp_bin->file_id, &added_comp, &args);
     
     // Note(Leo): All components should inherit the Component struct so that they have the file_id member
     Component* comp_obj = (Component*)added_comp;
@@ -789,6 +813,67 @@ void RouteEvent(void* master, Event* event)
         return;
     }
     
-    call_comp_event(((ElementMaster*)master)->master_dom, event, ((ElementMaster*)master)->file_id, master);
-    
+    call_comp_event(((ElementMaster*)master)->master_dom, event, ((ElementMaster*)master)->file_id, master);   
+}
+
+// Convenience methods for setting style overrides
+void SetColor(Element* element, StyleColor color)
+{
+    element->override_style.color = color;
+    element->override_style.color_p = 100;
+    element->do_override_style = true;
+}
+
+void SetMarginL(Element* element, Measurement sizing)
+{
+    element->override_style.margin.left = sizing;
+    element->override_style.margin_p = 100;
+    element->do_override_style = true;
+}
+
+void SetMarginR(Element* element, Measurement sizing)
+{
+    element->override_style.margin.right = sizing;
+    element->override_style.margin_p = 100;
+    element->do_override_style = true;
+}
+void SetMarginT(Element* element, Measurement sizing)
+{
+    element->override_style.margin.top = sizing;
+    element->override_style.margin_p = 100;
+    element->do_override_style = true;
+}
+
+void SetMarginB(Element* element, Measurement sizing)
+{
+    element->override_style.margin.bottom = sizing;
+    element->override_style.margin_p = 100;
+    element->do_override_style = true;
+}
+
+void SetMargin(Element* element, Margin margin)
+{
+    element->override_style.margin = margin;
+    element->override_style.margin_p = 100;
+    element->do_override_style = true;
+}
+
+void SetFont(Element* element, FontHandle font)
+{
+    element->override_style.font_id = font;
+    element->override_style.font_id_p = 100;
+    element->do_override_style = true;
+}
+
+void SetFontSize(Element* element, uint16_t sizing)
+{
+    element->override_style.font_size = sizing;
+    element->override_style.font_size_p = 100;
+    element->do_override_style = true;
+}
+
+void ClearOverrideStyle(Element* element)
+{
+    DefaultStyle(&element->override_style);
+    element->do_override_style = false;
 }

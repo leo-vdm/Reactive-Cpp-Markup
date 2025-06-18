@@ -122,6 +122,7 @@ enum class AttributeType
     ON_FOCUS,
     FOCUSABLE,
     ID,
+    TICKING, // The runtime sends an event every frame to "tick" this element
 };
 
 #define MAX_TAGS_PER_BINDING 20
@@ -136,6 +137,7 @@ enum class RegisteredBindingType
     PTR_RET,
     INT_RET,
     VOID_BOOL_RET,
+    ARG_RET,
 };
 
 enum class BindingContext
@@ -210,6 +212,11 @@ struct attr_custom_body : attr_text_like_body
     int name_length;
 };
 
+struct attr_args_body
+{
+    int binding_id;
+};
+
 struct Attribute
 {
     AttributeType type;
@@ -224,6 +231,7 @@ struct Attribute
         attr_condition_body Condition;
         attr_loop_body Loop;
         attr_on_focus_body OnFocus;
+        attr_args_body Args;
     };
 };
 
@@ -365,7 +373,9 @@ enum class DisplayType
     NONE,
     NORMAL, // Like css block
     HIDDEN, // Neither element nor its children are shown or taken into account at all. 
-    MANUAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
+    RELATIONAL, // Like css relative, top: n px, left: n px for placing the element inside its parent
+                // Note(Leo): Its called relational because relative has an aliasing issue with some of our third party headers
+    MANUAL, // Like css fixed, top: n px, left: n px for placing the element inside the screen
 };
 
 struct Style 
@@ -498,10 +508,10 @@ struct CompileTarget
 #define MAX_DIRECTIVE_LENGTH 12
 
 #define CALL_PAGE_MAIN_FN_TEMPLATE "case(%d):\n\tpage_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
-#define CALL_COMP_MAIN_FN_TEMPLATE "case(%d):\n\tcomp_main_%d(dom, file_id, d_void_target);\n\tbreak;\n"
+#define CALL_COMP_MAIN_FN_TEMPLATE "case(%d):\n\tcomp_main_%d(dom, file_id, d_void_target, ARGS);\n\tbreak;\n"
 #define CALL_PAGE_FRAME_FN_TEMPLATE "case(%d):\n\tpage_frame_%d(dom, d_void);\n\tbreak;\n"
 #define CALL_COMP_EVENT_FN_TEMPLATE "case(%d):\n\tcomp_event_%d(dom, event, d_void);\n\tbreak;\n"
-#define COMP_MAIN_FN_TEMPLATE "\nvoid call_comp_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
+#define COMP_MAIN_FN_TEMPLATE "\nvoid call_comp_main(DOM* dom, int file_id, void** d_void_target, CustomArgs* ARGS){\nswitch(file_id){\n"
 #define PAGE_MAIN_FN_TEMPLATE "\nvoid call_page_main(DOM* dom, int file_id, void** d_void_target){\nswitch(file_id){\n"
 #define CLOSE_MAIN_CALL_TEMLATE "default:\n\tprintf(\"Component/Page does not exist!\\n\");\n\tbreak;\n}\n}\n"
 #define PAGE_FRAME_FN_TEMPLATE "\nvoid call_page_frame(DOM* dom, int file_id, void* d_void){\nswitch(file_id){\n"

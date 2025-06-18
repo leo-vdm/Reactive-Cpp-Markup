@@ -1,15 +1,24 @@
 Things that need to be done:
-1. Add the absolute/relative display modes. Absolute is in relation to the root, relative is in relation to the parent.
-   Maybe a 'fixed' mode aswell to mimic HTML which is in relation to screen coordinates. Note that fixed can be used
-   to mimic absolute and vice versa with a little math and layoutelement inspection, maybe we only need one? 
-2. ArenaString needs an insert function
-3. Need to add buffer swapping for the renderque arena since we want to be able to reference the sized elements
-   in the next frame. Should also add dom methods for easily searching glyphs at a position to find a clicked glyph
-   (mostly for textbox to be able to function)
-4. Add the pointer passing mechanic/ a method for components to see their attributes and use custom attributes as 
-   arguments.
-5. Add self closing tags.
-6. Finish the InputBox implementation
-7. Change the onFocus callback to a focusChanged callback that gives a bool saying whether the element has become
-   focused or been defocused.
-8. Debug linux weirdness with image tiles showing neighbouring pixels. Potential rounding error?
+High Priority:
+-   Add a "recalculate style now" function, neccesary since otherwise there is a 1 frame lag between calling SetColor() etc
+    and the override actually being processed into the element.
+-   DO the text shape caching system. Add a "shape/calculate now" so we can immediately know the positions of glyphs after
+    text changes. To support this we also need a "re-process attributes now" or something of the sort to instantly repoll
+    text from bindings. Potentially runtime_evaluate_attributes() can already do this but it needs a userland interface.
+
+Then:
+-   Finish the InputBox implementation.
+-   Write some documentation files/make a documentation dir.
+-   Add a platform method to get/set the clipboard easily.
+-   Add self closing tags.
+-   Debug linux weirdness with image tiles showing neighbouring pixels. Potential rounding error?
+-   Add mip mapping to the font/image atlases.
+-   Remove current style class/selector system and replace it so that elements can have only 1 class attribute with 1
+    class named in it and NO bindings. This allows us to bake down styles at compile time. Each style can then also have
+    its possible selectors (i.e. !hovered/!mousedown) baked into it. This simplifies runtime alot since all it then needs
+    to do is combine the element style with the class style once afer which we can cache it. For dynamic changes the user
+    calls the SetColor() etc functions which modify a specific element's cached version of the style. Maybe we also add
+    a OverrideStyle() function which allows the user to dynamically change style attributes for all the elements with 
+    that style. Alternatively we could have some kind of pointer passing method where users can bind a style to a pointer
+    so that all the elements with that class will share the one style.
+-   Add a regression test suite.

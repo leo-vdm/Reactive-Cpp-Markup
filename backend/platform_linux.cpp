@@ -370,6 +370,52 @@ FILE* linux_open_relative_file_path(const char* relative_path, const char* open_
     return opened;
 }
 
+
+PlatformFile PlatformOpenFile(const char* file_path, Arena* bin_arena)
+{
+    PlatformFile loaded = {};
+    
+    FILE* opened = linux_open_relative_file_path(file_path, "rb");
+    
+    if(!opened)
+    {
+        return loaded;
+    }
+    
+    fseek(opened, 0, SEEK_END);
+    uint64_t opened_size = ftell(opened);
+    fseek(opened, 0, SEEK_SET);
+    
+    if(bin_arena)
+    {
+        loaded.data = Alloc(bin_arena, sizeof(char)*opened_size);
+        loaded.data_arena = bin_arena;
+    }
+    else
+    {
+        loaded.data = malloc(opened_size);
+    }
+    
+    loaded.len = opened_size;
+    
+    fread(loaded.data, opened_size, 1, opened);
+    fclose(opened);
+    
+    return loaded;
+}
+
+void PlatformCloseFile(PlatformFile* file)
+{
+    if(file->data_arena)
+    {
+        DeAlloc(file->data_arena, file->data);
+    }
+    else
+    {
+        free(file->data);
+    }
+}
+
 FileSearchResult* linux_find_markup_binaries(Arena* search_results_arena, Arena* search_result_values_arena)
 {
     char* working_dir = linux_get_execution_dir();
@@ -517,8 +563,14 @@ int main()
     
     PlatformWindow* curr_window = platform.first_window;
     
-    Arena* temp_renderque = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
-    *temp_renderque = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    // Note(Leo): We use 1 renderque for all the windows then when we loop back we swap them so that we write into the 
+    //            other. This is done so we can safely access the sizing data of elements from the last frame.
+    Arena* renderques[2] = {};  
+    renderques[0] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    renderques[1] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    *renderques[0] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    *renderques[1] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    bool used_renderque = false;
     
     while(true)
     {
@@ -526,11 +578,13 @@ int main()
         if(!curr_window)
         {
             curr_window = platform.first_window;
-        }    
-        linux_process_window_events(platform.first_window);
+            used_renderque = !used_renderque;
+            // Reset the arena we will use
+            ResetArena(renderques[used_renderque]);
+        }
         
-        //print_input_state(platform.first_window);    
-        
+        linux_process_window_events(curr_window);
+                
         if(curr_window->flags)
         {
             if(curr_window->flags & RESIZED_WINDOW)
@@ -546,7 +600,7 @@ int main()
             {
                 if(RenderplatformSafeToDelete(curr_window))
                 {
-                    linux_destroy_window(platform.windows, platform.first_window);                
+                    linux_destroy_window(platform.windows, curr_window);                
                     break;
                 }            
             }
@@ -558,12 +612,11 @@ int main()
         }
     
         BEGIN_TIMED_BLOCK(TICK_AND_BUILD);
-        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(renderques[used_renderque], (DOM*)curr_window->window_dom, &curr_window->controls, curr_window->width, curr_window->height);
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);
-        RenderplatformDrawWindow(platform.first_window, final_renderque);
-        ResetArena(temp_renderque);
+        RenderplatformDrawWindow(curr_window, final_renderque);
         END_TIMED_BLOCK(DRAW_WINDOW);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);

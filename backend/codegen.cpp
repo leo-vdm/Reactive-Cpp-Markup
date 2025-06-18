@@ -39,7 +39,7 @@ void reset_bound_vars();
 ///////////////////////////////
 
 // Args: File id, component name x 2
-#define COMP_MAIN_STUB_FN_TEMPLATE "void comp_main_%d(DOM* dom, int file_id, void** d_void_target){\nvoid* allocated = AllocComponent(dom, sizeof(%s), file_id);\n((%s*)allocated)->CompMain(dom);\n*(d_void_target) = allocated;\n}\n"
+#define COMP_MAIN_STUB_FN_TEMPLATE "void comp_main_%d(DOM* dom, int file_id, void** d_void_target, CustomArgs* ARGS){\nvoid* allocated = AllocComponent(dom, sizeof(%s), file_id);\n((%s*)allocated)->CompMain(dom, ARGS);\n*(d_void_target) = allocated;\n}\n"
 #define COMP_EVENT_STUB_FN_TEMPLATE "void comp_event_%d(DOM* dom, Event* event, void* d_void){\n((%s*)d_void)->OnEvent(dom, event);\n}\n"
 
 /////////////////////////////////////
@@ -61,7 +61,8 @@ void reset_bound_vars();
 #define BINDING_BOOL_STUB_TEMPLATE "\nbool %s(void* d_void)\n{\nauto e = (%s*)d_void;\n%s;\n}\n"
 #define BINDING_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* d_void, void* ptr_void)\n{\n((%s*)d_void)->%s = ptr_void;\n}\n"
 #define BINDING_PTR_STUB_TEMPLATE "\nvoid* %s(void* d_void)\n{\nreturn (void*)((%s*)d_void)->%s;\n}\n"
-#define BINDING_INT_STUB_TEMPLATE "\nint %s(void* d_void)\n{\nauto e = (%s*)d_void;%s;\n}\n"
+#define BINDING_INT_STUB_TEMPLATE "\nint %s(void* d_void)\n{\nauto e = (%s*)d_void;\n%s;\n}\n"
+#define BINDING_ARG_STUB_TEMPLATE "\nvoid %s(void*d_void, CustomArgs* ARGS)\n{\nauto e = (%s*)d_void;\n *ARGS = {%s};\nARGS->count = %d;\n}\n"
 
 // Args: stub name, array type name, var/fn name
 #define BINDING_ARR_TEXT_STUB_TEMPLATE "\nArenaString* %s(void* a_void, Arena* strings, int index)\n{\nreturn make_string(((%.*s*)a_void + index)->%s, strings);\n}\n"
@@ -71,6 +72,7 @@ void reset_bound_vars();
 #define BINDING_ARR_VOID_PTR_STUB_TEMPLATE "\nvoid %s(void* a_void, int index, void* ptr_void)\n{\n((%.*s*)a_void + index)->%s = ptr_void;\n}\n"
 #define BINDING_ARR_PTR_STUB_TEMPLATE "\nvoid* %s(void* a_void, int index)\n{\nreturn (void*)((%.*s*)a_void + index)->%s;\n}\n"
 #define BINDING_ARR_INT_STUB_TEMPLATE "\nint %s(void* a_void, void* d_void, int index)\n{\nauto a = (%.*s*)a_void;\nauto e = (%s)d_void;\n %s;\n}\n"
+#define BINDING_ARR_ARG_STUB_TEMPLATE "\nvoid %s(void* a_void, void* d_void, int index, CustomArgs* ARGS)\n{\nauto a = (%.*s*)a_void;\nauto e = (%s*)d_void;\n *ARGS = {%s};\nARGS->count = %d;\n}\n"
 
 static Token* curr_token;
 
@@ -251,6 +253,23 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
             case(RegisteredBindingType::VOID_BOOL_RET):
                 fprintf(target->code, BINDING_VOID_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name);
                 break;
+            case(RegisteredBindingType::ARG_RET):
+             {
+                int arg_count = 1; // Should have atleast 1
+                char* curr_char = terminated_binding_name;
+                while(*curr_char != '\0')
+                {
+                    // Count the commas to find the number of args
+                    if(*curr_char == ',')
+                    {
+                        arg_count++;
+                    }
+                    curr_char++;
+                }
+            
+                fprintf(target->code, BINDING_ARG_STUB_TEMPLATE, curr_expr->eval_fn_name,  target->file_name, terminated_binding_name, arg_count);
+                break;
+             }
             }
         }
         else if(curr_binding->context == BindingContext::LOCAL)
@@ -278,6 +297,22 @@ void RegisterMarkupBindings(CompileTarget* target, Arena* markup_bindings, Arena
             case(RegisteredBindingType::VOID_BOOL_RET):
                 fprintf(target->code, BINDING_ARR_VOID_BOOL_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name);
                 break;
+            case(RegisteredBindingType::ARG_RET):
+             {
+                int arg_count = 1; // Should have atleast 1
+                char* curr_char = terminated_binding_name;
+                while(curr_char)
+                {
+                    // Count the commas to find the number of args
+                    if(*curr_char == ',')
+                    {
+                        arg_count++;
+                    }
+                }
+             
+                fprintf(target->code, BINDING_ARR_ARG_STUB_TEMPLATE, curr_expr->eval_fn_name, curr_binding->context_name.len, curr_binding->context_name.value, target->file_name, terminated_binding_name, arg_count);
+                break;
+             }
             }
         }
         

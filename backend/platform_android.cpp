@@ -1,8 +1,9 @@
+#define KEYCODE_TRANSLATION_IMPL 1
+#include "platform.h"
+
 #if PLATFORM_ANDROID
 #include <jni.h>
 #include <string>
-#define KEYCODE_TRANSLATION_IMPL 1
-#include "platform.h"
 #include <android/log.h>
 //#include <android_native_app_glue.h>
 #include <pthread.h>
@@ -702,6 +703,49 @@ FILE* android_open_relative_file_path(Arena* binary_arena, const char* relative_
     return created_file;
 }
 
+PlatformFile PlatformOpenFile(const char* file_path, Arena* bin_arena)
+{
+    PlatformFile loaded = {};
+    
+    AAsset* opened = AAssetManager_open(platform.asset_manager, file_path, AASSET_MODE_BUFFER);
+    
+    if(!opened)
+    {
+        return loaded;
+    }
+    
+    uint32_t opened_size = AAsset_getLength(opened);
+    
+    if(bin_arena)
+    {
+        loaded->data = Alloc(bin_arena, sizeof(char)*opened_size);
+        loaded->data_arena = bin_arena;
+    }
+    else
+    {
+        loaded->data = malloc(opened_size);
+    }
+    
+    loaded->len = static_cast<uint64_t>(opened_size);
+    
+    AAsset_read(opened, loaded->data, opened_size);
+    AAsset_close(opened);
+    
+    return loaded;
+}
+
+void PlatformCloseFile(PlatformFile* file)
+{
+    if(file->data_arena)
+    {
+        DeAlloc(file->data_arena, file->data);
+    }
+    else
+    {
+        free(file->data);
+    }
+}
+
 FileSearchResult* android_find_markup_binaries(Arena* binary_arena, Arena* search_results_arena, Arena* search_result_values_arena)
 {
     android_search_dir(search_results_arena, search_result_values_arena, "", ".bin");
@@ -727,54 +771,7 @@ FileSearchResult* android_find_image_resources(Arena* search_results_arena, Aren
     
     return first;
 }
-/*
-// Returns the number of bytes that were consumed
-uint32_t android_consume_utf8_to_utf32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length)
-{
-    if(buffer_length < 1)
-    {
-        return 0;
-    }
-    
-    if((utf8_buffer[0] & 0b10000000) == 0) 
-    {
-        *codepoint = (utf8_buffer[0] & 0b01111111);
-        return 1;
-    }
-    else if((utf8_buffer[0] & 0b11100000) == 0b11000000)
-    {
-        if(buffer_length < 2)
-        {
-            return 0;
-        }
-        
-        *codepoint = (utf8_buffer[0] & 0b00011111) << 6 | (utf8_buffer[1] & 0b00111111);
-        return 2;
-    }
-    else if((utf8_buffer[0] & 0b11110000) == 0b11100000)
-    {
-        if(buffer_length < 3)
-        {
-            return 0;
-        }
-        
-        *codepoint = (utf8_buffer[0] & 0b00001111) << 12 | (utf8_buffer[1] & 0b00111111) << 6 | (utf8_buffer[2] & 0b00111111);
-        return 3;
-    }
-    else
-    {
-        if(buffer_length < 4)
-        {
-            return 0;
-        }
-        
-        *codepoint = (utf8_buffer[0] & 0b00000111) << 18 | (utf8_buffer[1] & 0b00111111) << 12 | (utf8_buffer[2] & 0b00111111) << 6 | (utf8_buffer[3] & 0b00111111);
-        return 4;
-    }
-    
-    return 0;
-}
-*/
+
 void PlatformShowVirtualKeyboard(bool should_show)
 {
     if(should_show)
@@ -876,8 +873,14 @@ void* android_main(void* arguments)
         curr_image++;
     }
     
-    Arena* temp_renderque = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
-    *temp_renderque = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    // Note(Leo): Android only supports 1 window ATM but we still do this renderque swapping behaviour since not doing
+    //            it could result in weird and hard to find bugs in the future.
+    Arena* renderques[2] = {};  
+    renderques[0] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    renderques[1] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
+    *renderques[0] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    *renderques[1] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    bool used_renderque = false;
     
     while(true)
     {
@@ -889,6 +892,10 @@ void* android_main(void* arguments)
         pthread_mutex_unlock(&platform.app_thread_mutex);
     
         android_swap_event_buffers();
+        
+        used_renderque = !used_renderque;
+        // Reset the arena we will use
+        ResetArena(renderques[used_renderque]);
         
         android_process_window_events();
     
@@ -916,9 +923,9 @@ void* android_main(void* arguments)
         {
             platform.window.flags = DEAD_WINDOW;
         }
-        Arena* final_renderque = RuntimeTickAndBuildRenderque(temp_renderque, (DOM*)platform.window.window_dom, &platform.window.controls, platform.window.width, platform.window.height);
+        
+        Arena* final_renderque = RuntimeTickAndBuildRenderque(renderques[used_renderque], (DOM*)platform.window.window_dom, &platform.window.controls, platform.window.width, platform.window.height);
         RenderplatformDrawWindow(&platform.window, final_renderque);
-        ResetArena(temp_renderque);
         RuntimeClearTemporal((DOM*)platform.window.window_dom);
 
     }

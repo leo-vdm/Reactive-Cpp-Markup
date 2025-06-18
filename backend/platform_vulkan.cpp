@@ -1350,7 +1350,6 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     //            screen there is approximately 500 work groups with some overdraw on the bottom of the screen.
     //            The actual number of work groups needs to be calculated using the screen width/height
     
-    // Note(Leo): + Render tile - 1 so that we will always round up the result
     assert(window->width && window->height);
     #if PLATFORM_ANDROID
     int width = rendering_platform.orientation != ScreenOrientation::ZERO ? window->height : window->width;
@@ -1360,6 +1359,7 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     int height = window->height;
     #endif
     
+    // Note(Leo): + Render tile - 1 so that we will always round up the result
     uint32_t render_tile_size = (uint32_t)rendering_platform.render_tile_size;
     uint32_t horizontal_tiles = (width + render_tile_size - 1) / render_tile_size;
     uint32_t vertical_tiles = (height + render_tile_size - 1) / render_tile_size;
@@ -2278,17 +2278,6 @@ void RenderplatformDrawWindow(PlatformWindow* window, Arena* renderque)
     
     END_TIMED_BLOCK(WAIT_FENCE);
     
-    
-    // Note(Leo): Temporary code, REMOVE!!
-    static bool done = false;
-    if(!done)
-    {
-        FontHandle test_font = FontPlatformGetFont("platform_default_font.ttf");
-        Arena temp = CreateArena(sizeof(FontPlatformShapedGlyph)*1000, sizeof(FontPlatformShapedGlyph));
-        //FontPlatformShape(&temp, "Deez Nuts", test_font, 40, 500, 500);
-        done = true;
-    }
-
     vk_swapchain_image* curr = window->vk_first_image;
     for(int i = 0; i < image_index; i++)
     {

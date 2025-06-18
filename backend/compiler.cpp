@@ -124,9 +124,20 @@ void add_main(ArenaString* string, int file_id, const char* used_template)
     Append(string, comp_main);
     DeAllocScratch(comp_main);
 }
+#if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+#include <windows.h>
+#endif
 
 int main(int argc, char* argv[])
 {
+    #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+    SYSTEM_INFO sys_info = {};
+    GetSystemInfo(&sys_info);
+    
+    WINDOWS_PAGE_SIZE = static_cast<uintptr_t>(sys_info.dwPageSize);
+    WINDOWS_PAGE_MASK = WINDOWS_PAGE_SIZE - 1;
+    #endif
+
     // Initialize scratch arena
     InitScratch(sizeof(char)*100000);
     
@@ -232,7 +243,7 @@ int main(int argc, char* argv[])
         
         TokenizeStyle(style_source, tokens_arena, token_values_arena);
         
-        ParseStyles(&styles, tokens_arena, token_values_arena, comp_id, &state);
+        ParseStyles(&styles, tokens_arena, target.values, comp_id, &state);
         //print_styles(&styles);
         
         ResetArena(tokens_arena);
@@ -357,7 +368,7 @@ int main(int argc, char* argv[])
         
         TokenizeStyle(style_source, tokens_arena, token_values_arena);
         
-        ParseStyles(&styles, tokens_arena, token_values_arena, page_id, &state);
+        ParseStyles(&styles, tokens_arena, target.values, page_id, &state);
         
         ResetArena(tokens_arena);
         ResetArena(token_values_arena);
@@ -427,7 +438,7 @@ int main(int argc, char* argv[])
         curr++;
     }
     
-    // Close off the page mains
+    // Close off the page main
     Append(main_calls, CLOSE_MAIN_CALL_TEMLATE);
     
     Append(frame_calls, CLOSE_MAIN_CALL_TEMLATE);

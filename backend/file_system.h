@@ -76,6 +76,11 @@ struct saved_attr_comp_id_body
     int id;
 };
 
+struct saved_attr_args_body 
+{
+    int binding_id;
+};
+
 struct saved_attr_loop_body
 {
     int array_binding;
@@ -91,12 +96,6 @@ struct saved_attr_text_like_body
     int binding_id; 
 };
 
-struct saved_attr_custom_body : saved_attr_text_like_body
-{
-    int name_index;
-    int name_length;
-};
-
 struct SavedAttribute 
 {
     Compiler::AttributeType type;
@@ -105,12 +104,12 @@ struct SavedAttribute
     {
         saved_attr_comp_id_body CompId;
         saved_attr_text_like_body Text;
-        saved_attr_custom_body Custom;
         saved_attr_on_click_body OnClick;
         saved_attr_on_focus_body OnFocus;
         saved_attr_this_body This;
         saved_attr_condition_body Condition;
         saved_attr_loop_body Loop;
+        saved_attr_args_body Args;
     };
 };
 

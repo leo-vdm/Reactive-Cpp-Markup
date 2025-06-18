@@ -52,6 +52,7 @@ struct PageSwitchRequest
 };
 
 struct Element;
+struct PlatformControlState;
 
 struct DOM
 {
@@ -67,13 +68,13 @@ struct DOM
 
     Arena* bound_vars;
     Arena* events;
+    
+    PlatformControlState* controls;
+    
     uint32_t event_count;
     uint32_t max_events;
     uint32_t last_event; // Used to keep track of where the last event was popped from
-/*    
-    Arena* styles;
-    Arena* selectors;
-*/    
+
     Arena* changed_que;
     
     Arena* frame_arena; // Composted every frame
@@ -89,6 +90,14 @@ struct ElementMaster
     DOM* master_dom;
 };
 
+// Note(Leo): For the CUSTOM attribute type, allows the user to pass 10 pointers (or other things which fit in void*) to a
+//            component.
+struct CustomArgs
+{
+    void* arg[10];
+    int count;
+};
+
 enum class EventType
 {
     NONE,
@@ -98,6 +107,7 @@ enum class EventType
     FOCUSED,
     DE_FOCUSED,
     VIRTUAL_KEYBOARD, // Mostly used for mobile
+    TICK,
 };
 
 struct Event
@@ -122,6 +132,10 @@ struct Event
         {
             bool isShown;
         } VirtualKeyboard;
+        struct
+        {
+            Element* target;
+        } Tick;
     };
 };
 
@@ -222,6 +236,8 @@ CONDITION,
 LOOP,
 ON_FOCUS,
 FOCUSABLE,
+ID,
+TICKING, // The runtime sends an event every frame to "tick" this element
 };
 
 struct attr_comp_id_body 
@@ -263,39 +279,29 @@ struct attr_text_like_body
     int value_length;
     int binding_position;
     int binding_id;
+    bool is_cached;
 };
 
-struct attr_custom_body : attr_text_like_body
+struct attr_args_body
 {
-    char* name_value;
-    int name_length;
-};
-
-// Marks an attribute as having been initialized (for attributes that need initialization in the runtime evaluator)
-#define AttributeInitilized (uint32_t)(1 << 0)
-
-struct class_attribute_cache 
-{
-    // Result of merging all the styles pointed too by each selector 
-    InFlightStyle* merged_style;
+    int binding_id;  
 };
 
 struct Attribute
 {
     Attribute* next_attribute;
     AttributeType type;
-    uint32_t flags;
     
     union 
     {
         attr_comp_id_body CompId;
         attr_text_like_body Text;
-        attr_custom_body Custom;
         attr_on_click_body OnClick;
         attr_on_focus_body OnFocus;
         attr_this_body This;
         attr_condition_body Condition;
         attr_loop_body Loop;
+        attr_args_body Args;
     };
 };
 
@@ -458,6 +464,9 @@ struct Element
     // In Flight Vars
     InFlightStyle working_style;
     
+    InFlightStyle override_style;
+    bool do_override_style;
+    
     struct
     {
         float x;  
@@ -513,6 +522,7 @@ typedef bool (*SubscribedStubBool)(void*);
 typedef void (*SubscribedStubPointer)(void*, void*); // For feeding pointers to the user
 typedef void* (*SubscribedStubGetPointer)(void*); // For getting pointers from the user
 typedef int (*SubscribedStubInt)(void*);
+typedef void (*SubscribedStubArgs)(void*, CustomArgs*);
 
 typedef ArenaString* (*ArrSubscribedStubString)(void*, Arena*, int);
 typedef void (*ArrSubscribedStubVoid)(void*, void*, int);
@@ -521,6 +531,7 @@ typedef bool (*ArrSubscribedStubBool)(void*, void*, int);
 typedef void (*ArrSubscribedStubPointer)(void*, int, void*); // For feeding pointers to the user
 typedef void* (*ArrSubscribedStubGetPointer)(void*, int); // For getting pointers from the user
 typedef int (*ArrSubscribedStubInt)(void*, void*, int);
+typedef void* (*ArrSubscribedStubArgs)(void*, void*, int, CustomArgs*);
 
 enum class BoundExpressionType
 {
@@ -532,6 +543,7 @@ enum class BoundExpressionType
     PTR_RET,
     INT_RET,
     VOID_BOOL_RET,
+    ARG_RET,
 };
 
 struct BoundExpression 
@@ -550,6 +562,7 @@ struct BoundExpression
         SubscribedStubBool stub_bool;
         SubscribedStubGetPointer stub_get_ptr;
         SubscribedStubInt stub_int;
+        SubscribedStubArgs stub_args;
         
         // Locals //
         ArrSubscribedStubVoid arr_stub_void;
@@ -559,6 +572,7 @@ struct BoundExpression
         ArrSubscribedStubBool arr_stub_bool;
         ArrSubscribedStubGetPointer arr_stub_get_ptr;
         ArrSubscribedStubInt arr_stub_int;
+        ArrSubscribedStubArgs arr_stub_args;
     };
     
 };
@@ -570,6 +584,7 @@ BoundExpression* register_bound_expr(SubscribedStubPointer fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubBool fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubGetPointer fn, int id);
 BoundExpression* register_bound_expr(SubscribedStubInt fn, int id);
+BoundExpression* register_bound_expr(SubscribedStubArgs fn, int id);
 
 BoundExpression* register_bound_expr(ArrSubscribedStubVoid fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubVoidBool fn, int id);
@@ -578,6 +593,7 @@ BoundExpression* register_bound_expr(ArrSubscribedStubPointer fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubBool fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubGetPointer fn, int id);
 BoundExpression* register_bound_expr(ArrSubscribedStubInt fn, int id);
+BoundExpression* register_bound_expr(ArrSubscribedStubArgs fn, int id);
 
 extern Runtime runtime;
 
@@ -633,6 +649,7 @@ void RouteEvent(void* master, Event* event);
 
 Element* GetFocused(DOM* dom);
 
+void FocusElement(DOM* dom, Element* old_focused, Element* new_focused);
 // Runtime Function Definitions //
 
 LoadedFileHandle* GetFileFromId(int id);
@@ -645,3 +662,13 @@ void RuntimeClearTemporal(DOM* target);
 // Frees all the element masters that have been malloc'ed in all the child elements of the given start element
 // Optionally DeAlloc's all the elements/attributes that are encountered aswell
 void FreeSubtreeObjects(Element* start, DOM* dom = NULL); // If DOM is given then elements are DeAlloc'ed
+
+// Convenience methods for setting style overrides
+void SetColor(Element* element, StyleColor color);
+void SetMarginL(Element* element, Measurement sizing);
+void SetMarginR(Element* element, Measurement sizing);
+void SetMarginT(Element* element, Measurement sizing);
+void SetMarginB(Element* element, Measurement sizing);
+void SetMargin(Element* element, Margin margin);
+void SetFont(Element* element, FontHandle font);
+void SetFontSize(Element* element, Measurement sizing);

@@ -106,11 +106,31 @@ void ConvertStyles(Compiler::Style* style)
             terminated_name[curr_style->font_name.len] = '\0';
             
             added_style->font_id = FontPlatformGetFont(terminated_name);
+            
+            if(!added_style->font_id)
+            {
+                // Try loading the font
+                PlatformFile opened = PlatformOpenFile(terminated_name);
+                if(!opened.data)
+                {
+                    printf("Error while loading font '%s'\n", terminated_name);
+                    added_style->font_id = 1; // Use the default font instead             
+                }
+                else
+                {
+                    FontPlatformLoadFace(terminated_name, &opened);
+                    added_style->font_id = FontPlatformGetFont(terminated_name);
+                    PlatformCloseFile(&opened);
+                }
+            
+            }
+            
             if(!added_style->font_id)
             {
                 printf("Error while loading font '%s'\n", terminated_name);
-                added_style->font_id = 1; // Use the default font instead
+                added_style->font_id = 1; // Use the default font instead             
             }
+            
             DeAllocScratch(terminated_name);
         }
         else // Use the default font
@@ -124,7 +144,7 @@ void ConvertStyles(Compiler::Style* style)
 
 
 int InitializeRuntime(Arena* master_arena, FileSearchResult* first_binary)
-{   
+{
     // Initialize Runtime
     
     InitRuntime(master_arena, &runtime);
@@ -415,6 +435,118 @@ void update_click_state(Element* target, PlatformControlState* controls)
     
 }
 
+void merge_element_class_style(Element* element, Attribute* class_attribute)
+{
+    // Todo(Leo): Once classes get reworked to not allow bindings/multiple selectors this should all be removed
+
+    assert(class_attribute->type == AttributeType::CLASS);
+    
+    ArenaString* class_string = CreateString(runtime.strings);
+    
+    if(class_attribute->Text.binding_position) // Indicates theres text to copy before the binding
+    {
+        Append(class_string, class_attribute->Text.static_value, class_attribute->Text.binding_position*sizeof(char));
+    }
+    
+    if(class_attribute->Text.binding_id)
+    {
+        BoundExpression* binding = GetBoundExpression(class_attribute->Text.binding_id);
+        assert(binding->type == BoundExpressionType::ARENA_STRING);
+        assert(element->master);
+        ArenaString* binding_text = NULL;
+        
+        if(binding->context == BindingContext::GLOBAL)
+        {
+            binding_text = binding->stub_string((void*)element->master, runtime.strings);
+        }
+        else
+        {
+            binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
+        }
+        
+        // Note(Leo): binding_text gets freed as a part of class_string (dont need to call freestring)
+        Append(class_string, binding_text, no_copy());
+    }
+    
+    
+    if(class_attribute->Text.value_length > class_attribute->Text.binding_position) // Indicates theres text after the binding
+    {
+        Append(class_string, class_attribute->Text.static_value + class_attribute->Text.binding_position, (class_attribute->Text.value_length - class_attribute->Text.binding_position)*sizeof(char));
+    }
+    
+    if(!class_string->length)
+    {
+        return;
+    }
+    
+    // Split selectors and mangle names to create global names and combine the styles from all the selectors
+    char* flat_class_string = Flatten(class_string); 
+    char* start_address = flat_class_string;
+    char* end_address = start_address; 
+    for(int i = 0; i < class_string->length; i++)
+    {
+        // Go until hitting a space or getting to the end of the string
+        if(flat_class_string[i] != ' ' && i != class_string->length - 1)
+        {
+            end_address++;
+            continue;
+        }
+        
+        // Weve hit another space after just hitting one
+        if(start_address == end_address)
+        {
+            start_address++;
+            end_address++;
+            continue;
+        }
+        
+        // We are on the last iteration so include the remaining charachter
+        if(i == class_string->length - 1)
+        {
+            end_address++;
+        }
+        
+        // Weve succesfully found a selector
+        int name_length = end_address - start_address;
+        //printf("Found selector: %.*s\n", unmangled_name_length, start_address);
+        
+        Selector* found_selector = GetGlobalSelector({start_address, (uint32_t)name_length}, ((ElementMaster*)element->master)->file_id);
+    
+        if(found_selector)
+        {
+            InFlightStyle* selector_style = merge_selector_styles(found_selector);
+            MergeStyles(&element->working_style, selector_style);
+        }
+        
+        if(element->flags & is_hovered())
+        {
+            // Check for a hovered version of the selector
+            ArenaString* hovered_selector = CreateString(runtime.strings);
+            Append(hovered_selector, start_address, name_length);
+            Append(hovered_selector, "!hover");
+            char* flat_selector_string = Flatten(hovered_selector);
+            found_selector = GetGlobalSelector({flat_selector_string, (uint32_t)hovered_selector->length}, ((ElementMaster*)element->master)->file_id);
+    
+            if(found_selector)
+            {
+                InFlightStyle* selector_style = merge_selector_styles(found_selector);
+                MergeStyles(&element->working_style, selector_style);
+            }
+            DeAllocScratch(flat_selector_string);
+            FreeString(hovered_selector);
+        }
+        
+        
+        // Move over the ' '
+        end_address++;
+        start_address = end_address;
+        
+    }
+    
+    DeAllocScratch(flat_class_string);
+    FreeString(class_string);
+}
+
 // Note(Leo): Called for every element every frame!!!!!!
 void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Element* element)
 {
@@ -436,6 +568,11 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
     update_click_state(element, controls);
     
     merge_element_type_style(element->type, element->flags & is_hovered(), ((ElementMaster*)element->master)->file_id, &element->working_style);
+
+    if(element->do_override_style)
+    {
+        MergeStyles(&element->working_style, &element->override_style);
+    }
 
     Attribute* curr_attribute = element->first_attribute;
     while(curr_attribute)
@@ -647,11 +784,18 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 
                 break;
             }
+            case(AttributeType::TICKING):
+            {
+                Event* tick_event = PushEvent(dom);
+                tick_event->type = EventType::TICK;
+                tick_event->Tick.target = element;
+                
+                break;
+            }
             case(AttributeType::CLASS):
             {
-                // Todo(Leo): If an attribute has no binding then selector name(s) cant change, this means we could cache the 
-                // selectors that this attribute names in order to skip doing this string manipulation every frame! We can also
-                // have a cache_valid member or similiar which we can invalidate elsewhere if the selector names are manually changed
+                merge_element_class_style(element, curr_attribute);
+                /*
                 ArenaString* class_string = CreateString(runtime.strings);
                 
                 if(curr_attribute->Text.binding_position) // Indicates theres text to copy before the binding
@@ -745,7 +889,8 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                         }
                         DeAllocScratch(flat_selector_string);
                         FreeString(hovered_selector);
-                    }                
+                    }
+                    
                     
                     // Move over the ' '
                     end_address++;
@@ -755,7 +900,7 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 
                 DeAllocScratch(flat_class_string);
                 FreeString(class_string);
-                
+                */
                 break;
             }
             default:
@@ -877,9 +1022,8 @@ void sanitize_scrollable(Element* target)
     }
 }
 
-void focus_element(DOM* dom, Element* old_focused)
+void FocusElement(DOM* dom, Element* old_focused, Element* new_focused)
 {
-    Element* new_focused = dom->focused_element;
     
     if(old_focused)
     {
@@ -909,7 +1053,7 @@ void focus_element(DOM* dom, Element* old_focused)
         }
     }
     
-    if(dom->focused_element)
+    if(new_focused)
     {
         Attribute* focussed_binding = GetAttribute(new_focused, AttributeType::ON_FOCUS);
         if(focussed_binding) // Element has an OnFocus binding
@@ -936,10 +1080,14 @@ void focus_element(DOM* dom, Element* old_focused)
             focus_event->Focused.target = new_focused;    
         }
     }
+    
+    dom->focused_element = new_focused;
 }
 
 Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlState* controls, int window_width, int window_height)
 {
+    dom->controls = controls;
+    
     // Note(Leo): Page root element is always at the first address of the dom
     Element* old_focused = dom->focused_element;
     
@@ -1034,7 +1182,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     
     if(old_focused != dom->focused_element)
     {
-        focus_element(dom, old_focused);
+        FocusElement(dom, old_focused, dom->focused_element);
     }
 
     call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);    
@@ -1090,4 +1238,271 @@ uint32_t PlatformConsumeUTF8ToUTF32(const char* utf8_buffer, uint32_t* codepoint
     }
     
     return 0;
+}
+
+// Returns the number of bytes in the utf8 glob
+uint32_t PlatformUTF32ToUTF8(uint32_t codepoint, char* utf8_buffer)
+{
+    if(codepoint < 0x80) 
+    {
+        utf8_buffer[0] = (char)codepoint;
+        return 1;
+    }
+    else if(codepoint < 0x800)
+    {
+        utf8_buffer[0] = (0b11000000 | (codepoint >> 6));
+        utf8_buffer[1] = (0b10000000 | (codepoint & 0x3F));
+        return 2;
+    }
+    else if(codepoint < 0x10000)
+    {
+        utf8_buffer[0] = (0b11100000 | (codepoint >> 12));         
+		utf8_buffer[1] = (0b10000000 | ((codepoint >> 6) & 0x3f)); 
+		utf8_buffer[2] = (0b10000000 | (codepoint & 0x3f));        
+        
+        return 3;
+    }
+    else if(codepoint < 0x200000)
+    {
+        utf8_buffer[0] = (0b11110000 | (codepoint >> 18));          
+		utf8_buffer[1] = (0b10000000 | ((codepoint >> 12) & 0x3f)); 
+		utf8_buffer[2] = (0b10000000 | ((codepoint >> 6)  & 0x3f)); 
+		utf8_buffer[3] = (0b10000000 | (codepoint & 0x3f));         
+		
+        return 4;
+    }
+    
+    // Invalid codepoint
+    return 0;
+    
+}
+
+// Returns the number of bytes that were consumed.
+uint32_t PlatformConsumeUTF16ToUTF32(const uint16_t* utf16_buffer, uint32_t* codepoint, uint32_t buffer_length)
+{
+    // Need 2 bytes to have a utf16 char
+    if(buffer_length < 2)
+    {
+        return 0;
+    }
+    
+    uint16_t high_surrogate = utf16_buffer[0];
+    uint16_t low_surrogate = utf16_buffer[1];
+    
+    // Direct encoded codepoints
+    if(high_surrogate < 0xD7FF || (high_surrogate > 0xE000 && high_surrogate < 0xFFFF))
+    {
+        *codepoint = high_surrogate;
+    
+        return 2;
+    }
+    // Double word encoded codepoints
+    if(high_surrogate > 0xD800 && high_surrogate < 0xDBFF)
+    {
+        if(buffer_length < 4)
+        {
+            return 0;
+        }
+        *codepoint = ((0b0000001111111111 & high_surrogate) << 10) | (0b0000001111111111 & low_surrogate);
+        
+        return 4;
+    }
+    
+    return 0;
+}
+
+PlatformControlState* PlatformGetControlState(DOM* dom)
+{
+    return dom->controls;
+}
+
+FontPlatformShapedGlyph* PlatformGetGlyphAt(Element* text, vec2 pos)
+{
+    assert(text);
+    if(!text || text->type != ElementType::TEXT || !text->last_sizing)
+    {
+        return NULL;
+    }
+    
+    // Note(Leo): If an element is hidden then reapears its sizing pointer probably points at someone elese layout element
+    //            so ensure we dont accidentaly use that.
+    if(text->id != text->last_sizing->element_id)
+    {
+        return NULL;
+    }
+    
+    // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
+    assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
+    
+    FontPlatformShapedGlyph* curr = text->last_sizing->TEXT_COMBINED.first_glyph;
+    uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
+    
+    float base_x = text->last_sizing->position.x;
+    float base_y = text->last_sizing->position.y;
+    
+    for(uint32_t i = 0; i < count; i++)
+    {
+        bounding_box curr_bounds = { base_x + curr->placement_offsets.x, base_y + curr->placement_offsets.y,
+                                     curr->placement_size.x, curr->placement_size.y };
+        
+        if(PointInsideBounds(curr_bounds, pos))
+        {
+            return curr;
+        }
+        
+        curr++;
+    }
+    
+    return NULL;
+    
+}
+
+FontPlatformShapedGlyph* PlatformGetGlyphForBufferIndex(Element* text, uint32_t index)
+{
+    assert(text);
+    if(!text || text->type != ElementType::TEXT || !text->last_sizing)
+    {
+        return NULL;
+    }
+    
+    // Note(Leo): If an element is hidden then reapears its sizing pointer probably points at someone elese layout element
+    //            so ensure we dont accidentaly use that.
+    if(text->id != text->last_sizing->element_id)
+    {
+        return NULL;
+    }
+    
+    // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
+    assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
+    
+    FontPlatformShapedGlyph* curr = text->last_sizing->TEXT_COMBINED.first_glyph;
+    uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
+    
+    for(uint32_t i = 0; i < count; i++)
+    {
+        if(index >= curr->buffer_index && index < (curr->buffer_index + curr->run_length))
+        {
+            return curr;
+        }
+    
+        curr++;
+    }
+    
+    return NULL;
+}
+
+FontPlatformShapedGlyph* PlatformGetGlyphAt(Element* text, uint32_t index)
+{
+    assert(text);
+    if(!text || text->type != ElementType::TEXT || !text->last_sizing)
+    {
+        return NULL;
+    }
+    
+    // Note(Leo): If an element is hidden then reapears its sizing pointer probably points at someone elese layout element
+    //            so ensure we dont accidentaly use that.
+    if(text->id != text->last_sizing->element_id)
+    {
+        return NULL;
+    }
+    
+    // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
+    assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
+    
+    FontPlatformShapedGlyph* first = text->last_sizing->TEXT_COMBINED.first_glyph;
+    uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
+    
+    if(index >= count)
+    {
+        return NULL;
+    }
+    
+    return first + index;
+    
+}
+
+uint32_t PlatformGetGlyphIndex(Element* text, FontPlatformShapedGlyph* glyph)
+{
+    assert(text);
+    if(!text || text->type != ElementType::TEXT || !text->last_sizing || !glyph)
+    {
+        return 0;
+    }
+    
+    // Note(Leo): If an element is hidden then reapears its sizing pointer probably points at someone elese layout element
+    //            so ensure we dont accidentaly use that.
+    if(text->id != text->last_sizing->element_id)
+    {
+        return 0;
+    }
+    
+    // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
+    assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
+    
+    FontPlatformShapedGlyph* first = text->last_sizing->TEXT_COMBINED.first_glyph;
+    uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
+    
+    // Todo(Leo): How safe are these pointer comparisons?
+    if((first + count) < glyph || glyph < first)
+    {
+        return 0;
+    }
+    
+    return glyph - first;
+}
+
+uint32_t PlatformGetGlyphCount(Element* text)
+{
+    assert(text);
+    if(!text || text->type != ElementType::TEXT || !text->last_sizing)
+    {
+        return 0;
+    }
+    
+    // Note(Leo): If an element is hidden then reapears its sizing pointer probably points at someone elese layout element
+    //            so ensure we dont accidentaly use that.
+    if(text->id != text->last_sizing->element_id)
+    {
+        return 0;
+    }
+    
+    // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
+    assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
+    
+    uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
+    
+    return count;
+}
+
+void PlatformUpdateStyle(Element* target)
+{
+    if(!target)
+    {
+        return;
+    }
+
+    // Note(Leo): Most of this is copy pasta from runtime_evaluate_attributes
+    DefaultStyle(&target->working_style);
+    merge_element_type_style(target->type, target->flags & is_hovered(), ((ElementMaster*)target->master)->file_id, &target->working_style);
+    
+    if(target->do_override_style)
+    {
+        MergeStyles(&target->working_style, &target->override_style);
+    }
+    
+    if(target->type == ElementType::TEXT)
+    {
+        // Text font and size comes from parent
+        target->working_style.font_id = target->parent->working_style.font_id;
+        target->working_style.font_size = target->parent->working_style.font_size;
+        target->working_style.text_color = target->parent->working_style.text_color;
+        return;
+    }
+    
+    Attribute* class_attribute = GetAttribute(target, AttributeType::CLASS);
+    
+    if(class_attribute)
+    {
+        merge_element_class_style(target, class_attribute);
+    }
 }

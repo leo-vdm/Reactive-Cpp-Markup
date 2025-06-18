@@ -13,9 +13,10 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
 void aggregate_selectors(LocalStyles* target, int style_id, int global_prefix, CompilerState* state);
 StyleFieldType parse_field_name(StringView* name);
 Measurement parse_size_field(StringView* expression);
-void parse_style_expr(Style* target);
+void parse_style_expr(Style* target, Arena* values_arena);
 void clear_registered_bindings();
 void clear_registered_ids();
+void sanity_check_style(Style* target);
 
 struct ast_context
 {
@@ -352,6 +353,8 @@ std::map<std::string, AttributeType> attribute_map =
     {"onfocus", AttributeType::ON_FOCUS },
     {"focusable", AttributeType::FOCUSABLE },
     {"id", AttributeType::ID },
+    {"args", AttributeType::CUSTOM},
+    {"ticking", AttributeType::TICKING},
 };
 
 
@@ -389,7 +392,7 @@ AttributeType GetAttributeFromName(StringView* name)
     if(search != attribute_map.end()){
         return search->second;
     }
-    return AttributeType::CUSTOM;
+    return AttributeType::NONE;
 }
 
 RegisteredTemplate* RegisterTemplate(Arena* templates_arena, Compiler::CompilerState* state)
@@ -441,7 +444,8 @@ int RegisterBindingByName(Arena* bindings_arena, Arena* values_arena, StringView
     auto search = registered_binding_map.find((const char*)terminated_name);
     
     // If the binding is already registered, return its ID
-    if(search != registered_binding_map.end()){
+    if(search != registered_binding_map.end())
+    {
         // Register the tag with the binding
         int binding_id = search->second;
         
@@ -494,9 +498,9 @@ void ClearRegisteredSelectors()
     registered_selector_map.clear();
 }
 
-void ParseStyles(LocalStyles* target, Arena* style_tokens, Arena* style_token_values, int file_prefix, CompilerState* state)
+void ParseStyles(LocalStyles* target, Arena* style_tokens, Arena* values_arena, int file_prefix, CompilerState* state)
 {
-    #define push_style() (Style*)Alloc(target->styles, sizeof(Style))
+    #define push_style() (Style*)Alloc(target->styles, sizeof(Style), zero())
     
     curr_token = (Token*)style_tokens->mapped_address;
     Style* curr_style;
@@ -520,17 +524,29 @@ void ParseStyles(LocalStyles* target, Arena* style_tokens, Arena* style_token_va
                 }
                 else // Style attribute decleration.
                 {
-                    parse_style_expr(curr_style);
+                    parse_style_expr(curr_style, values_arena);
                 }
                 break;
             }
             case(TokenType::CLOSE_BRACKET):
             {
                 style_opened = false;
+                if(!curr_style)
+                {
+                    printf("Unexpected closing bracket while parsing style!\n");
+                    break;
+                }
+                
+                sanity_check_style(curr_style);
+                break;
             }
         }
         eat();
     }
+    
+    // Stoppers to mark the end of styles/selectors
+    push_style();
+    Alloc(target->selectors, sizeof(Selector), zero());
 }
 
 char* ParseStyleStub()
@@ -625,18 +641,16 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
         Attribute* new_attribute = push_attribute();
         // Determine the attribute type
         new_attribute->type = GetAttributeFromName(&curr_token->body);
-        
-        if(new_attribute->type == AttributeType::CUSTOM)
+    
+        switch(new_attribute->type)
         {
-            if(parent_tag->type != TagType::CUSTOM)
-            {
-                printf("Warning: Custom attribute \"%.*s\" on non-component tag. Please insure this was intended and not a typo.\n", curr_token->body.len, curr_token->body.value);
-            }
-            new_attribute->Custom.name_length = curr_token->body.len;
-            new_attribute->Custom.name = (char*)Alloc(values_arena, new_attribute->Custom.name_length*sizeof(char));
-            memcpy(new_attribute->Custom.name, curr_token->body.value, new_attribute->Custom.name_length);
+        case(AttributeType::NONE):
+        {
+            printf("Unknown attribute \"%.*s\".", curr_token->body.len, curr_token->body.value);
+            eat();
+            continue;
         }
-        else if(new_attribute->type == AttributeType::FOCUSABLE) // No value 
+        case(AttributeType::FOCUSABLE): // No value 
         {
             eat();
             if(curr_token->type != TokenType::ATTRIBUTE_IDENTIFIER && curr_token->type != TokenType::END)
@@ -647,9 +661,28 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
             else if(curr_token->type == TokenType::END)
             {
                 parent_tag->num_attributes++;
-                break;
+                continue;
             }
+            parent_tag->num_attributes++;
             continue;
+        }
+        case(AttributeType::TICKING):
+        {
+            eat();
+            if(curr_token->type != TokenType::ATTRIBUTE_IDENTIFIER && curr_token->type != TokenType::END)
+            {
+                printf("Unexpected token while parsing attribute!\n");
+                return NULL;
+            }
+            else if(curr_token->type == TokenType::END)
+            {
+                parent_tag->num_attributes++;
+                continue;
+            }
+            
+            parent_tag->num_attributes++;
+            continue;
+        }
         }
         
         if(!expect_eat(TokenType::EQUALS))
@@ -725,6 +758,17 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
             case(AttributeType::ID):
             {
                 printf("Found a binding while parsing id attribute. Bindings are not allowed for id attributes since they baked at compile time.\n");
+                break;
+            }
+            case(AttributeType::CUSTOM):
+            {
+                if(parent_tag->type != TagType::CUSTOM)
+                {
+                    printf("Warning: Args attribute on non-component tag. Please ensure this was intended and not a typo.\n");
+                }
+                
+                new_attribute->Args.binding_id = RegisterBindingByName(registered_bindings_arena, values_arena, &curr_token->body, RegisteredBindingType::ARG_RET, is_local, state, parent_tag->context_name);
+                
                 break;
             }
             case(AttributeType::LOOP):
@@ -830,6 +874,7 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
             case(AttributeType::THIS_ELEMENT):
             case(AttributeType::CONDITION):
             case(AttributeType::LOOP):
+            case(AttributeType::CUSTOM):
             {
                 break;
             }
@@ -978,6 +1023,7 @@ std::map<std::string, DisplayType> display_type_map =
 {
     {"normal", DisplayType::NORMAL},
     {"hidden", DisplayType::HIDDEN},
+    {"relative", DisplayType::RELATIONAL},
     {"manual", DisplayType::MANUAL},
 };
 
@@ -1040,9 +1086,28 @@ std::map<std::string, StyleFieldType> style_field_map =
     {"priority", StyleFieldType::PRIORITY },
 };
 
+// Note(Leo): For printing error messages relating to style rules
+void sanity_check_style(Style* target)
+{
+    if(target->display == DisplayType::MANUAL || target->display == DisplayType::RELATIONAL)
+    {
+        if(target->width.type == MeasurementType::GROW)
+        {
+            printf("A manual or relative element should not use width: grow; since it has no real siblings, you should use width: 100%; instead.\n");            
+            target->width.type = MeasurementType::PERCENT;
+            target->width.size = 1.0f;
+        }
+        if(target->height.type == MeasurementType::GROW)
+        {
+            printf("A manual or relative element should not use height: grow; since it has no real siblings, you should use height: 100%; instead.\n");            
+            target->width.type = MeasurementType::PERCENT;
+            target->width.size = 1.0f;
+        }
+    }
+}
 
 // Parses the style entry at the current token into the given style
-void parse_style_expr(Style* target)
+void parse_style_expr(Style* target, Arena* values_arena)
 {
     StringView stripped_field = StripOuterWhitespace(&curr_token->body);
     StyleFieldType expr_type = parse_field_name(&stripped_field);
@@ -1139,7 +1204,11 @@ void parse_style_expr(Style* target)
         {
             if(!expect_eat(TokenType::QUOTE)){ printf("Expected an opening quote while parsing style!\n"); }
             if(!expect_eat(TokenType::TEXT)){ printf("Expected a value while parsing font name!\n"); }
-            memcpy(&target->font_name, &curr_token->body, sizeof(StringView));
+            
+            target->font_name.value = (char*)Alloc(values_arena, sizeof(char)*curr_token->body.len);
+            target->font_name.len = curr_token->body.len;
+            
+            memcpy(target->font_name.value, curr_token->body.value, sizeof(char)*curr_token->body.len);
             if(!expect_eat(TokenType::QUOTE)){ printf("Expected a closing quote while parsing style!\n"); }
             
             //printf("Parsed a font name: '%.*s'\n", target->font_name.len, target->font_name.value);
@@ -1222,6 +1291,13 @@ void parse_style_expr(Style* target)
             if(!expect_eat(TokenType::TEXT)){ printf("Expected a value decleration while parsing style!"); }
             StringView stripped = StripOuterWhitespace(&curr_token->body);
             target->display = parse_display_type(&stripped);
+            
+            if(target->display == DisplayType::NONE)
+            {
+                target->display = DisplayType::NORMAL;
+                printf("Unknown display type \"%.*s\"\n", stripped.len, stripped.value);
+            }
+            
             break;
         }
         case(StyleFieldType::MARGIN):

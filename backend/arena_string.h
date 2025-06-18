@@ -50,3 +50,7 @@ void Append(ArenaString* target, ArenaString* source, int flags = 0);
 
 // Remove count chars starting at index
 void Remove(ArenaString* target, int index, int count = 0);
+
+void Insert(ArenaString* target, const char* source, int index);
+void Insert(ArenaString* target, const char* source, int length, int index);
+void Insert(ArenaString* target, ArenaString* src, int index);

@@ -5,9 +5,10 @@
 #include <iostream>
 #include "arena.h"
 
-#define page_size 4095
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
+uintptr_t WINDOWS_PAGE_MASK;
+uintptr_t WINDOWS_PAGE_SIZE;
 // Windows definitions for memory management
 #include <windows.h>
 Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
@@ -15,8 +16,8 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
     Arena new_arena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
     
     // Allocate the first page
-    VirtualAlloc((void*)(new_arena.next_address & ~(page_size)), page_size, MEM_COMMIT, PAGE_READWRITE);
-    new_arena.furthest_committed = (new_arena.next_address & ~(page_size)) + page_size;
+    VirtualAlloc((void*)(new_arena.next_address & ~(WINDOWS_PAGE_MASK)), WINDOWS_PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE);
+    new_arena.furthest_committed = (new_arena.next_address & ~(WINDOWS_PAGE_MASK)) + WINDOWS_PAGE_SIZE;
     
     return new_arena;
 }
@@ -50,12 +51,13 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     {
         // Check if we are allocating over the page boundry of memory weve commited, if we are commit the new pages.
         //
-        uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
+        // Note(Leo): + Page size to always round up
+        uintptr_t new_next_address = arena->next_address + size;
         
-        if(aligned_new_next_address > arena->furthest_committed){
-            uintptr_t aligned_next_address = arena->next_address & ~(page_size);
-            arena->furthest_committed = aligned_new_next_address + page_size;
-            LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
+        if(new_next_address > arena->furthest_committed){
+            uintptr_t aligned_new_next_address = (new_next_address + WINDOWS_PAGE_SIZE) & ~(WINDOWS_PAGE_MASK);
+            LPVOID result = VirtualAlloc((void*)arena->furthest_committed, aligned_new_next_address - arena->furthest_committed, MEM_COMMIT, PAGE_READWRITE);
+            arena->furthest_committed = aligned_new_next_address;
         }
         arena->next_address += size;
     }
@@ -76,45 +78,6 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     
     return allocatedAddress;
 }
-
-/*
-void* Alloc(Arena* arena, uint64_t flags)
-{
-    void* allocatedAddress = (void*)arena->next_address;
-    int size = arena->alloc_size;
-    
-    // If there is a free block, allocate that instead.
-    if(arena->first_free.next_freeblock_offset != 0)
-    {
-        allocatedAddress = (void*)(arena->first_free.next_free);
-        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
-    }
-    else
-    {
-        // Check if we are allocating over a page boundry, if we are commit the new pages.
-        uintptr_t aligned_next_address = arena->next_address & ~(page_size);
-        uintptr_t aligned_new_next_address = (arena->next_address + size) & ~(page_size);
-        
-        if(aligned_next_address < aligned_new_next_address){
-            LPVOID result = VirtualAlloc((void*)(aligned_next_address + page_size), size, MEM_COMMIT, PAGE_READWRITE);
-        }
-        arena->next_address += size;
-    }
-    
-    if(flags & no_zero())
-    {
-       return allocatedAddress;
-    }
-    
-    if(flags & zero() || !arena->flags)
-    {
-        memset((void*)allocatedAddress, 0, size);
-        return allocatedAddress;
-    }
-    
-    return allocatedAddress;
-}
-*/
 
 void DeAlloc(Arena* arena, void* address)
 {
@@ -186,36 +149,6 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     
     return allocatedAddress;
 }
-
-/*
-void* Alloc(Arena* arena, uint64_t flags)
-{
-    void* allocatedAddress = (void*)arena->next_address;
-    int size = arena->alloc_size;
-    
-    // If there is a free block, allocate that instead.
-    if(arena->first_free.next_free){
-        allocatedAddress = (void*)(arena->first_free.next_free);
-        arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
-    }
-    else
-    {
-        arena->next_address += size;
-    }
-    
-    if(flags & no_zero())
-    {
-        return allocatedAddress;
-    }
-    if(flags & zero() || !arena->flags)
-    {
-        memset((void*)allocatedAddress, 0, size);
-        return allocatedAddress;
-    }
-    
-    return allocatedAddress;
-}
-*/
 
 void DeAlloc(Arena* arena, void* address)
 {

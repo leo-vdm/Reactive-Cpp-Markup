@@ -43,6 +43,13 @@ enum class CursorSource
     TOUCH
 };
 
+// The current shown cursor image
+enum class CursorImage
+{
+    POINTER,
+    HAND_POINT,
+};
+
 #define VIRTUAL_KEY_COUNT 255
 struct VirtualKeyboard
 {
@@ -114,6 +121,41 @@ void PlatformShowVirtualKeyboard(bool should_show);
 
 // Returns the number of bytes that were consumed
 uint32_t PlatformConsumeUTF8ToUTF32(const char* utf8_buffer, uint32_t* codepoint, uint32_t buffer_length);
+uint32_t PlatformConsumeUTF16ToUTF32(const uint16_t* utf16_buffer, uint32_t* codepoint, uint32_t buffer_length);
+// Returns the number of UTF8 bytes generated
+uint32_t PlatformUTF32ToUTF8(uint32_t codepoint, char* utf8_buffer);
+
+struct PlatformFile
+{
+    Arena* data_arena; // The Arena that this file was loaded into, NULL for a malloced file
+    void* data;
+    uint64_t len;
+};
+
+// Note(Leo): Path is relative to the executable.
+PlatformFile PlatformOpenFile(const char* file_path, Arena* bin_arena = NULL);
+void PlatformCloseFile(PlatformFile* file);
+
+PlatformControlState* PlatformGetControlState(DOM* dom);
+
+// Searches the shaped glyphs of the given text element (only if its been shaped) and returns the glyph whats bounding
+// box intersects the given point (in screenspace coords) or NULL if there are none.
+FontPlatformShapedGlyph* PlatformGetGlyphAt(Element* text, vec2 pos);
+
+// Gets the glyph containing the byte at the given index in the source buffer. (glyphs can have multiple bytes each)
+FontPlatformShapedGlyph* PlatformGetGlyphForBufferIndex(Element* text, uint32_t index);
+
+// Gets the glyph corresponding to index in the text element
+FontPlatformShapedGlyph* PlatformGetGlyphAt(Element* text, uint32_t index);
+
+// A wrapper for the pointer arithmetic finding what the index of this glyph is
+uint32_t PlatformGetGlyphIndex(Element* text, FontPlatformShapedGlyph* glyph);
+
+// Wrapper for getting the number of glyphs a text element's buffer produced
+uint32_t PlatformGetGlyphCount(Element* text);
+
+// Immidiately re-merge the given element's style (including overrides)
+void PlatformUpdateStyle(Element* target);
 
 extern float SCROLL_MULTIPLIER;
 
@@ -125,7 +167,7 @@ extern float SCROLL_MULTIPLIER;
 
 #define TIMER_INTRINSIC() __rdtsc()
 
-#define WINDOWS_WINDOW_CLASS_NAME "TemporaryMarkupWindowClass"
+#define WINDOWS_WINDOW_CLASS_NAME L"TemporaryMarkupWindowClass"
 
 #define FONT_PLATFORM_USE_SDF 1
 
@@ -293,6 +335,11 @@ struct FontPlatformShapedGlyph
     vec3 atlas_offsets;
     vec2 atlas_size;
     
+    uint32_t buffer_index; // Index of this glyph run into the original buffer
+    uint32_t run_length; // Length of this run (Several codepoints may be combined by harfbuzz)
+    
+    float base_line;
+    
     StyleColor color;
 };
 
@@ -317,6 +364,7 @@ struct FontPlatformShapedText
 int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size);
 
 void FontPlatformLoadFace(const char* font_name, FILE* font_file);
+void FontPlatformLoadFace(const char* font_name, PlatformFile* font_file);
 void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point);
 FontHandle FontPlatformGetFont(const char* font_name);
 //FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
@@ -355,8 +403,22 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
     
     #define SetupInstrumentation() 
     
+    #if PLATFORM_LINUX || PLATFORM_ANDROID
     #define BEGIN_TIMED_BLOCK(name) uint64_t START_CYCLE_##name = TIMER_INTRINSIC(); INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].hits++;
     #define END_TIMED_BLOCK(name) INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].cycle_count += TIMER_INTRINSIC() - START_CYCLE_##name;
+    #endif
+    
+    #if PLATFORM_WINDOWS
+    #define BEGIN_TIMED_BLOCK(name) uint64_t START_CYCLE_##name = 0;\
+            QueryPerformanceCounter((LARGE_INTEGER*)&START_CYCLE_##name);\
+            INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].hits++;
+    
+    #define END_TIMED_BLOCK(name) uint64_t END_FREQ_##name = 0;\
+            uint64_t END_CYCLE_##name = 0;\
+            QueryPerformanceFrequency((LARGE_INTEGER*)&END_FREQ_##name);\
+            QueryPerformanceCounter((LARGE_INTEGER*)&END_CYCLE_##name);\
+            INSTRUMENT_TIMINGS[TIMED_BLOCKS_##name].cycle_count += ((END_CYCLE_##name - START_CYCLE_##name) * 1000000) / END_FREQ_##name;
+    #endif
 
     // Define once at the platform implementation like an STB style lib
     #if INSTRUMENT_IMPLEMENTATION
@@ -382,8 +444,14 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
             {
                 if(INSTRUMENT_TIMINGS[i].hits)
                 {
+                    #if PLATFORM_LINUX || PLATFORM_ANDROID
                     printf("\t%s: %ldcy, %ldhits, %ldcy/hit\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits);
+                    #endif
+                    #if PLATFORM_WINDOWS
+                    printf("\t%s: %ld microseconds, %ldhits, %ld microseconds/hit\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits);
+                    #endif
                     INSTRUMENT_TIMINGS[i] = {};
+                    
                 }
             }
         }
