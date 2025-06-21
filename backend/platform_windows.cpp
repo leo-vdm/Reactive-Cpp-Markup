@@ -190,7 +190,6 @@ LRESULT win32_main_callback(HWND window_handle, UINT message, WPARAM w_param, LP
             }
             
             PlatformConsumeUTF16ToUTF32((uint16_t*)&w_param, &added->Key.key_char, 4);
-            printf("Got char: %c, Encoding: %X\n", (char)w_param, added->Key.key_char);
             
             break;
         }

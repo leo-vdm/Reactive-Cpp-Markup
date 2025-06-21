@@ -5,7 +5,6 @@
 #include <iostream>
 #include "arena.h"
 
-
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 uintptr_t WINDOWS_PAGE_MASK;
 uintptr_t WINDOWS_PAGE_SIZE;
@@ -25,6 +24,7 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
 Arena CreateArenaWith(void* memory_block, int memory_block_size, int alloc_size, uint64_t flags)
 {
     Arena new_arena = Arena(memory_block, memory_block_size, alloc_size, flags);
+
     new_arena.furthest_committed = new_arena.next_address + memory_block_size;
     return new_arena;
 }
@@ -48,13 +48,14 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
         arena->first_free.next_free = ((FreeBlock*)allocatedAddress)->next_free;
     }
     else
-    {
+    {    
         // Check if we are allocating over the page boundry of memory weve commited, if we are commit the new pages.
         //
         // Note(Leo): + Page size to always round up
         uintptr_t new_next_address = arena->next_address + size;
         
-        if(new_next_address > arena->furthest_committed){
+        if(new_next_address > arena->furthest_committed)
+        {
             uintptr_t aligned_new_next_address = (new_next_address + WINDOWS_PAGE_SIZE) & ~(WINDOWS_PAGE_MASK);
             LPVOID result = VirtualAlloc((void*)arena->furthest_committed, aligned_new_next_address - arena->furthest_committed, MEM_COMMIT, PAGE_READWRITE);
             arena->furthest_committed = aligned_new_next_address;
@@ -83,17 +84,21 @@ void DeAlloc(Arena* arena, void* address)
 {
     ((FreeBlock*)address)->next_free = arena->first_free.next_free;
     arena->first_free.next_free = ((FreeBlock*)address);
+    
 }
 
 void ResetArena(Arena* arena)
 {
+    
     arena->next_address = arena->mapped_address;
     arena->first_free = {};
+    
 }
 
 void FreeArena(Arena* arena)
 {
     VirtualFree((void*)arena->mapped_address, arena->size, MEM_RELEASE);
+
 }
 
 #elif defined(__linux__) && !defined(_WIN32)
@@ -186,7 +191,6 @@ void* Push(Arena* arena, int size, uint64_t flags)
 
 // Get space from the scratch arena
 void* AllocScratch(int alloc_size, uint64_t flags)
-
 {
     assert(alloc_size > 0);
     if(scratch_arena.mapped_address == 0)

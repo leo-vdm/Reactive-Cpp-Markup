@@ -789,11 +789,14 @@ Event* PopEvent(DOM* dom)
 {
     if(dom->event_count == 0)
     {
+        ResetArena(dom->events);
         return NULL;
     }
 
-    Event* popped = (Event*)dom->events->mapped_address + (dom->event_count - 1);
-
+    // Todo(Leo): Fix this by changing it to a circular buffer instead of an arena thing.
+    // Note(Leo): This is a really silly way of popping of the start of the arena to get events in-order
+    Event* popped = (Event*)dom->events->next_address - dom->event_count;
+    
     void* allocated = Alloc(dom->frame_arena, sizeof(Event)*2);
     Event* copied = align_mem(allocated, Event);
     memcpy(copied, popped, sizeof(Event));

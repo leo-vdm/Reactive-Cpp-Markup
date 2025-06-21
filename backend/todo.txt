@@ -1,8 +1,6 @@
 Things that need to be done:
 High Priority:
--   Add a "recalculate style now" function, neccesary since otherwise there is a 1 frame lag between calling SetColor() etc
-    and the override actually being processed into the element.
--   DO the text shape caching system. Add a "shape/calculate now" so we can immediately know the positions of glyphs after
+-   Add a "shape/calculate now" so we can immediately know the positions of glyphs after
     text changes. To support this we also need a "re-process attributes now" or something of the sort to instantly repoll
     text from bindings. Potentially runtime_evaluate_attributes() can already do this but it needs a userland interface.
 

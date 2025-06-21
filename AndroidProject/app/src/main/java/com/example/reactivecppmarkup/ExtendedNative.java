@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.PixelFormat;
 import android.os.Bundle;
+import android.os.Debug;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
@@ -78,10 +79,17 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
             return; // Already shown
         }
 
-        content.setEnabled(true);
-        content.requestFocus();
-        InputMethodManager input_manager = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-        input_manager.toggleSoftInputFromWindow(content.getApplicationWindowToken(), InputMethodManager.SHOW_FORCED, 0);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                content.setEnabled(true);
+                content.requestFocus();
+
+                InputMethodManager input_manager = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                input_manager.toggleSoftInputFromWindow(content.getApplicationWindowToken(), InputMethodManager.SHOW_FORCED, 0);
+                //input_manager.showSoftInput(content, InputMethodManager.SHOW_FORCED);
+            }
+        });
     }
 
     public void hide_soft_keyboard()
@@ -91,9 +99,14 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
        //     return; // Already hidden
        // }
 
-        InputMethodManager input_manager = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
-        input_manager.hideSoftInputFromWindow(content.getApplicationWindowToken(), 0);
-        content.setEnabled(false);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                InputMethodManager input_manager = (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                input_manager.hideSoftInputFromWindow(content.getApplicationWindowToken(), 0);
+                content.setEnabled(false);
+            }
+        });
     }
 
     @Override

@@ -154,8 +154,11 @@ uint32_t PlatformGetGlyphIndex(Element* text, FontPlatformShapedGlyph* glyph);
 // Wrapper for getting the number of glyphs a text element's buffer produced
 uint32_t PlatformGetGlyphCount(Element* text);
 
-// Immidiately re-merge the given element's style (including overrides)
+// Immediately re-merge the given element's style (including overrides)
 void PlatformUpdateStyle(Element* target);
+
+// Immediately re-evaluate the attributes of the given element.
+void PlatformEvaluateAttributes(DOM* dom, Element* target);
 
 extern float SCROLL_MULTIPLIER;
 
@@ -376,7 +379,7 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
 
 bool PointInsideBounds(const bounding_box bounds, const vec2 point);
 
-#define USING_INSTREMENTATION 0
+#define USING_INSTREMENTATION 1
 // Instrumentation related stuff
 #if !INDCLUDED_INSTREMENTATION && USING_INSTREMENTATION  
 #define INDCLUDED_INSTREMENTATION 1
@@ -389,6 +392,7 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
         TIMED_BLOCKS_RENDER_PRESENT,
         TIMED_BLOCKS_TICK_AND_BUILD,
         TIMED_BLOCKS_HARFBUZZ,
+        TIMED_BLOCKS_MEOW,
         TIMED_BLOCKS_BLOCKS_MAX, // Note(Leo): Should be at the end of the enum
     };
     
@@ -433,6 +437,7 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
             "RENDER_PRESENT",
             "TICK_AND_BUILD",
             "HARFBUZZ",
+            "MEOW_HASH",
             "BLOCKS_MAX",
         };
 

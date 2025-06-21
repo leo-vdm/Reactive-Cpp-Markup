@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #pragma once
+
 struct FreeBlock
 {
     FreeBlock* next_free;
@@ -14,7 +15,7 @@ struct Arena
     int size;
     int alloc_size; // Size of objects in this arena
     int flags;
-        
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
     uintptr_t furthest_committed; // The end of the furthest page we have commited
 #endif 

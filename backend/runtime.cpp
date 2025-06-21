@@ -612,9 +612,9 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 
                 element->Text.temporal_text_length = binding_text->length;
                 
-                // Note(Leo): +1 to fit \0 which is automatically apended
+                // Note(Leo): A \0 is automatically added by flatten so account for it
                 element->Text.temporal_text = (char*)Alloc(dom->frame_arena, sizeof(char)*(binding_text->length + 1));
-                Flatten(binding_text, element->Text.temporal_text);
+                Flatten(binding_text, element->Text.temporal_text, binding_text->length + 1);
             
                 FreeString(binding_text);
                 
@@ -795,112 +795,7 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
             case(AttributeType::CLASS):
             {
                 merge_element_class_style(element, curr_attribute);
-                /*
-                ArenaString* class_string = CreateString(runtime.strings);
                 
-                if(curr_attribute->Text.binding_position) // Indicates theres text to copy before the binding
-                {
-                    Append(class_string, curr_attribute->Text.static_value, curr_attribute->Text.binding_position*sizeof(char));
-                }
-                
-                if(curr_attribute->Text.binding_id)
-                {
-                    BoundExpression* binding = GetBoundExpression(curr_attribute->Text.binding_id);
-                    assert(binding->type == BoundExpressionType::ARENA_STRING);
-                    assert(element->master);
-                    ArenaString* binding_text = NULL;
-                    
-                    if(binding->context == BindingContext::GLOBAL)
-                    {
-                        binding_text = binding->stub_string((void*)element->master, runtime.strings);
-                    }
-                    else
-                    {
-                        binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
-                    }
-                    
-                    // Note(Leo): binding_text gets freed as a part of class_string (dont need to call freestring)
-                    Append(class_string, binding_text, no_copy());
-                }
-                
-                
-                if(curr_attribute->Text.value_length > curr_attribute->Text.binding_position) // Indicates theres text after the binding
-                {
-                    Append(class_string, curr_attribute->Text.static_value + curr_attribute->Text.binding_position, (curr_attribute->Text.value_length - curr_attribute->Text.binding_position)*sizeof(char));
-                }
-                
-                if(!class_string->length)
-                {
-                    break;
-                }
-                
-                // Split selectors and mangle names to create global names and combine the styles from all the selectors
-                char* flat_class_string = Flatten(class_string); 
-                char* start_address = flat_class_string;
-                char* end_address = start_address; 
-                for(int i = 0; i < class_string->length; i++)
-                {
-                    // Go until hitting a space or getting to the end of the string
-                    if(flat_class_string[i] != ' ' && i != class_string->length - 1)
-                    {
-                        end_address++;
-                        continue;
-                    }
-                    
-                    // Weve hit another space after just hitting one
-                    if(start_address == end_address)
-                    {
-                        start_address++;
-                        end_address++;
-                        continue;
-                    }
-                    
-                    // We are on the last iteration so include the remaining charachter
-                    if(i == class_string->length - 1)
-                    {
-                        end_address++;
-                    }
-                    
-                    // Weve succesfully found a selector
-                    int name_length = end_address - start_address;
-                    //printf("Found selector: %.*s\n", unmangled_name_length, start_address);
-                    
-                    Selector* found_selector = GetGlobalSelector({start_address, (uint32_t)name_length}, ((ElementMaster*)element->master)->file_id);
-
-                    if(found_selector)
-                    {
-                        InFlightStyle* selector_style = merge_selector_styles(found_selector);
-                        MergeStyles(&element->working_style, selector_style);
-                    }
-                    
-                    if(element->flags & is_hovered())
-                    {
-                        // Check for a hovered version of the selector
-                        ArenaString* hovered_selector = CreateString(runtime.strings);
-                        Append(hovered_selector, start_address, name_length);
-                        Append(hovered_selector, "!hover");
-                        char* flat_selector_string = Flatten(hovered_selector);
-                        found_selector = GetGlobalSelector({flat_selector_string, (uint32_t)hovered_selector->length}, ((ElementMaster*)element->master)->file_id);
-
-                        if(found_selector)
-                        {
-                            InFlightStyle* selector_style = merge_selector_styles(found_selector);
-                            MergeStyles(&element->working_style, selector_style);
-                        }
-                        DeAllocScratch(flat_selector_string);
-                        FreeString(hovered_selector);
-                    }
-                    
-                    
-                    // Move over the ' '
-                    end_address++;
-                    start_address = end_address;
-                    
-                }
-                
-                DeAllocScratch(flat_class_string);
-                FreeString(class_string);
-                */
                 break;
             }
             default:
@@ -912,6 +807,16 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
         
         curr_attribute = curr_attribute->next_attribute; 
     }
+}
+
+void PlatformEvaluateAttributes(DOM* dom, Element* target)
+{
+    if(!dom || !target || !dom->controls)
+    {
+        return;
+    }
+    
+    runtime_evaluate_attributes(dom, dom->controls, target);
 }
 
 void RuntimeClearTemporal(DOM* target)
