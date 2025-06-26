@@ -550,6 +550,8 @@ void merge_element_class_style(Element* element, Attribute* class_attribute)
 // Note(Leo): Called for every element every frame!!!!!!
 void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Element* element)
 {
+    BEGIN_TIMED_BLOCK(EVALUATE_ATTRIBUTES);
+    
     DefaultStyle(&element->working_style);
     if(element->last_sizing)
     {
@@ -807,6 +809,8 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
         
         curr_attribute = curr_attribute->next_attribute; 
     }
+    
+    END_TIMED_BLOCK(EVALUATE_ATTRIBUTES);
 }
 
 void PlatformEvaluateAttributes(DOM* dom, Element* target)
@@ -837,7 +841,7 @@ bool should_capture_scroll(PlatformControlState* controls, Element* target)
     
     if(PointInsideBounds(target->last_sizing->bounds, controls->cursor_pos) && 
         target->working_style.vertical_clipping == ClipStyle::SCROLL &&
-        target->last_sizing->bounds.height < target->last_sizing->sizing.height.desired.size 
+        target->last_sizing->bounds.height < target->last_sizing->sizing.height.current
     )
     {
         return true;
@@ -856,12 +860,12 @@ void scroll_element(vec2 scroll_dir, Element* target)
     
     float scrollable_top = (target->last_sizing->bounds.y - target->last_sizing->position.y);
     scrollable_top += target->scroll.y;
-    float scrollable_bottom = (target->last_sizing->position.y + MAX(target->last_sizing->sizing.height.current, target->last_sizing->sizing.height.desired.size)) - (target->last_sizing->bounds.y + target->last_sizing->bounds.height);
+    float scrollable_bottom = (target->last_sizing->position.y + target->last_sizing->sizing.height.current) - (target->last_sizing->bounds.y + target->last_sizing->bounds.height);
     scrollable_bottom -= target->scroll.y;
      
     float scrollable_left = target->last_sizing->bounds.x - target->last_sizing->position.x;
     scrollable_left += target->scroll.x;
-    float scrollable_right = (target->last_sizing->position.x + MAX(target->last_sizing->sizing.width.current, target->last_sizing->sizing.width.desired.size)) - (target->last_sizing->bounds.x + target->last_sizing->bounds.width);
+    float scrollable_right = (target->last_sizing->position.x + target->last_sizing->sizing.width.current) - (target->last_sizing->bounds.x + target->last_sizing->bounds.width);
     scrollable_right -= target->scroll.x;
     
     
@@ -897,6 +901,7 @@ void sanitize_scrollable(Element* target)
     {
         return;
     }
+    
     
     float scrollable_top = (target->last_sizing->bounds.y - target->last_sizing->position.y);
     scrollable_top += target->scroll.y;
@@ -1011,6 +1016,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     
     Element* curr_element = root_element;
     
+    runtime_evaluate_attributes(dom, controls, curr_element);
     sanitize_scrollable(curr_element);
     if(should_capture_scroll(controls, curr_element)) // Root is allowed to capture scroll
     {
@@ -1090,12 +1096,18 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         FocusElement(dom, old_focused, dom->focused_element);
     }
 
+
     call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);    
     
     // Note(Leo): This is an approximation of the element count since there could be empty space inside the arena but we
     //            will never underestimate so its ok.
     int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
-    return ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
+
+    BEGIN_TIMED_BLOCK(PLATFORM_SHAPE);    
+    Arena* result = ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
+    END_TIMED_BLOCK(PLATFORM_SHAPE);
+    
+    return result;
 }
 
 // Returns the number of bytes that were consumed

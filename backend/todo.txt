@@ -1,10 +1,4 @@
 Things that need to be done:
-High Priority:
--   Add a "shape/calculate now" so we can immediately know the positions of glyphs after
-    text changes. To support this we also need a "re-process attributes now" or something of the sort to instantly repoll
-    text from bindings. Potentially runtime_evaluate_attributes() can already do this but it needs a userland interface.
-
-Then:
 -   Finish the InputBox implementation.
 -   Write some documentation files/make a documentation dir.
 -   Add a platform method to get/set the clipboard easily.

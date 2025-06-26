@@ -2095,6 +2095,7 @@ void RenderplatformLoadImage(FILE* image_file, const char* name)
     }
     
     DeAllocScratch(working_tile_mem);
+    free(image_pixels);
 }
 
 

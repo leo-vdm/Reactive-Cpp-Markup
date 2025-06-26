@@ -19,15 +19,15 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->static_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->cached_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
     *(target->dynamic_cstrings) = CreateArena(sizeof(char)*100000, sizeof(char));
-    *(target->strings) = CreateArena(sizeof(StringBlock)*10000, sizeof(StringBlock));
+    *(target->strings) = CreateArena(sizeof(StringBlock)*1000000, sizeof(StringBlock));
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
-    *(target->elements) = CreateArena(sizeof(Element)*5000, sizeof(Element));
-    *(target->attributes) = CreateArena(sizeof(Element)*20000, sizeof(Attribute));
+    *(target->elements) = CreateArena(sizeof(Element)*1000000, sizeof(Element));
+    *(target->attributes) = CreateArena(sizeof(Element)*200000, sizeof(Attribute));
     *(target->changed_que) = CreateArena(sizeof(int*)*1000, sizeof(int*));
-    *(target->frame_arena) = CreateArena(sizeof(char)*10000, sizeof(char));
-    *(target->events) = CreateArena(sizeof(Event)*100, sizeof(Event));
+    *(target->frame_arena) = CreateArena(sizeof(char)*10000000, sizeof(char));
+    *(target->events) = CreateArena(sizeof(Event)*1000000, sizeof(Event));
     
-    target->max_events = 100;
+    target->max_events = 1000000;
 }
 
 #define bound_expr(expr_context, fn_type, expr_type, union_name)                                                  \
@@ -386,7 +386,7 @@ void* InstanceComponent(DOM* target_dom, Element* parent, int id)
     void** element_addresses = (void**)align_ptr(element_addresses_unaligned);
     
     // Note(Leo): We use element id to index into this array, since id's are local to the file we know that
-    //  they are in the range 1 - num_tags + 1
+    //  they are in the range 1 to num_tags + 1
     
     Compiler::Tag* curr = comp_bin->root_tag;
     
@@ -600,7 +600,7 @@ void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int tem
             added->first_child = (Element*)element_addresses[curr->first_child->tag_id];
         }
         
-        added->master = parent;
+        added->master = parent->master;
         added->context_master = array_ptr;
         added->context_index = index;
         

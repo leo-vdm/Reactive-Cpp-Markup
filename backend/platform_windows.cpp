@@ -514,8 +514,8 @@ int main()
     Arena* renderques[2] = {};  
     renderques[0] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
     renderques[1] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
-    *renderques[0] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
-    *renderques[1] = CreateArena(sizeof(Element) * 10000, sizeof(Element));
+    *renderques[0] = CreateArena(sizeof(Element) * 1000000, sizeof(Element));
+    *renderques[1] = CreateArena(sizeof(Element) * 1000000, sizeof(Element));
     bool used_renderque = false;
     
     PlatformWindow* curr_window = platform.first_window;

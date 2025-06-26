@@ -38,6 +38,7 @@ bool boxes_intersect(bounding_box* first, bounding_box* second, bounding_box* re
         region->width = MIN(first_right, second_right) - region->x;
         region->height = MIN(first_bottom, second_bottom) - region->y;   
     }
+    
     return true;
 }
 
@@ -370,7 +371,9 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
             
             // Shape text
             FontPlatformShapedText result = {};
+            BEGIN_TIMED_BLOCK(TEXT_SHAPE);
             FontPlatformShapeMixed(context->shape_arena, &result, text_views, text_fonts, font_sizes, text_colors, text_sibling_count, wrapping_point);
+            END_TIMED_BLOCK(TEXT_SHAPE);
             
             context->glyph_count += result.glyph_count;
             
@@ -877,6 +880,10 @@ void shape_final_pass(shaping_context* context, LayoutElement* parent)
         } 
     }
     
+    // Note(Leo): To properly calculate scrollable elements we need the size of the parents contents.
+    parent->sizing.width.current = MAX(MAX(p_width_accumulated, parent->sizing.width.current), parent->sizing.width.desired.size);
+    parent->sizing.height.current = MAX(MAX(p_height_accumulated, parent->sizing.height.current), parent->sizing.height.desired.size);
+    
     DeAllocScratch(revisit_width_elements);
     DeAllocScratch(revisit_height_elements);
     
@@ -1028,7 +1035,9 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
         unpack(&context, unpack_parent->first_child, &(curr_element->children), &(curr_element->child_count));
         unpacked_count += curr_element->child_count;
         
+        BEGIN_TIMED_BLOCK(FIRST_PASS);
         shape_first_pass(&context, curr_element);
+        END_TIMED_BLOCK(FIRST_PASS);
         
         if(curr_element->display == DisplayType::RELATIONAL)
         {
@@ -1051,7 +1060,9 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     {
         if(curr_element->type != LayoutElementType::TEXT) // Skip non-combined text
         {
+            BEGIN_TIMED_BLOCK(SECOND_PASS);
             shape_second_pass(&context, curr_element);
+            END_TIMED_BLOCK(SECOND_PASS);
         }
         curr_element--;
     }
@@ -1124,7 +1135,9 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
             manual_elements++;
         }
         
+        BEGIN_TIMED_BLOCK(FINAL_PASS);
         shape_final_pass(&context, curr_element);
+        END_TIMED_BLOCK(FINAL_PASS);
         
         switch(curr_element->type)
         {
@@ -1184,8 +1197,8 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
         {
             if(curr_element->children[i].display == DisplayType::RELATIONAL)
             {
-                curr_element->children[i].position.x = inner_bounds.x + curr_element->children[i].sizing.width.margin1.size;
-                curr_element->children[i].position.y = inner_bounds.y + curr_element->children[i].sizing.height.margin1.size;
+                curr_element->children[i].position.x = curr_element->position.x + curr_element->sizing.width.padding1.size + curr_element->children[i].sizing.width.margin1.size;
+                curr_element->children[i].position.y = curr_element->position.y + curr_element->sizing.height.padding1.size + curr_element->children[i].sizing.height.margin1.size;
             }
             else if(curr_element->children[i].display == DisplayType::MANUAL)
             {
@@ -1259,4 +1272,37 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     }
     
     return context.final_renderque;
+}
+
+// Does a mini version of what the first pass does with sibling text elements. Shapes into the given arena and returns the
+// combined text element.
+void PlatformPreviewText(Arena* shape_arena, Element* first_text, Measurement width, Measurement height)
+{
+    assert(shape_arena && first_text);
+    if(!shape_arena || !first_text)
+    {
+        return;
+    }
+    
+    // Note(Leo): Align arena just incase
+    shape_arena->next_address = (uintptr_t)align_mem(shape_arena->next_address, LayoutElement);
+    
+    shaping_context temp_context = {};
+    
+    temp_context.shape_arena = shape_arena;
+    
+    // Note(Leo): This is okay to do since we only shape one set of child elements so we dont get the issue of glyphs
+    //            being allocated in between layout elements
+    temp_context.layout_element_arena = shape_arena;
+    
+    LayoutElement* fake_parent = (LayoutElement*)Alloc(shape_arena, sizeof(LayoutElement), zero());
+    fake_parent->sizing.width.desired = width;
+    fake_parent->sizing.height.desired = height;
+    fake_parent->dir = LayoutDirection::VERTICAL;
+    
+    unpack(&temp_context, first_text, &(fake_parent->children), &(fake_parent->child_count));
+    
+    shape_first_pass(&temp_context, fake_parent);
+    
+    first_text->last_sizing = fake_parent->children;
 }

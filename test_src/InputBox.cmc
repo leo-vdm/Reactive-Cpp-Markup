@@ -1,10 +1,22 @@
 <code>
 #include "platform.h"
+// Note(Leo): Random inline comments like //> are to 'close' markup tags which my lsp detects when using the < operator //>  
+
+struct input_box_args
+{
+    ArenaString* content;
+    ArenaString* watermark;
+    
+    uint32_t cursor_height;
+    uint32_t cursor_width;
+};
 
 struct InputBox : Component
 {
     ArenaString* content;
+    ArenaString* watermark;
     bool is_focused;
+    bool content_changed; // Content was changed this frame, cursor needs an update
     uint32_t cursor_pos; // The index of the glyph that the cursor is on.
     uint32_t glyph_count; // The number of traversable glyphs
     DOM* dom;
@@ -15,12 +27,48 @@ struct InputBox : Component
     float cursor_width;
     float cursor_height;
 
-    void CompMain(DOM* dom, CustomArgs* args)
+    void CompMain(DOM* dom, CustomArgs* custom_args)
     {
+        input_box_args* args = (input_box_args*)custom_args->arg[0];
+    
         this->dom = dom;
-        content = CreateString(dom->strings);
-        cursor_width = 5;
-        cursor_height = 50;
+        
+        if(args && args->content)
+        {
+            content = args->content;
+        }
+        else
+        {
+            content = CreateString(dom->strings);
+        }
+        
+        if(args && args->watermark)
+        {
+            watermark = args->watermark;
+        }
+        else
+        {
+            watermark = CreateString(dom->strings);
+            Append(watermark, " ");
+        }
+        
+        if(args)
+        {
+            cursor_width = args->cursor_width;
+            cursor_height = args->cursor_height;
+        }
+        else
+        {
+            cursor_width = 5;
+            cursor_height = 50;
+        }
+        
+        cursor_pos = 0;
+        glyph_count = 0;
+        content_changed = false;
+        is_focused = false;
+        cursor = NULL;
+        content_box = NULL;
     }
     
     void OnEvent(DOM* dom, Event* event)
@@ -67,7 +115,9 @@ struct InputBox : Component
             }
             case(EventType::TICK):
             {
-                update_cursor();
+                tick_cursor(content_changed);
+            
+                content_changed = false;
             
                 break;
             }
@@ -78,19 +128,33 @@ struct InputBox : Component
         }
     }
     
-    void update_cursor()
+    void tick_cursor(bool refresh_text)
     {
         Element* content_el = (Element*)content_box;
+        
+        bool cursor_on_right = (cursor_pos == glyph_count && glyph_count > 0);
         
         if(content_el && content_el->first_child)
         {
             Element* text_el = content_el->first_child;
+            
+            if(refresh_text)
+            {
+                PlatformEvaluateAttributes(dom, text_el);
+                PlatformPreviewText(dom->frame_arena, text_el, {0.0f, MeasurementType::FIT}, {0.0f, MeasurementType::FIT});
+            }
+            
             glyph_count = PlatformGetGlyphCount(text_el);
             
-            FontPlatformShapedGlyph* cursor_glyph = NULL;
+            FontPlatformShapedGlyph* cursor_glyph = PlatformGetGlyphAt(text_el, cursor_pos);
+            if(cursor_glyph && text_el->Text.temporal_text)
+            {
+                bool is_newline = text_el->Text.temporal_text[cursor_glyph->buffer_index] == '\n';
+                cursor_on_right |= is_newline && (glyph_count > 1);
+            }
             
             // Handle the cursor wanting to be on the right side of the last glyph
-            if(cursor_pos == glyph_count && glyph_count > 0)
+            if(cursor_on_right)
             {
                 cursor_glyph = PlatformGetGlyphAt(text_el, cursor_pos - 1);
                 if(cursor_glyph)
@@ -99,19 +163,14 @@ struct InputBox : Component
                     SetMarginT((Element*)cursor, { cursor_glyph->base_line - cursor_height, MeasurementType::PIXELS });
                 }
             }
-            else
+            else if(cursor_glyph)
             {
-                cursor_glyph = PlatformGetGlyphAt(text_el, cursor_pos);
-                if(cursor_glyph)
-                {
-                    SetMarginL((Element*)cursor, { cursor_glyph->placement_offsets.x, MeasurementType::PIXELS });
-                    SetMarginT((Element*)cursor, { cursor_glyph->base_line - cursor_height, MeasurementType::PIXELS });
-                }
+                SetMarginL((Element*)cursor, { cursor_glyph->placement_offsets.x, MeasurementType::PIXELS });
+                SetMarginT((Element*)cursor, { cursor_glyph->base_line - cursor_height, MeasurementType::PIXELS });
             }
             
             PlatformUpdateStyle((Element*)cursor);
         }
-        
     }
     
     void user_input(Event* in)
@@ -139,11 +198,16 @@ struct InputBox : Component
             case(K_ALT_L):
             case(K_ALT_R):
             case(K_ESCAPE):
-            case(K_ENTER):
             case(K_CAPS):
             case(K_TAB):
             {
                 return;
+            }
+            case(K_ENTER):
+            {
+                in->Key.key_char = (uint32_t)0;
+                in->Key.key_char = '\n';
+                break;
             }
             case(K_ARROW_L):
             {
@@ -152,7 +216,7 @@ struct InputBox : Component
                     cursor_pos--;
                 }
                 
-                break;
+                return;
             }
             case(K_ARROW_R):
             {
@@ -162,7 +226,19 @@ struct InputBox : Component
                     cursor_pos++;
                 }
                 
-                break;
+                return;
+            }
+            case(K_ARROW_U):
+            {
+                move_cursor_up();
+                
+                return;
+            }
+            case(K_ARROW_D):
+            {
+                move_cursor_down();
+                
+                return;
             }
             default:
             {
@@ -181,6 +257,7 @@ struct InputBox : Component
         
         Insert(content, (char*)&added_chars, static_cast<int>(len), cursor_pos);
         cursor_pos++;
+        content_changed = true;
     }
     
     // Remove the char at the cursor (forward) or behind the cursor (backward)
@@ -191,33 +268,210 @@ struct InputBox : Component
             return;
         }
         
+        Element* content_el = (Element*)content_box;
+        Element* text_el = NULL;
+        FontPlatformShapedGlyph* removed = NULL;
+        
+        if(content_el && content_el->first_child)
+        {
+            text_el = content_el->first_child;
+            removed = PlatformGetGlyphAt(text_el, cursor_pos);
+        }
+        
         // Cursor is at start so we cant remove anymore
         if(!cursor_pos && !remove_forward)
         {
-            return;
+            // Exception is when we are at buffer start with a \n next (remove the line)
+            if(!removed || !(text_el->Text.temporal_text[removed->buffer_index] == '\n'))
+            {
+                return;
+            }
         }
         else if(!remove_forward)
         {
             cursor_pos -= 1;
-        }
-        
-        PlatformControlState* controls = PlatformGetControlState(dom);    
-        
-        Element* content_el = (Element*)content_box;
-        
-        if(content_el && content_el->first_child)
-        {
-            Element* text_el = content_el->first_child;
-            FontPlatformShapedGlyph* removed = PlatformGetGlyphAt(text_el, cursor_pos);
-            if(removed && (removed->buffer_index + removed->run_length) <= content->length)
+            if(text_el)
             {
-                Remove(content, removed->buffer_index, removed->run_length);
-                SetMarginL((Element*)cursor, { removed->placement_offsets.x, MeasurementType::PIXELS });
-                SetMarginT((Element*)cursor, { removed->base_line - cursor_height, MeasurementType::PIXELS });
-                printf("Removing from %u to %u\n", removed->buffer_index, removed->run_length);
+                removed = PlatformGetGlyphAt(text_el, cursor_pos);
             }
         }
         
+        PlatformControlState* controls = PlatformGetControlState(dom);    
+
+        if(removed && (removed->buffer_index + removed->run_length) <= content->length)
+        {
+            Remove(content, removed->buffer_index, removed->run_length);
+            content_changed = true;
+        }
+        
+    }
+    
+    void move_cursor_down()
+    {
+        Element* content_el = (Element*)content_box;
+        
+        if(!content_el || !content_el->first_child)
+        {
+            return;
+        }
+        Element* text_el = content_el->first_child;
+        
+        char* buffer = text_el->Text.temporal_text;
+        uint32_t buffer_len = text_el->Text.temporal_text_length;
+        
+        if(!buffer || !buffer_len)
+        {
+            return;
+        }
+        
+        int cursor_line_index = 0; // Index of the \n denoting the cursors current line 
+        int below_line_index = 0; // Index of the \n denoting the start of the bottom line
+        int below_line_end = 0; // Index of the \n denoting the end of the bottom line
+        
+        // Iterate backwards to find cursor line index
+        for(int i = static_cast<int>(cursor_pos) + 1; i; i--)
+        {
+            int index = i - 1;
+            FontPlatformShapedGlyph* curr_glyph = PlatformGetGlyphAt(text_el, index);
+            
+            // We were at the end of the buffer or we are starting on a \n 
+            if(!curr_glyph || (buffer[curr_glyph->buffer_index] == '\n' && index == cursor_pos))                   
+            {
+                continue;
+            }
+            
+            if(curr_glyph->buffer_index >= buffer_len)
+            {
+                return;
+            }
+        
+            if(buffer[curr_glyph->buffer_index] == '\n')
+            {
+                cursor_line_index = index;
+                break;
+            }
+            else if(index == 0)
+            {
+                cursor_line_index = -1; // There was no \n for the above line
+            }
+        }
+        
+        for(int i = static_cast<int>(cursor_pos); i < glyph_count; i++) //>
+        {
+            FontPlatformShapedGlyph* curr_glyph = PlatformGetGlyphAt(text_el, i);
+            // We were at the end of the buffer or we are starting on a \n 
+            
+            if(!curr_glyph || (curr_glyph->buffer_index >= buffer_len))                   
+            {
+                continue;
+            }
+            
+            if(buffer[curr_glyph->buffer_index] == '\n' && !below_line_index)
+            {
+                below_line_index = i;
+                continue;
+            }
+            else if(buffer[curr_glyph->buffer_index] == '\n' && !below_line_end)
+            {
+                below_line_end = i;
+                break;
+            }
+            else if(i + 1 == glyph_count)
+            {
+                below_line_end = glyph_count;
+            }
+        }
+        
+        if(!below_line_index)
+        {
+            below_line_index = glyph_count;
+        }
+        
+        // Not Enough chars in the row below to move to a corresponding one, move to line end instead
+        if((cursor_pos - cursor_line_index) > (below_line_end - below_line_index))
+        {
+            cursor_pos = below_line_end;
+        }
+        else
+        {
+            cursor_pos = below_line_index + (cursor_pos - cursor_line_index);
+        }
+    }
+    
+    void move_cursor_up()
+    {
+        Element* content_el = (Element*)content_box;
+        
+        if(!content_el || !content_el->first_child)
+        {
+            return;
+        }
+        Element* text_el = content_el->first_child;
+        
+        char* buffer = text_el->Text.temporal_text;
+        uint32_t buffer_len = text_el->Text.temporal_text_length;
+        
+        if(!buffer || !buffer_len)
+        {
+            return;
+        }
+
+        int cursor_line_index = 0; // Index of the \n denoting the cursors current line 
+        int above_line_index = 0; // Index of the \n denoting the start of the top line
+        for(int i = static_cast<int>(cursor_pos) + 1; i; i--)
+        {
+            int index = i - 1;
+            FontPlatformShapedGlyph* curr_glyph = PlatformGetGlyphAt(text_el, index);
+            
+            // We were at the end of the buffer 
+            if(!curr_glyph)                   
+            {
+                continue;
+            }
+            
+            if(curr_glyph->buffer_index >= buffer_len)
+            {
+                return;
+            }
+        
+            if(buffer[curr_glyph->buffer_index] == '\n' && !cursor_line_index)
+            {
+                cursor_line_index = index;
+                continue;
+            }
+            else if(buffer[curr_glyph->buffer_index] == '\n' && !above_line_index)
+            {
+                above_line_index = index;
+                break;
+            }
+            else if(index == 0)
+            {
+                above_line_index = -1; // There was no \n for the above line
+            }
+        
+        }
+        
+        // There is no line above the current one
+        if(!cursor_line_index)
+        {
+            cursor_pos = 0;
+        }
+        else
+        {
+            // Not enough chars in the above row to move to a corresponding one, move to the line end instead
+            if((cursor_pos - cursor_line_index) > (cursor_line_index - above_line_index))
+            {
+                cursor_pos = cursor_line_index;
+            }
+            else if(((static_cast<int>(cursor_pos) - cursor_line_index) + above_line_index) > 0)
+            {
+                cursor_pos = above_line_index + (static_cast<int>(cursor_pos) - cursor_line_index);
+            }
+            else
+            {
+                cursor_pos = 0;
+            }
+        }
     }
     
     void clicked()
@@ -231,15 +485,8 @@ struct InputBox : Component
             Element* text_el = content_el->first_child;
             FontPlatformShapedGlyph* clicked_glyph = PlatformGetGlyphAt(text_el, controls->cursor_pos);
             if(clicked_glyph)
-            {
-                
-                //printf("Placing cursor at %f\n", clicked_glyph->base_line);
-                //printf("Clicked glyph, index %u, length %u\n", clicked_glyph->buffer_index, clicked_glyph->run_length);
-                SetMarginL((Element*)cursor, { clicked_glyph->placement_offsets.x, MeasurementType::PIXELS });
-                SetMarginT((Element*)cursor, { clicked_glyph->base_line - cursor_height, MeasurementType::PIXELS });
-                
+            {   
                 cursor_pos = PlatformGetGlyphIndex(text_el, clicked_glyph);
-                printf("Glyph index %u\n", cursor_pos);
             }
         }
         
@@ -248,16 +495,13 @@ struct InputBox : Component
 </code>
 <root>
 <vdiv onclick="{e->clicked()}" focusable ticking>
-	<hdiv this="{content_box}" condition="{return e->content->length > 0 && e->is_focused}">
+	<hdiv class="test" this="{content_box}" condition="{return e->content->length > 0}">
 		{content}
+	   <hdiv class="cursor" this="{cursor}" condition="{return e->is_focused}"></hdiv>
 	</hdiv>
-	<hdiv condition="{return e->content->length == 0 && e->is_focused}">
-        Enter some text...
+	<hdiv condition="{return e->content->length == 0}">
+        {watermark}
 	</hdiv>
-	<hdiv condition="{return !e->is_focused}">
-        Click to focus!
-	</hdiv>
-	<hdiv class="cursor" this="{cursor}" condition="{return e->content->length > 0 && e->is_focused}"></hdiv>
 </vdiv>
 
 </root>
@@ -265,7 +509,7 @@ struct InputBox : Component
 <style>
 root, vdiv, hdiv {
 	margin: grow, grow;
-	width: fit;
+	width: grow;
 	height: fit;
     font: "resources/fonts/NotoSans.ttf";
 }

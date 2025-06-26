@@ -50,6 +50,7 @@ struct cached_shaped_glyph
 
     // Note(Leo): All dimensions here are scaled versions of those of fixed size glyphs to fit the requested font size
     vec2 placement_offsets;
+    vec2 placement_advances;
     vec2 placement_size;
     
 };
@@ -107,6 +108,12 @@ struct text_handle_table
 
 };
 
+struct rasterized_glyph_cache
+{
+    uint32_t most_ru;
+    uint32_t least_ru;
+};
+
 struct FontPlatform
 {
     FT_Library freetype;
@@ -123,6 +130,8 @@ struct FontPlatform
     
     int standard_glyph_size;
     int cache_slot_count;
+
+    rasterized_glyph_cache rasterized_glyphs;
 };
 
 FontPlatform font_platform;
@@ -277,7 +286,6 @@ cached_shaped_text_handle* get_or_evict_text_handle(text_handle_table* table, bo
     // Need to evict a handle
     else
     {
-        printf("EVICTION\n");
     
         used = &table->cached_text_handles[master_text_handle->least_ru];
         master_text_handle->least_ru = used->prev_lru;
@@ -456,10 +464,10 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     font_platform.loaded_font_map = new std::map<std::string, loaded_font_handle*>;
     
     font_platform.shaping_buffer = hb_buffer_create();
-    hb_buffer_pre_allocate(font_platform.shaping_buffer, Megabytes(1));
+    //hb_buffer_pre_allocate(font_platform.shaping_buffer, Megabytes(1));
 
     // Todo(Leo): Tune these values
-    font_platform.text_cache = create_text_cache_table(0xFFFF, 400, 5000);
+    font_platform.text_cache = create_text_cache_table(0x1000, 400, 5000);
     
     return 0;
 }
@@ -576,25 +584,54 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     
     FT_GlyphSlot slot = font->face->glyph;
 
-    #if FONT_PLATFORM_USE_SDF
     FT_Render_Glyph(slot, FT_RENDER_MODE_SDF);
-    #else
-    FT_Render_Glyph(slot, FT_RENDER_MODE_NORMAL);
-    #endif
     
     FT_Bitmap glyph_bitmap = slot->bitmap;
     
-    FontPlatformGlyph* added_glyph = (FontPlatformGlyph*)Alloc(font_platform.cached_glyphs, sizeof(FontPlatformGlyph));
     
     // Todo(Leo): Actually implement the least recently used cache eviction rather than just running out of space!
     // Check if weve run out of space
-    assert(font_platform.cached_glyphs->next_address + sizeof(FontPlatformGlyph) < font_platform.cached_glyphs->next_address + font_platform.cached_glyphs->size);
+    //assert(font_platform.cached_glyphs->next_address + sizeof(FontPlatformGlyph) < font_platform.cached_glyphs->mapped_address + font_platform.cached_glyphs->size);
+    FontPlatformGlyph* added_glyph = NULL;
+    
+    // Use free slot
+    if(font_platform.cached_glyphs->first_free.next_free || (font_platform.cached_glyphs->next_address <
+         (font_platform.cached_glyphs->mapped_address + font_platform.cached_glyphs->size)))
+    {
+        added_glyph = (FontPlatformGlyph*)Alloc(font_platform.cached_glyphs, sizeof(FontPlatformGlyph), zero());
+    }
+    // Evict a glyph
+    else
+    {
+        FontPlatformGlyph* base = (FontPlatformGlyph*)font_platform.cached_glyphs->mapped_address;
+        added_glyph = &base[font_platform.rasterized_glyphs.least_ru];
+        
+        if(added_glyph->prev_lru)
+        {
+            FontPlatformGlyph* prev = &base[added_glyph->prev_lru]; 
+            prev->next_lru = 0;
+            font_platform.rasterized_glyphs.least_ru = added_glyph->prev_lru;
+        }
+        
+        // Remove glyph from its font map
+        loaded_font_handle* notified_font = platform_get_font(added_glyph->font);
+        if(notified_font)
+        {
+            notified_font->glyph_cache_map->erase(added_glyph->codepoint);
+        }
+        
+        memset(added_glyph, 0, sizeof(FontPlatformGlyph));
+    }
     
     added_glyph->width = glyph_bitmap.width;
     added_glyph->height = glyph_bitmap.rows;
     
     added_glyph->bearing_x = slot->bitmap_left;
     added_glyph->bearing_y = slot->bitmap_top;
+    
+    // Font so we know who to notify if this glyph is evicted
+    added_glyph->font = font_handle;
+    added_glyph->codepoint = glyph_index;
     
     font->glyph_cache_map->insert({glyph_index, added_glyph});
     
@@ -625,11 +662,54 @@ inline FontPlatformGlyph* plaform_get_glyph_or_raster(FontHandle font_handle, ui
 {
     loaded_font_handle* font = platform_get_font(font_handle);
     auto search = font->glyph_cache_map->find(glyph_index);
+    
+    FontPlatformGlyph* found = NULL;
     if(search == font->glyph_cache_map->end())
     {
-        return FontPlatformRasterizeGlyph(font_handle, glyph_index);
+        found = FontPlatformRasterizeGlyph(font_handle, glyph_index);
     }
-    return search->second;
+    else
+    {
+        found = search->second;
+    }
+    
+    if(!found)
+    {
+        return NULL;
+    }
+    
+    FontPlatformGlyph* base = (FontPlatformGlyph*)font_platform.cached_glyphs->mapped_address;
+    
+    if(found->prev_lru)
+    {
+        FontPlatformGlyph* prev = &base[found->prev_lru];
+        prev->next_lru = found->next_lru;
+    }
+    
+    if(found->next_lru)
+    {
+        FontPlatformGlyph* next = &base[found->next_lru];
+        next->prev_lru = found->prev_lru;
+    }
+    
+    uint32_t found_index = index_of(found, base, FontPlatformGlyph);
+    
+    if(font_platform.rasterized_glyphs.most_ru)
+    {
+        FontPlatformGlyph* prev = &base[font_platform.rasterized_glyphs.most_ru];
+        prev->prev_lru = found_index;
+    }
+    
+    if(font_platform.rasterized_glyphs.least_ru == found_index)
+    {
+        font_platform.rasterized_glyphs.least_ru = found->prev_lru;
+    }
+    
+    found->prev_lru = 0;
+    found->next_lru = font_platform.rasterized_glyphs.most_ru;
+    font_platform.rasterized_glyphs.most_ru = found_index;
+    
+    return found;
 }
 
 const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UINT_MAX }, { HB_TAG('l', 'i', 'g', 'a'), 1, 0, UINT_MAX }, { HB_TAG('c', 'l', 'i', 'g'), 1, 0, UINT_MAX } };
@@ -651,8 +731,6 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
     
     float cursor_x = 0.0f;
     float cursor_y = 0.0f;
-    
-    float accum_offset_x = 0.0f;
     
     result->required_width = 0;
     result->required_height = 0;
@@ -725,9 +803,6 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             return;
         }
         
-        float local_x = 0.0f;
-        float local_y = 0.0f;
-        
         for(int j = 0; j < glyph_count; j++)
         {
             cached_shaped_glyph* added_glyph = insert_cached_shaped_glyph(font_platform.text_cache, cached_glyphs);
@@ -744,6 +819,12 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             
             added_glyph->glyph_code = glyph_info[j].codepoint;
             
+            // Dont add any sizing for newlines.
+            if(utf8_buffer[added_glyph->buffer_index] == '\n')
+            {
+                continue;
+            }
+            
             FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, glyph_info[j].codepoint);
             // Bearings are relative to the glyph's raster size which is different from the size of the font so scale it
             float scaled_bearing_x = (float)added_glyph_raster_info->bearing_x * font_scale;
@@ -752,14 +833,15 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             // Note(Leo): The calculated coordinate is the top-left corner of the quad enclosing the char
             // Note(Leo): Vulkan has the y-axis upside down compared to cartesian coordinates which freetype uses, so Y gets more positive as we go down
             // Note(Leo): Divide by 64 to convert back to pixel measurements from harfbuzz
-            added_glyph->placement_offsets.x = local_x + (glyph_pos[j].x_offset / 64) + scaled_bearing_x;
-            added_glyph->placement_offsets.y = local_y - (glyph_pos[j].y_offset / 64 + scaled_bearing_y);
+            added_glyph->placement_offsets.x = (glyph_pos[j].x_offset / 64) + scaled_bearing_x;
+            added_glyph->placement_offsets.y = -(glyph_pos[j].y_offset / 64 + scaled_bearing_y);
     
             added_glyph->placement_size.x = (float)added_glyph_raster_info->width * font_scale;
             added_glyph->placement_size.y = (float)added_glyph_raster_info->height * font_scale;
             
-            local_x += glyph_pos[j].x_advance / 64;
-            local_y += glyph_pos[j].y_advance / 64;
+            added_glyph->placement_advances.x = glyph_pos[j].x_advance / 64;
+            added_glyph->placement_advances.y = glyph_pos[j].y_advance / 64;
+        
         }
         
         }
@@ -775,10 +857,14 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
         
             // Check linewrap
             // Todo(Leo): Implement word wrapping as an option
-            if(wrapping_point && ((curr_cached_glyph->placement_offsets.x + curr_cached_glyph->placement_size.x + accum_offset_x) - cursor_x) >= wrapping_point)
+            bool auto_wrap = wrapping_point && (curr_cached_glyph->placement_offsets.x + curr_cached_glyph->placement_size.x + cursor_x) >= wrapping_point; 
+            bool manual_wrap = utf8_buffer[curr_cached_glyph->buffer_index] == '\n';
+            if(auto_wrap || manual_wrap)
             {
-                cursor_x += (curr_cached_glyph->placement_offsets.x + curr_cached_glyph->placement_size.x + accum_offset_x);
-                result->required_width = wrapping_point;
+                if(auto_wrap)
+                {
+                    result->required_width = wrapping_point;
+                }
                 
                 // Go back and add line heights to all the glyphs
                 FontPlatformShapedGlyph* curr_glyph = line_first;
@@ -797,9 +883,8 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
                 line_count = 0;
                 
                 cursor_y += top_line_height;
-                cursor_y += lower_line_height;
-                top_line_height = 0.0f;
-                lower_line_height = 0.0f;
+                //cursor_y += lower_line_height;
+                cursor_x = 0.0f;
             }
             
             added_glyph = (FontPlatformShapedGlyph*)Alloc(glyph_arena, sizeof(FontPlatformShapedGlyph), no_zero());
@@ -817,28 +902,27 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             
             FontPlatformGlyph* added_glyph_raster_info = plaform_get_glyph_or_raster(font_handle, curr_cached_glyph->glyph_code);
             
-            //added_glyph->color = color;
-            added_glyph->color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            added_glyph->color = color;
             
             added_glyph->atlas_offsets = RenderPlatformGetGlyphPosition(GlyphSlot(added_glyph_raster_info));
             
             added_glyph->atlas_size = { (float)added_glyph_raster_info->width, (float)added_glyph_raster_info->height };
             
-            added_glyph->placement_offsets.x = (curr_cached_glyph->placement_offsets.x + accum_offset_x) - cursor_x;
-            added_glyph->placement_offsets.y = curr_cached_glyph->placement_offsets.y - cursor_y;
+            added_glyph->placement_offsets.x = curr_cached_glyph->placement_offsets.x + cursor_x;
+            
+            added_glyph->placement_offsets.y = curr_cached_glyph->placement_offsets.y + cursor_y;
             added_glyph->base_line = cursor_y + top_line_height;
     
             added_glyph->placement_size.x = curr_cached_glyph->placement_size.x;
             added_glyph->placement_size.y = curr_cached_glyph->placement_size.y;
             
-            //cursor_y += curr_cached_glyph->placement_offsets.y + curr_cached_glyph->placement_size.y;
-            
             result->required_width = MAX(result->required_width, added_glyph->placement_offsets.x + added_glyph->placement_size.x);
+            
+            cursor_x += curr_cached_glyph->placement_advances.x;
+            cursor_y += curr_cached_glyph->placement_advances.y;
+            
             if(!curr_cached_glyph->next_glyph)
             {
-                // Note(Leo): We accumulate the offset to the last glyph in this buffer so the next buffer knows where it needs
-                //            to start.
-                accum_offset_x += curr_cached_glyph->placement_offsets.x + curr_cached_glyph->placement_size.x;
                 curr_cached_glyph = NULL;    
             }
             else

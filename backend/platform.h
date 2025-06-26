@@ -160,6 +160,10 @@ void PlatformUpdateStyle(Element* target);
 // Immediately re-evaluate the attributes of the given element.
 void PlatformEvaluateAttributes(DOM* dom, Element* target);
 
+// Does a mini version of what the first pass does with sibling text elements. Shapes into the given arena and returns the
+// combined text element.
+void PlatformPreviewText(Arena* shape_arena, Element* first_text, Measurement width, Measurement height);
+
 extern float SCROLL_MULTIPLIER;
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
@@ -171,8 +175,6 @@ extern float SCROLL_MULTIPLIER;
 #define TIMER_INTRINSIC() __rdtsc()
 
 #define WINDOWS_WINDOW_CLASS_NAME L"TemporaryMarkupWindowClass"
-
-#define FONT_PLATFORM_USE_SDF 1
 
 extern HMODULE windows_module_handle;
 
@@ -348,10 +350,17 @@ struct FontPlatformShapedGlyph
 
 struct FontPlatformGlyph
 {
+    // Caching related
+    uint32_t prev_lru;
+    uint32_t next_lru;
+    uint32_t codepoint;
+
+    // Real values
     int bearing_x;
     int bearing_y;
     int width;
     int height;
+    FontHandle font;
 };
 
 struct FontPlatformShapedText
@@ -370,7 +379,7 @@ void FontPlatformLoadFace(const char* font_name, FILE* font_file);
 void FontPlatformLoadFace(const char* font_name, PlatformFile* font_file);
 void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point);
 FontHandle FontPlatformGetFont(const char* font_name);
-//FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t glyph_index);
+
 int FontPlatformGetGlyphSize();
 void FontPlatformUpdateCache(int new_size_glyphs);
 
@@ -393,6 +402,13 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
         TIMED_BLOCKS_TICK_AND_BUILD,
         TIMED_BLOCKS_HARFBUZZ,
         TIMED_BLOCKS_MEOW,
+        TIMED_BLOCKS_EVALUATE_ATTRIBUTES,
+        TIMED_BLOCKS_PLATFORM_SHAPE,
+        TIMED_BLOCKS_FIRST_PASS,
+        TIMED_BLOCKS_SECOND_PASS,
+        TIMED_BLOCKS_FINAL_PASS,
+        TIMED_BLOCKS_TEXT_SHAPE,
+        TIMED_BLOCKS_SECTION_A,
         TIMED_BLOCKS_BLOCKS_MAX, // Note(Leo): Should be at the end of the enum
     };
     
@@ -438,6 +454,13 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
             "TICK_AND_BUILD",
             "HARFBUZZ",
             "MEOW_HASH",
+            "EVALUATE_ATTRIBUTES",
+            "PLATFORM_SHAPE",
+            "FIRST_PASS",
+            "SECOND_PASS",
+            "FINAL_PASS",
+            "TEXT_SHAPE",
+            "SECTION_A",
             "BLOCKS_MAX",
         };
 

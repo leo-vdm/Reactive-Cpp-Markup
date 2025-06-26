@@ -14,6 +14,7 @@ struct MainPage : Page
     int mycolor;
     int count;
     void* my_element;
+    input_box_args* inputbox_args;
     
     test_struct* things;
     int things_len;
@@ -27,11 +28,16 @@ struct MainPage : Page
         
         should_show = true;
         my_element = NULL;
-        things_len = 3;
+        things_len = 5;
         things = (test_struct*)malloc(things_len*sizeof(test_struct));
         memset(things, 0, things_len*sizeof(test_struct));
         
         userInput = CreateString(dom->strings);
+        inputbox_args = (input_box_args*)malloc(sizeof(input_box_args));
+        inputbox_args->content = userInput;
+        inputbox_args->watermark = NULL;
+        inputbox_args->cursor_height = 50;
+        inputbox_args->cursor_width = 5;
     }
     
     void OnFrame(DOM* dom)
@@ -165,10 +171,11 @@ struct MainPage : Page
 		<img this="{my_element}" src="texture.png" focusable></img>
 		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>
 	</hdiv>
-	<InputBox></InputBox>
+	<InputBox args="{e->inputbox_args}"></InputBox>
 	<each loop="{things;return e->things_len;test_struct}">
         <hdiv condition="{{return a[index].test_number == 0;}}">
 	       This is a loooooped text! {{test_number}}
+    	<InputBox args="{e->inputbox_args}"></InputBox>
         </hdiv> 
 	</each>
 	<vdiv class="footer" onclick="{e->countChanged()}">
@@ -179,8 +186,13 @@ struct MainPage : Page
 
 <style>
 
+root {
+    color: 120, 0, 0;
+}
+
 fill {
-	height: 150%;
+    color: 255, 255, 255;
+	height: 90%;
 	width: 100%;
 	vertical_clipping: scroll;
 }
