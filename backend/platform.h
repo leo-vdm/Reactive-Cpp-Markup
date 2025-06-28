@@ -164,6 +164,9 @@ void PlatformEvaluateAttributes(DOM* dom, Element* target);
 // combined text element.
 void PlatformPreviewText(Arena* shape_arena, Element* first_text, Measurement width, Measurement height);
 
+void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len);
+char* PlatformGetTextClipboard(uint32_t* buffer_len); // UTF8 on the scratch arena
+
 extern float SCROLL_MULTIPLIER;
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)

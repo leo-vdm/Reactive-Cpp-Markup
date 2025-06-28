@@ -1,6 +1,11 @@
 package com.example.reactivecppmarkup;
 
+import static android.content.ClipDescription.MIMETYPE_TEXT_PLAIN;
+
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.graphics.PixelFormat;
@@ -70,6 +75,41 @@ public class ExtendedNative extends Activity implements SurfaceHolder.Callback2,
     static
     {
         System.loadLibrary("rcm");
+    }
+
+    public String get_text_clipboard()
+    {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if(clipboard == null)
+        {
+            return null;
+        }
+
+        ClipDescription primary_desc = clipboard.getPrimaryClipDescription();
+        if(primary_desc == null || !primary_desc.hasMimeType(MIMETYPE_TEXT_PLAIN))
+        {
+            return null;
+        }
+
+        ClipData item = clipboard.getPrimaryClip();
+
+        if(item != null)
+        {
+            ClipData.Item clipboard_data = item.getItemAt(0);
+            return clipboard_data.getText().toString();
+        }
+        return null;
+    }
+
+    public void set_text_clipboard(String text)
+    {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if(clipboard == null)
+        {
+            return;
+        }
+
+        clipboard.setPrimaryClip(ClipData.newPlainText("", text));
     }
 
     public void show_soft_keyboard()

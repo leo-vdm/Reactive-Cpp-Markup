@@ -433,7 +433,13 @@ struct InputBox : Component
             {
                 return;
             }
-        
+            
+            // We started on a \n
+            if(buffer[curr_glyph->buffer_index] == '\n' && (i == (static_cast<int>(cursor_pos) + 1)))
+            {
+                continue;
+            }
+            
             if(buffer[curr_glyph->buffer_index] == '\n' && !cursor_line_index)
             {
                 cursor_line_index = index;

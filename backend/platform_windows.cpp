@@ -572,7 +572,7 @@ int main()
         curr_window = curr_window->next_window;
         END_TIMED_BLOCK(PLATFORM_LOOP);
         
-        DUMP_TIMINGS();
+        //DUMP_TIMINGS();
     }
     
     return 0;
@@ -590,4 +590,114 @@ void PlatformRegisterDom(void* dom)
     platform.first_window = created_window;
 }
 
+
+void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len)
+{
+    if(!utf8_buffer || !platform.first_window->window_handle)
+    {
+        return;
+    }
+
+    // Note(Leo): We always give clipboard ownership to the first window in the dom.
+    // Todo(Leo): This seems pretty bad but IDK that ownership really matters.
+    if(!OpenClipboard(platform.first_window->window_handle))
+    {
+        return;
+    }
+    
+    if(!EmptyClipboard())
+    {
+        CloseClipboard();
+        return;
+    }
+    
+    // Note(Leo): We shouldnt use more than 4x memory going to utf16
+    uint32_t temp_len = buffer_len*4;
+    void* temp_mem = AllocScratch(temp_len*sizeof(char), zero());
+    int utf16_len = MultiByteToWideChar(CP_UTF8, MB_PRECOMPOSED, utf8_buffer, static_cast<int>(buffer_len), (LPWSTR)temp_mem, static_cast<int>(temp_len / sizeof(WCHAR)));
+    
+    // Note(Leo): +1 to leave space for \0 
+    utf16_len = (utf16_len + 1) * sizeof(WCHAR);
+    
+    if(!utf16_len)
+    {
+        DeAllocScratch(temp_mem);
+        CloseClipboard();
+        return;
+    }
+    
+    HGLOBAL text_mem = GlobalAlloc(GMEM_MOVEABLE, utf16_len);
+    WCHAR* terminated_text = (WCHAR*)GlobalLock(text_mem);
+    
+    if(!terminated_text)
+    {
+        DeAllocScratch(temp_mem);
+        CloseClipboard();
+        return;
+    }
+    
+    memcpy(terminated_text, temp_mem, utf16_len);
+    terminated_text[buffer_len] = 0;
+    
+    GlobalUnlock(text_mem);
+    
+    SetClipboardData(CF_UNICODETEXT, text_mem);
+    DeAllocScratch(temp_mem);
+    
+    CloseClipboard();
+}
+
+char* PlatformGetTextClipboard(uint32_t* buffer_len)
+{
+    if(!IsClipboardFormatAvailable(CF_UNICODETEXT) || !OpenClipboard(platform.first_window->window_handle))
+    {
+        *buffer_len = 0;
+        return NULL;
+    }
+    
+    HGLOBAL clipboard_mem = GetClipboardData(CF_UNICODETEXT);
+    
+    if(!clipboard_mem)
+    {
+        *buffer_len = 0;
+        CloseClipboard();
+        return NULL;
+    }
+    
+    WCHAR* data = (WCHAR*)GlobalLock(clipboard_mem);
+    
+    if(!data)
+    {
+        *buffer_len = 0;
+        CloseClipboard();
+        return NULL;
+    }
+    
+    uint32_t utf16_len = 0;
+    for(uint32_t i = 0; i < 0xFFFF; i++)
+    {
+        if(data[i] == 0)
+        {
+            utf16_len = i;
+            break;
+        }
+    }
+    
+    *buffer_len = utf16_len * 2;
+    char* text_mem = (char*)AllocScratch(*buffer_len*sizeof(char));
+    
+    int final_len = WideCharToMultiByte(CP_UTF8, WC_COMPOSITECHECK, data, static_cast<int>(utf16_len), text_mem, static_cast<int>(*buffer_len), NULL, NULL);
+    if(!final_len)
+    {
+        *buffer_len = 0;
+        DeAllocScratch(text_mem);
+        return NULL;
+    }
+    
+    *buffer_len = static_cast<uint32_t>(final_len);
+    GlobalUnlock(clipboard_mem);
+    CloseClipboard();
+    
+    return text_mem;
+} 
 #endif

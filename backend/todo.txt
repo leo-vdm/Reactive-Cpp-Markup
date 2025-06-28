@@ -1,7 +1,7 @@
 Things that need to be done:
--   Finish the InputBox implementation.
 -   Write some documentation files/make a documentation dir.
 -   Add a platform method to get/set the clipboard easily.
+-   Add a platform method to open/read/write files from paths. Maybe also a native file selector option?
 -   Add self closing tags.
 -   Debug linux weirdness with image tiles showing neighbouring pixels. Potential rounding error?
 -   Add mip mapping to the font/image atlases.

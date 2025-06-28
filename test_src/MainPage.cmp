@@ -148,10 +148,17 @@ struct MainPage : Page
     	}
     	
     	things[1].test_number = count % 2;
+    
+        PlatformSetTextClipboard("what", 4);
+        uint32_t len = 0;
+        char* text = PlatformGetTextClipboard(&len);
+        printf("Got this from the clipboard: %.*s\n", (int)len, text);
+        DeAllocScratch(text);
     }
     
     void onFocusTitle(bool isFocused)
     {
+        
         if(isFocused)
         {
             printf("Focused the new thing!\n");

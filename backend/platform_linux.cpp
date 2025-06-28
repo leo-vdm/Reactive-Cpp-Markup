@@ -6,15 +6,21 @@
 #include <iostream>
 #include <cassert>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <unistd.h>
 #include <libgen.h>
-
+#include <climits>
 
 Display* x_display = {};
 Visual* x_visual = {};
 XDefaultValues x_defaults = {};
 XIM x_input_method = {};
 Atom x_wm_delete_message = {};
+
+Atom x_wm_clipboard = {};
+Atom x_wm_clipboard_targets = {};
+Atom x_wm_utf8 = {};
+Atom x_wm_clipboard_target = {};
 
 float SCROLL_MULTIPLIER; 
 
@@ -35,6 +41,9 @@ struct linux_platform_state
     Arena* runtime_master_arena;
     
     PlatformWindow* first_window;
+    
+    char* clipboard_data;
+    uint32_t clipboard_len;
     
     VirtualKeyboard keyboard_state;
 };
@@ -120,206 +129,390 @@ void update_control_state(PlatformWindow* target_window)
     target_window->controls.scroll_dir = { 0.0, 0.0 };
 }
 
+// Note(Leo): This method only exists seperately from process_window_events so we have something to direct unwanted
+//            events to when querying the clipboard since that is a multi-event negotiation which we want to do in a
+//            blocking manner since its more convenient to use.
+int linux_process_window_event(PlatformWindow* target_window, XEvent* x_event)
+{   
+    int return_value = 0;
+    // Note(Leo): IME's may want some keystrokes to not be sent which is what this filters for
+    if(XFilterEvent(x_event, None) == true)
+    {
+        return 0;
+    }
+    
+    switch(x_event->type)
+    {
+        case(DestroyNotify):
+        {
+            if(x_event->xdestroywindow.window == target_window->window_handle)
+            {
+                return_value = return_value | QUIT_WINDOW;
+            }
+            break;
+        }
+        case(ConfigureNotify):
+        {
+            target_window->width = x_event->xconfigure.width;
+            target_window->height = x_event->xconfigure.height;
+            return_value = return_value | RESIZED_WINDOW;
+            //XSync(x_display, 0);
+            //XFlush(x_display);
+            break;
+        }
+        case(KeyPress):
+        {
+            // Note(Leo): remove the control modifier since it makes stuff return control codes
+            x_event->xkey.state &= ~ControlMask;
+        
+            // Note(Leo): 100 is an arbitrary size
+            #define TEXT_BUFF_SIZE 100
+            char* key_text = (char*)AllocScratch(sizeof(char)*TEXT_BUFF_SIZE);
+            Status status;
+            KeySym keysym = NoSymbol;
+            int text_len = Xutf8LookupString(target_window->window_input_context, &x_event->xkey, key_text, TEXT_BUFF_SIZE - 1, &keysym, &status);
+            if(text_len < 0)
+            {
+                text_len = 0;
+            }
+            
+            int key_code = x_event->xkey.keycode;
+            VirtualKeyCode translated_keycode = 0; 
+            if(key_code < sizeof(KEYCODE_TRANSLATIONS))
+            {
+                translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+            }
+            
+            // We didnt find a translation
+            if(!translated_keycode)
+            {
+                translated_keycode = K_UNMAPPED;
+            }
+        
+            uint32_t buffer_len = (uint32_t)text_len;
+            char* curr_char = key_text;
+            
+            // Note(Leo): If a key only has 1 utf8 char in it then we send the char with they keystroke event.
+            //            However for keys that are multi char we assume they are IME events and so we sepereate the
+            //            text and key event. We send the keystroke event first with no codepoint then all the chars
+            //            as individual K_VIRTUAL keystrokes with a utf8 char in each.
+            //            This is mostly for consistency with the android layer which does something similiar.
+            
+            Event* added = PushEvent((DOM*)target_window->window_dom);
+            added->type = EventType::KEY_DOWN;
+            added->Key.code = translated_keycode;
+            
+            if(buffer_len)
+            {
+                uint32_t codepoint = 0;
+                uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
+            
+                buffer_len -= consumed;
+                curr_char += consumed;
+                
+                if(!buffer_len)
+                {
+                    added->Key.key_char = codepoint;
+                }
+                else
+                {
+                    added = PushEvent((DOM*)target_window->window_dom);
+                    added->type = EventType::KEY_DOWN;
+                    added->Key.code = K_VIRTUAL;
+                    added->Key.key_char = codepoint;
+                }
+            }
+            
+            while(buffer_len)
+            {
+                uint32_t codepoint = 0;
+                uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
+            
+                // Hit some type of invalid codepoint
+                if(!consumed)
+                {
+                    buffer_len -= 1;
+                    curr_char += 1;
+                    return 0;
+                }
+                
+                added = PushEvent((DOM*)target_window->window_dom);
+                added->type = EventType::KEY_DOWN;
+                added->Key.code = K_VIRTUAL;
+                added->Key.key_char = codepoint;
+                
+                buffer_len -= consumed;
+                curr_char += consumed;
+            }
+            
+            target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::DOWN;
+            DeAllocScratch(key_text);
+            
+            break;
+        }
+        case(KeyRelease):
+        {
+            int key_code = x_event->xkey.keycode;
+            VirtualKeyCode translated_keycode = 0; 
+            if(key_code < sizeof(KEYCODE_TRANSLATIONS))
+            {
+                translated_keycode = KEYCODE_TRANSLATIONS[key_code];
+            }
+            
+            // We didnt find a translation
+            if(!translated_keycode)
+            {
+                translated_keycode = K_UNMAPPED;
+            }
+        
+            Event* added = PushEvent((DOM*)target_window->window_dom);
+            added->type = EventType::KEY_UP;
+            added->Key.code = translated_keycode;
+            
+            target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::UP;
+            break;
+        }
+        case(ButtonPress):
+        {
+            if (x_event->xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::DOWN_THIS_FRAME; }
+            else if (x_event->xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::DOWN_THIS_FRAME; }
+            else if (x_event->xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::DOWN_THIS_FRAME; }
+            else if (x_event->xbutton.button == Button4) { target_window->controls.scroll_dir = { 0.0f, SCROLL_MULTIPLIER }; }
+            else if (x_event->xbutton.button == Button5) { target_window->controls.scroll_dir = { 0.0f, -1.0f * SCROLL_MULTIPLIER }; }
+            else if (x_event->xbutton.button == Button6) { target_window->controls.scroll_dir = { SCROLL_MULTIPLIER, 0.0f }; }
+            else if (x_event->xbutton.button == Button7) { target_window->controls.scroll_dir = { -1.0f * SCROLL_MULTIPLIER, 0.0f }; }
+            break;
+        }
+        case(ButtonRelease):
+        {
+            if (x_event->xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::UP_THIS_FRAME; }
+            else if (x_event->xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::UP_THIS_FRAME; }
+            else if (x_event->xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::UP_THIS_FRAME; }
+            break;
+        }
+        case MotionNotify:
+        {
+            float x = x_event->xmotion.x;
+            float y = x_event->xmotion.y;
+            
+            target_window->controls.cursor_delta = { x - target_window->controls.cursor_pos.x, y - target_window->controls.cursor_pos.y };
+            target_window->controls.cursor_pos = {x, y};
+        }
+        case(ClientMessage):
+        {
+            // Window manager has requested a close
+            if(x_event->xclient.data.l[0] == x_wm_delete_message)
+            {
+                return_value = return_value | QUIT_WINDOW;
+            }
+            break;
+        }
+        case(SelectionRequest):
+        {
+            XSelectionRequestEvent request = x_event->xselectionrequest;
+            if(XGetSelectionOwner(x_display, x_wm_clipboard) != platform.first_window->window_handle || request.selection != x_wm_clipboard)
+            {
+                break;   
+            }
+            
+            // Request for the list of types we support
+            if(request.target == x_wm_clipboard_targets && request.property != None)
+            {
+                XChangeProperty(request.display, request.requestor, request.property, XA_ATOM, 32, PropModeReplace, (unsigned char*)&x_wm_utf8, 1);
+            }
+            // Request for the value of our utf8 clipboard
+            else if(request.target == x_wm_utf8 && request.property != None)
+            {
+                XChangeProperty(request.display, request.requestor, request.property, request.target, 8, PropModeReplace, (unsigned char*)platform.clipboard_data, platform.clipboard_len);
+            }
+            
+            XSelectionEvent reply = {};
+            reply.type = SelectionNotify;
+            reply.serial = request.serial;
+			reply.send_event = request.send_event;
+			reply.display = request.display;
+			reply.requestor = request.requestor;
+			reply.selection = request.selection;
+			reply.target = request.target;
+			reply.property = request.property;
+			reply.time = request.time;
+			XSendEvent(x_display, request.requestor, 0, 0, (XEvent*)&reply);
+			
+            break;
+        }
+        default:
+            break;
+    }
+
+    return return_value;
+}
+
 // Returns flags for the runtime to know the status of the window
 void linux_process_window_events(PlatformWindow* target_window)
 {
     update_control_state(target_window);
     XEvent x_event;
-    int return_value = 0;
     while(XPending(x_display))
     {
         XNextEvent(x_display, &x_event);
         
-        // Note(Leo): IME's may want some keystrokes to not be sent which is what this filters for
-        if(XFilterEvent(&x_event, None) == true)
-        {
-            continue;
+        target_window->flags |= linux_process_window_event(target_window, &x_event);
+    }
+}
+
+void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len)
+{
+    if(!utf8_buffer)
+    {
+        return;
+    }
+
+    // If we previously had a clipboard value clear it
+    if(platform.clipboard_data)
+    {
+        free(platform.clipboard_data);
+    }
+    
+    XSetSelectionOwner(x_display, x_wm_clipboard, platform.first_window->window_handle, CurrentTime);
+    
+    platform.clipboard_data = (char*)malloc(buffer_len*sizeof(char));
+    platform.clipboard_len = buffer_len;
+    
+    memcpy(platform.clipboard_data, utf8_buffer, buffer_len*sizeof(char));
+}
+
+char* PlatformGetTextClipboard(uint32_t* buffer_len)
+{
+    // If we are lucky we will own the selection and dont need to do a back and forth with X11
+    if(XGetSelectionOwner(x_display, x_wm_clipboard) == platform.first_window->window_handle)
+    {
+        *buffer_len = platform.clipboard_len;
+        
+        char* content = (char*)AllocScratch(*buffer_len*sizeof(char));
+        memcpy(content, platform.clipboard_data, *buffer_len*sizeof(char));
+        
+        return content;
+    }
+
+    XConvertSelection(x_display, x_wm_clipboard, x_wm_clipboard_targets, x_wm_clipboard, platform.first_window->window_handle, CurrentTime);
+
+    XEvent x_event;
+    uint32_t attempts = 50; // Note(Leo): This is arbitrary
+    while(attempts)
+    {
+        attempts--;
+        usleep(30); // Note(Leo): Pause for 30 microseconds each time (also arbitrary)
+        while(XPending(x_display))
+        {   
+            XNextEvent(x_display, &x_event);
+            
+            if(x_event.type == SelectionNotify)
+            {
+                attempts = 0;
+                break;
+            }
+            
+            platform.first_window->window_handle |= linux_process_window_event(platform.first_window, &x_event);
+            
+            // Failed to find the event in time
+            if(!attempts)
+            {
+                return NULL;
+            }
         }
         
-        switch(x_event.type)
+    }
+    
+    XSelectionEvent selection = x_event.xselection;
+    if(selection.property == None || selection.target != x_wm_clipboard_targets)
+    {
+        return NULL;
+    }
+    
+    Atom actual_type;
+    int actual_format;
+    uint64_t bytes;
+    unsigned char* data;
+    uint64_t count;
+    
+    XGetWindowProperty(x_display, platform.first_window->window_handle, x_wm_clipboard, 0, LONG_MAX, False, AnyPropertyType, 
+                        &actual_type, &actual_format, &count, &bytes, &data);
+
+    Atom* list = (Atom*)data;
+    for(uint64_t i = 0; i < count; i++)
+    {
+        if(list[i] == XA_STRING)
         {
-            case(DestroyNotify):
-            {
-                if(x_event.xdestroywindow.window == target_window->window_handle)
-                {
-                    return_value = return_value | QUIT_WINDOW;
-                }
-                break;
-            }
-            case(ConfigureNotify):
-            {
-                target_window->width = x_event.xconfigure.width;
-                target_window->height = x_event.xconfigure.height;
-                return_value = return_value | RESIZED_WINDOW;
-                //XSync(x_display, 0);
-                //XFlush(x_display);
-                break;
-            }
-            /*
-            case(Expose):
-            {
-                int x = x_event.xexpose.x;
-                int y = x_event.xexpose.y;
-                int width = x_event.xexpose.width;
-                int height = x_event.xexpose.height;
-                XFillRectangle(x_display, target_window->window_handle, target_window->window_gc, x, y, width, height);
-                break;
-            }
-            */
-            case(KeyPress):
-            {
-                // Note(Leo):remove the control modifier since it makes stuff return control codes
-                x_event.xkey.state &= ~ControlMask;
-            
-                // Note(Leo): 100 is an arbitrary size
-                #define TEXT_BUFF_SIZE 100
-                char* key_text = (char*)AllocScratch(sizeof(char)*TEXT_BUFF_SIZE);
-                Status status;
-                KeySym keysym = NoSymbol;
-                int text_len = Xutf8LookupString(target_window->window_input_context, &x_event.xkey, key_text, TEXT_BUFF_SIZE - 1, &keysym, &status);
-                if(text_len < 0)
-                {
-                    text_len = 0;
-                }
-                
-                int key_code = x_event.xkey.keycode;
-                VirtualKeyCode translated_keycode = 0; 
-                if(key_code < sizeof(KEYCODE_TRANSLATIONS))
-                {
-                    translated_keycode = KEYCODE_TRANSLATIONS[key_code];
-                }
-                
-                // We didnt find a translation
-                if(!translated_keycode)
-                {
-                    translated_keycode = K_UNMAPPED;
-                }
-            
-                uint32_t buffer_len = (uint32_t)text_len;
-                char* curr_char = key_text;
-                
-                // Note(Leo): If a key only has 1 utf8 char in it then we send the char with they keystroke event.
-                //            However for keys that are multi char we assume they are IME events and so we sepereate the
-                //            text and key event. We send the keystroke event first with no codepoint then all the chars
-                //            as individual K_VIRTUAL keystrokes with a utf8 char in each.
-                //            This is mostly for consistency with the android layer which does something similiar.
-                
-                Event* added = PushEvent((DOM*)target_window->window_dom);
-                added->type = EventType::KEY_DOWN;
-                added->Key.code = translated_keycode;
-                
-                if(buffer_len)
-                {
-                    uint32_t codepoint = 0;
-                    uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
-                
-                    buffer_len -= consumed;
-                    curr_char += consumed;
-                    
-                    if(!buffer_len)
-                    {
-                        added->Key.key_char = codepoint;
-                    }
-                    else
-                    {
-                        added = PushEvent((DOM*)target_window->window_dom);
-                        added->type = EventType::KEY_DOWN;
-                        added->Key.code = K_VIRTUAL;
-                        added->Key.key_char = codepoint;
-                    }
-                }
-                
-                while(buffer_len)
-                {
-                    uint32_t codepoint = 0;
-                    uint32_t consumed = PlatformConsumeUTF8ToUTF32(curr_char, &codepoint, buffer_len);
-                
-                    // Hit some type of invalid codepoint
-                    if(!consumed)
-                    {
-                        buffer_len -= 1;
-                        curr_char += 1;
-                        continue;
-                    }
-                    
-                    added = PushEvent((DOM*)target_window->window_dom);
-                    added->type = EventType::KEY_DOWN;
-                    added->Key.code = K_VIRTUAL;
-                    added->Key.key_char = codepoint;
-                    
-                    buffer_len -= consumed;
-                    curr_char += consumed;
-                }
-                
-                target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::DOWN;
-                DeAllocScratch(key_text);
-                
-                break;
-            }
-            case(KeyRelease):
-            {
-                int key_code = x_event.xkey.keycode;
-                VirtualKeyCode translated_keycode = 0; 
-                if(key_code < sizeof(KEYCODE_TRANSLATIONS))
-                {
-                    translated_keycode = KEYCODE_TRANSLATIONS[key_code];
-                }
-                
-                // We didnt find a translation
-                if(!translated_keycode)
-                {
-                    translated_keycode = K_UNMAPPED;
-                }
-            
-                Event* added = PushEvent((DOM*)target_window->window_dom);
-                added->type = EventType::KEY_UP;
-                added->Key.code = translated_keycode;
-                
-                target_window->controls.keyboard_state->keys[translated_keycode] = (uint8_t)KeyState::UP;
-                break;
-            }
-            case(ButtonPress):
-            {
-                if (x_event.xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::DOWN_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::DOWN_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::DOWN_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button4) { target_window->controls.scroll_dir = { 0.0f, SCROLL_MULTIPLIER }; }
-                else if (x_event.xbutton.button == Button5) { target_window->controls.scroll_dir = { 0.0f, -1.0f * SCROLL_MULTIPLIER }; }
-                else if (x_event.xbutton.button == Button6) { target_window->controls.scroll_dir = { SCROLL_MULTIPLIER, 0.0f }; }
-                else if (x_event.xbutton.button == Button7) { target_window->controls.scroll_dir = { -1.0f * SCROLL_MULTIPLIER, 0.0f }; }
-                break;
-            }
-            case(ButtonRelease):
-            {
-                if (x_event.xbutton.button == Button1) { target_window->controls.mouse_left_state = MouseState::UP_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button2) { target_window->controls.mouse_middle_state = MouseState::UP_THIS_FRAME; }
-                else if (x_event.xbutton.button == Button3) { target_window->controls.mouse_right_state = MouseState::UP_THIS_FRAME; }
-                break;
-            }
-            case MotionNotify:
-            {
-                float x = x_event.xmotion.x;
-                float y = x_event.xmotion.y;
-                
-                target_window->controls.cursor_delta = { x - target_window->controls.cursor_pos.x, y - target_window->controls.cursor_pos.y };
-                target_window->controls.cursor_pos = {x, y};
-            }
-            case(ClientMessage):
-            {
-                // Window manager has requested a close
-                if(x_event.xclient.data.l[0] == x_wm_delete_message)
-                {
-                    return_value = return_value | QUIT_WINDOW;
-                }
-                break;
-            }
-            default:
-                break;
+            x_wm_clipboard_target = XA_STRING;
+        }
+        else if(list[i] == x_wm_utf8)
+        {
+            x_wm_clipboard_target = x_wm_utf8;
+            break;
         }
     }
-    fflush(stdout);
     
-    target_window->flags = target_window->flags | return_value;
+    if(data)
+    {
+        XFree(data);
+    }
+    
+    if(x_wm_clipboard_target == None)
+    {
+        return NULL;
+    }
+    
+    // Signal we want the data
+    XConvertSelection(x_display, x_wm_clipboard, x_wm_clipboard_target, x_wm_clipboard, platform.first_window->window_handle, CurrentTime);
+    
+    attempts = 50; // Note(Leo): This is arbitrary
+    while(attempts)
+    {
+        attempts--;
+        usleep(30); // Note(Leo): Pause for 30 microseconds each time (also arbitrary)
+        while(XPending(x_display))
+        {   
+            XNextEvent(x_display, &x_event);
+            
+            if(x_event.type == SelectionNotify)
+            {
+                attempts = 0;
+                break;
+            }
+            
+            platform.first_window->window_handle |= linux_process_window_event(platform.first_window, &x_event);
+           
+            // Failed to find the event in time
+            if(!attempts)
+            {
+                return NULL;
+            }
+        }
+        
+    }
+    
+    selection = x_event.xselection;
+    if(selection.target != x_wm_clipboard_target)
+    {
+        return NULL; 
+    }
+    
+    XGetWindowProperty(x_display, platform.first_window->window_handle, x_wm_clipboard, 0, LONG_MAX, False, AnyPropertyType, 
+                        &actual_type, &actual_format, &count, &bytes, &data);
+    
+    if(!data)
+    {
+        return NULL;
+    }
+    
+    *buffer_len = static_cast<uint32_t>(count);
+        
+    char* content = (char*)AllocScratch(*buffer_len*sizeof(char));
+    memcpy(content, data, *buffer_len*sizeof(char));
+    XFree(data);
+    
+    
+    return content;
 }
 
 // Returns -1 if searched char is not found, otherwise returns the index of the last instance of searched_char
@@ -496,6 +689,11 @@ int main()
     x_defaults.default_depth = XDefaultDepth(x_display, default_screen);
     x_defaults.default_root_window = XDefaultRootWindow(x_display);
     x_wm_delete_message = XInternAtom(x_display, "WM_DELETE_WINDOW", False);
+    
+    x_wm_clipboard = XInternAtom(x_display , "CLIPBOARD", False);
+    x_wm_clipboard_targets = XInternAtom(x_display , "TARGETS", False);
+    x_wm_utf8 = XInternAtom(x_display, "UTF8_STRING", False);
+    x_wm_clipboard_target = None;
     
     // Note(Leo): Input system was adapted from this https://gist.github.com/baines/5a49f1334281b2685af5dcae81a6fa8a
     x_input_method = XOpenIM(x_display, 0, 0, 0);

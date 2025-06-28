@@ -127,6 +127,8 @@
 #else
 #endif
 #include <intrin.h>
+#elif HAVE_ARM_8 || HAVE_ARM_7
+#include "../sse2neon/sse2neon.h"
 #else
 #include <x86intrin.h>
 #endif
@@ -135,10 +137,10 @@
 #define meow_u64 long long unsigned
 #define meow_u128 __m128i
 
-#if __x86_64__ || _M_AMD64
+#if __x86_64__ || _M_AMD64 || HAVE_ARM_8
 #define meow_umm long long unsigned
 #define MeowU64From(A, I) (_mm_extract_epi64((A), (I)))
-#elif __i386__  || _M_IX86
+#elif __i386__  || _M_IX86 || HAVE_ARM_7
 #define meow_umm int unsigned
 #define MeowU64From(A, I) (*(meow_u64 *)&(A))
 #else

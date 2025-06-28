@@ -5,7 +5,6 @@
 #include <jni.h>
 #include <string>
 #include <android/log.h>
-//#include <android_native_app_glue.h>
 #include <pthread.h>
 #include <android/native_window_jni.h>
 #include <android/asset_manager_jni.h>
@@ -413,13 +412,12 @@ Java_com_example_reactivecppmarkup_ExtendedNative_android_1on_1touch(JNIEnv *env
 void android_show_soft_keyboard()
 {
     JNIEnv* java_env;
-    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) != JNI_EDETACHED)
+    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) == JNI_EDETACHED)
     {
-        return;
-    }
-    if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
-    {
-        return;
+        if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
+        {
+            return;
+        }
     }
     
     jmethodID method = java_env->GetMethodID(platform.activity_class, "show_soft_keyboard", "()V");
@@ -431,19 +429,89 @@ void android_show_soft_keyboard()
 void android_hide_soft_keyboard()
 {
     JNIEnv* java_env;
-    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) != JNI_EDETACHED)
+    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) == JNI_EDETACHED)
     {
-        return;
-    }
-    if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
-    {
-        return;
+        if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
+        {
+            return;
+        }
     }
 
     jmethodID method = java_env->GetMethodID(platform.activity_class, "hide_soft_keyboard", "()V");
     java_env->CallVoidMethod(platform.activity, method);
     
     platform.java_vm->DetachCurrentThread();
+}
+
+void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len)
+{
+    JNIEnv* java_env;
+    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) == JNI_EDETACHED)
+    {
+        if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
+        {
+            return;
+        }
+    }
+
+    jmethodID method = java_env->GetMethodID(platform.activity_class, "set_text_clipboard", "(Ljava/lang/String;)V");
+    
+    // Note(Leo): +1 to fit \0
+    char* terminated_buffer = (char*)AllocScratch((buffer_len + 1)*sizeof(char));
+    memcpy(terminated_buffer, utf8_buffer, buffer_len*sizeof(char));
+    terminated_buffer[buffer_len] = '\0';
+    
+    jstring clipboard_text = java_env->NewStringUTF(terminated_buffer);
+    
+    java_env->CallVoidMethod(platform.activity, method, clipboard_text);
+    
+    DeAllocScratch(terminated_buffer);
+    
+    java_env->DeleteLocalRef(clipboard_text);
+    platform.java_vm->DetachCurrentThread();
+}
+
+char* PlatformGetTextClipboard(uint32_t* buffer_len)
+{
+    *buffer_len = 0;
+    
+    JNIEnv* java_env;
+    if(platform.java_vm->GetEnv((void**)&java_env, JNI_VERSION_1_6) == JNI_EDETACHED)
+    {
+        if(platform.java_vm->AttachCurrentThread(&java_env, NULL) != JNI_OK)
+        {
+            return NULL;
+        }
+    }
+
+    jmethodID method = java_env->GetMethodID(platform.activity_class, "get_text_clipboard", "()Ljava/lang/String;");
+    
+    jstring clipboard_text = (jstring)java_env->CallObjectMethod(platform.activity, method);
+    const char* converted_text = java_env->GetStringUTFChars(clipboard_text, 0);
+    
+    char* clipboard_content = NULL;
+    
+    if(converted_text)
+    {
+        uint32_t len = 0;
+        for(uint32_t i = 0; i < 0xFFFF; i++)
+        {
+            if(converted_text[i] == 0)
+            {
+                len = i;
+                break;
+            }
+        }
+        
+        clipboard_content = (char*)AllocScratch(len*sizeof(char));
+        memcpy(clipboard_content, converted_text, len*sizeof(char));
+        *buffer_len = len;
+    }
+    
+    java_env->ReleaseStringUTFChars(clipboard_text, converted_text);
+    java_env->DeleteLocalRef(clipboard_text);
+    
+    return clipboard_content;
 }
 
 void android_swap_event_buffers()
@@ -718,17 +786,17 @@ PlatformFile PlatformOpenFile(const char* file_path, Arena* bin_arena)
     
     if(bin_arena)
     {
-        loaded->data = Alloc(bin_arena, sizeof(char)*opened_size);
-        loaded->data_arena = bin_arena;
+        loaded.data = Alloc(bin_arena, sizeof(char)*opened_size);
+        loaded.data_arena = bin_arena;
     }
     else
     {
-        loaded->data = malloc(opened_size);
+        loaded.data = malloc(opened_size);
     }
     
-    loaded->len = static_cast<uint64_t>(opened_size);
+    loaded.len = static_cast<uint64_t>(opened_size);
     
-    AAsset_read(opened, loaded->data, opened_size);
+    AAsset_read(opened, loaded.data, opened_size);
     AAsset_close(opened);
     
     return loaded;

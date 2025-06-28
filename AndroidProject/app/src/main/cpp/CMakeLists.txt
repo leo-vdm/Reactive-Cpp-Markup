@@ -1,19 +1,12 @@
 
 cmake_minimum_required(VERSION 3.22.1)
-set(${CMAKE_C_FLAGS}, "${CMAKE_C_FLAGS} -fPIC")
-
+set(${CMAKE_CXX_FLAGS}, "${CMAKE_CXX_FLAGS} -fPIC")
 
 project("rcm")
-
-#add_library(native_app_glue STATIC
-#        ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
-#target_include_directories(native_app_glue PUBLIC
-#        ${ANDROID_NDK}/sources/android/native_app_glue)
 
 find_library(log-lib
         log)
 
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
 add_compile_definitions(FT2_BUILD_LIBRARY)
 
 add_library(${CMAKE_PROJECT_NAME} SHARED
@@ -21,6 +14,18 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
         backend/platform_android.cpp backend/platform_vulkan.cpp backend/harfbuzz_module.cpp backend/platform_font.cpp
         backend/shaping_platform.cpp backend/freetype_module.cpp
         generated/dom_attatchment.cpp)
+
+if (${ANDROID_ABI} STREQUAL "armeabi-v7a")
+    add_definitions("-DHAVE_ARM_7")
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -mfpu=neon)
+elseif (${ANDROID_ABI} STREQUAL "x86")
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -g -msse -maes -fsanitize=undefined -fsanitize-trap=undefined)
+elseif (${ANDROID_ABI} STREQUAL "x86_64")
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -g -msse -maes -fsanitize=undefined -fsanitize-trap=undefined)
+else ()
+    add_definitions("-DHAVE_ARM_8")
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -mfpu=neon)
+endif ()
 
 target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC backend/third_party/freetype/freetype-2.13.3/include generated)
 
