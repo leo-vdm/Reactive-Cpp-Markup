@@ -1,0 +1,293 @@
+RCM uses two file types for creating UIs.
+".cmp" - "C Markup Page" 
+".cmc" - "C Markup Component"
+These files serve different purposes which will be explained later, however both follow the same format which is:
+<code>
+    ## A C++ class/struct definition which MUST match the name of your file ##
+</code>
+<root>
+    ## Normal markup in the style of HTML or others with some special semantics ##
+</root>
+<style>
+    ## A CSS like style language with some more restrictions and special semantics ##
+</style>
+
+This style is basically a copy of what the Svelte javascript framework uses. There are also other carry-overs from 
+Svelte (Such as the way bindings work) which will be apparent later.
+
+The markup works similiar to all other markup implementations, that is with a <element attribute1="x"></element> style.
+The <root> element is unique and does not function like other elements in that it does not allow any attributes.
+ 
+Following is the list of currently useable elements:
+<hdiv></hdiv>   ## Like the <div> element from HTML except it will always layout its children in a horizontal fashion.
+<vdiv></vdiv>   ## Like <hdiv> but with a vertical layout.
+<img></img>     ## An image, loads an image file specified with the src attribute from the resources/images/ directory.
+<each></each>   ## Like the #each statement from svelte, makes a copy of its children for each element in a specified dir.
+
+Q - HTML has easily 10x more elements, why does RCM have so few?
+A - Basically all elements in HTML (and other markup languages) are totally interchangeable with one another. Readibility
+    quickly becomes an issue in HTML since you just use DIV everywhere and use styles to control the layout behaviour of
+    each div. This totally destroys the ability of the programmer to skim code and know how the result will look based on
+    its pattern (due to the fact that all the layout behaviour is hidden inside of styles).
+    My philosophy was to create as few elements as possible while trying to create noticeable patterns which the programmer
+    can learn to recognize. By having div types named based on how they layout children the pattern of the program makes it
+    obvious how a layout will look.
+
+
+There are conceptually 3 attribute categories in RCM - normal attributes, bindings and properties - although in the compiler
+all attributes are treated the same. We will discuss more about attributes later, but for now we can talk about the compiler.
+
+Q - Compiler?
+A - RCM uses a "compiler" to lex and parse its mixed file type into seperate targets. First is the binary (.bin) which is an
+    AST like representation of your markup code. These .bin files represent all the elements, styles, bindings and text in
+    your project. The "compile" aspect is due to all the .bin files being "linked" in a coherent way with many internal ids
+    being global between your markup files, the result is that the binary representations are inseparable.
+    The second target is a programically extended version of your code. The compiler extracts your code block to a .cpp
+    file and adds function calls to interact with your class/struct that you have created.
+Q - Why use this type of inflexible representation?
+A - By using this compiled approach we can allow simpler interoperation with C++ which is itself a very static language, 
+    further there is also a performance aspect to compiling markup and CSS. The cost is that binary files cant be mixed together
+    in a nice way since there will be overlapping ids for bindings and styles.
+
+We now almost know everything we need to make our first app. Finally we just need to explain some quirks/boilerplate.
+The entry point of your application is a page, pages are represented by the .cmp file type. Pages are unique as you cannot
+embedd a page within another page since they are strictly tied to windows, i.e. each page has a window representing it.
+A page receives unique events such as keystrokes from the runtime which it can then choose to either handle itself or
+otherwise send to a component. Pages receive a callback from the runtime each frame after all element attributes have been
+evaluated so that they can handle any events they have received or do any other frame-to-frame work.
+
+Execution in RCM is strictly single threaded, i.e. when your page receives a callback from the runtime no other evaluation
+will occur until you return. 
+
+When a page is first loaded you will receive a callback to construct your class/struct, this call occurs BEFORE any of your
+page's elements have been created.
+
+The first (and only) page the runtime will open is MainPage.cmp, this is like index.html in that it is intended to be a
+universal design that you must follow.
+
+Your page class/struct must inherit the Page struct defined in dom.h, this is required so that the DOM can identify your 
+page object properly when doing callbacks.
+
+Now that we know the neccesary boilerplate, we are ready to make our first app.
+
+## Inside MainPage.cmp ##
+<code>
+
+// You should either use struct for your page object or ensure that all the members RCM wants to access are set public
+struct MainPage : Page
+{
+    // This is called when your page is first loaded, see dom.h for more details on what the DOM object has.
+    // In general pointers in RCM will be "stable" since objects are allocated in arenas and not moved around like they
+    // would be in std::vector
+    void PageMain(DOM* dom)
+    {
+    
+    }
+    
+    // This is called every frame, we wont bother processing events for this example.
+    void OnFrame(DOM* dom)
+    {
+    
+    }
+};
+
+</code>
+<root>
+<vdiv>
+    Hello world!
+</vdiv>
+</root>
+
+<style>
+</style>
+## To compile MainPage.cmp (or any number of source files) use the RCM compiler ##
+compiler source_dir build_dir
+
+The compiler searches the source dir recursively for .cmp and .cmc files and outputs generated .cpp and .bin files to
+the build dir.
+
+Then to build your executable you need to use a C++ compiler and copy some specific files to your build dir.
+Copy the .h files found in the backend dir in the compiler's repo, further also copy the overloads.cpp file from backend.
+
+In your build dir create the compiled_shaders subdirectory and copy the combined_shader.spv file to it.
+Alternatively you can compile the shader yourself if you have glslc. 
+
+Create the resources directory inside your build dir and inside that create the images and fonts directorys.
+Choose a (true type) font you would like to use as your default, put it in the fonts dir and rename it to "default.ttf".
+
+Finally either consult the RCM repo for instructions to build the backend lib or download a pre-compiled binary and copy
+the binary to your build dir.
+
+There are two compilation steps to get your executable: 
+First you must compile the generated sources in your build dir.
+On gcc:
+g++ -Wshadow=compatible-local -march=native -g -c -I. -I$dep_dir/vulkan/Vulkan-Headers-1.4.317/include -I$dep_dir/freetype/freetype-2.13.3/include dom_attatchment.cpp
+Or for MSVC:
+cl -arch:AVX2 /MP12 /Zi /Od /EHsc /c dom_attatchment.cpp /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include
+The main points to notice are that AVX and AES are required (for meow_hash) and you need to provide the switch to your compiler
+which tells it to output object files rather than immediately linking. You must also ensure that you properly set your dep_dir
+variable which points to a directory containing the third_party folder from the backend dir.
+
+Also notice that you only compile the generated dom_attatchment.cpp file since that file uses the #include directory to pull
+in your other generated files.
+
+Next you must link your compiled object files with the library file.
+For gcc:
+g++ -o test *.o *.a -g -ldl -lpthread -lX11
+For MSVC:
+LINK /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib /OUT:test.exe
+
+Congratulations, you should now have your first RCM application!
+For more detail on the build steps check out the build.bat and build.sh scripts in the RCM repo, both have sections which copy
+the required files and run the previously stated compiler commands.
+
+To package you new app, this is the required structure:
+top_level_dir/
+              test.exe
+              MainPage.bin
+              resources/
+                        compiled_shaders/
+                                         combined_shader.spv
+                        fonts/
+                              default.ttf
+                        images/
+None of the other files in the build are required for the application to run. In the future all the required files/dirs will be 
+compacted into an assetpack format for convenience and better compatability with certain platforms, however this is not the
+case yet.
+
+Now that we have a working example we can use some more interesting features. First we will do a basic text binding, edit your
+MainPage.cmp:
+## Inside MainPage.cmp <code> ##
+
+struct MainPage : Page
+{
+    const char* const_text;
+
+    void PageMain(DOM* dom)
+    {
+        const_text = "Hello this is bound text!";
+    }
+    
+    // ....... OnFrame omitted for now .....
+};
+
+## Inside MainPage.cmp <root> ##
+
+<vdiv>
+    Hello world! {const_text}
+</vdiv>
+                 ^- Bindings are denoted by curly braces, this binding is a child of a div so it will insert its value as text
+If you recompile and run your executable you will see the new text appear appended to the old "Hello world!"
+Bindings are not limited to only char* variables, by default integers also work.
+
+## Inside MainPage.cmp <code> ##
+
+struct MainPage : Page
+{
+    int count;
+
+    void PageMain(DOM* dom)
+    {
+        count = 22;
+    }
+    
+    // ....... OnFrame omitted for now .....
+};
+
+## Inside MainPage.cmp <root> ##
+
+<vdiv>
+    Hello world! {count}
+</vdiv>
+
+Now when you recompile and run you will see the number 22 next to your "Hello world". You may now wonder how this conversion
+to text works and what types are supported. The answer is that there is no magic and any type you want can be supported.
+This is because these conversions are done via an overloaded function called make_string() defined in "overloads.cpp" which
+you may remember having copied to your build dir earlier.
+
+The make_string() function must follow the pattern of ArenaString* make_string(your_type arg, Arena* strings)
+where the string "Arena" and returned "ArenaString" are RCM defined types. It should now be clear how you can support
+arbitrary types, simply make your own overload of the make_string function following the pattern and make sure to use
+your custom version of overloads.cpp in your builds.
+
+Circling back to the earlier point of bindings, there are generally two patterns of bindings in RCM, we have seen the first
+which is a type of implicit acces. Called such due to the fact we did not explicitly access an object, we simply entered a
+name of a member of our MainPage struct and the compiler emits the code around this to correctly reference the variable.
+The problem with this is that the compiler is stupid, so had we done something such as {count + count} the emitted code
+would not account for this, it would look something like:
+
+return make_string(((MainPage*)e)->count + count);
+
+which is obviously invalid C++. This is an inherit limitation of implicit access bindings (and there is no real way around
+this at the moment for bindings which use this pattern). The other binding type is "explicit access", to explain this we will
+again extend our example. We will add a button to iterate count.
+
+## Inside MainPage.cmp <code> ##
+
+struct MainPage : Page
+{
+    int count;
+
+    void PageMain(DOM* dom)
+    {
+        count = 0;
+    }
+    
+    void on_click_count()
+    {
+        count++;
+    }
+    
+    // ....... OnFrame omitted for now .....
+};
+
+## Inside MainPage.cmp <root> ##
+
+<vdiv>
+    Hello world! 
+    <hdiv onclick="{e->on_click_count()}" class="button"> Count is {count} </hdiv>
+</vdiv>
+
+## Inside MainPage.cmp <style> ##
+
+button {
+    margin: grow, grow;
+    width: fit;
+    height: fit;
+    color: 120, 120, 120;
+    corners: 20px, 20px, 20px, 20px;
+}
+
+That was alot, here is the explanation. You will see a new attribute "onclick" which as you might expect will call its 
+given callback when its element is clikced. Notice that in onclick the binding uses the "e" variable as a way of accessing
+your class/struct object. This is why its called an explicit acces, the compiler generates a variable with your type which
+you can access inside of the binding. Another property of this is that the code gen is more forgiving, you can essentially
+write normal C++ inside an explicit access binding like so "{e->on_click_count(); e->another_signal(); e->clicked=true}".
+The compiler will generate code similiar to this:
+auto e = (MainPage*)arg; e->on_click_count; e->another_signal(); e->clicked=true;
+This is clearly valid C++, unlike the implicit access when we had an invalid code gen.
+
+// Note(Leo): Move this stuff to its own file.
+Normal attributes work the same as other markup languages, i.e. attribute_name="value". Depending on the attribute's semantics
+it may store the text value directly or be compiled down.
+Following is a list of normal attributes:
+
+- class="my_class"
+This is like the HTML class attribute, my_class will be the name of a class you declare in the local <style> block.
+The plan is to limit class to only allow one class name however it currently still supports multiple class names.
+Class names in RCM ARE namespaced to their origin file, i.e. your class called "my_class" in MainPage.cmp is totally seperate
+from "my_class" in MyComponent.cmc (This comes from Svelte aswell).
+
+- id="my_id"
+This attribute attatches a unique "id" to an element which can be used by your C++ code. The value you provide is not stored
+as text but is rather replaced with an integer number allocated at compile time. The compiler generates a set of C++ macros
+which encode this information in a queryable format. By using the EID() macro your C++ code can get the integer allocated
+to an id. This works accros different pages aswell, so if we had a element in "MyComponent.cmc" we wanted to identify
+we could use id="myelement" on it then in another Page/Component we can use EID(myelement, MyComponent) to get the integer
+id of that element.
+
+- src="my_pic.png"
+Sets the source file name for an <img> tag. Currently STBI is used for reading images so .jpg and .png are the supported formats.
+Image files should be placed in the resources/images/ directory.
+
+Next are the binding attributes, these are like bindings in Svelte/React using the attribute_name="{var_name}" pattern.
