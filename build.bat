@@ -26,7 +26,7 @@ IF %ERRORLEVEL% NEQ 0 (
 )
 
 :: Link the .lib
-lib /nologo /out:runtime.lib freetype_module.obj runtime.obj arena.obj arena_string.obj DOM.obj platform_linux.obj platform_windows.obj platform_vulkan.obj file_system.obj platform_font.obj harfbuzz_module.obj shaping_platform.obj
+lib /nologo /out:runtime.lib freetype_module.obj runtime.obj arena.obj arena_string.obj DOM.obj platform_windows.obj platform_vulkan.obj file_system.obj platform_font.obj harfbuzz_module.obj shaping_platform.obj
 xcopy /y /s runtime.lib ..\test_build
 
 :: Link the compiler .exe
