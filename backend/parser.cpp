@@ -235,10 +235,13 @@ void ProduceAST(AST* target, Arena* tokens, Arena* token_values, CompilerState* 
                 
                 Attribute* text_content = (Attribute*)Alloc(target->attributes, sizeof(Attribute), zero());
                 text_content->type = AttributeType::TEXT;
-                text_content->Text.value = (char*)Alloc(target->values, curr_token->body.len*sizeof(char));
-                text_content->Text.value_length = curr_token->body.len;
+                
+                StringView text_value = StripOuterWhitespace(&curr_token->body);
+                
+                text_content->Text.value = (char*)Alloc(target->values, text_value.len*sizeof(char));
+                text_content->Text.value_length = text_value.len;
                  
-                memcpy((void*)text_content->Text.value, curr_token->body.value, curr_token->body.len*sizeof(char));
+                memcpy((void*)text_content->Text.value, text_value.value, text_value.len*sizeof(char));
                 
                 curr_tag->first_attribute = text_content;
                 break;

@@ -120,6 +120,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 
                 ungetc(next_char, src); // Put the first char back.
                 aggregate_text(src, token_values_arena, new_token, "<>{}", "\n\t\r");
+                
                 break;
         }
     }

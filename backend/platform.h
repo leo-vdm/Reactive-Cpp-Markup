@@ -168,6 +168,7 @@ void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len);
 char* PlatformGetTextClipboard(uint32_t* buffer_len); // UTF8 on the scratch arena
 
 extern float SCROLL_MULTIPLIER;
+#define PREFETCH_INTRINSIC(...)
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #include <windows.h>
@@ -176,6 +177,9 @@ extern float SCROLL_MULTIPLIER;
 #include "key_codes.h"
 
 #define TIMER_INTRINSIC() __rdtsc()
+
+#undef PREFETCH_INTRINSIC
+#define PREFETCH_INTRINSIC(A) _mm_prefetch((char *)(A), _MM_HINT_T0)
 
 #define WINDOWS_WINDOW_CLASS_NAME L"TemporaryMarkupWindowClass"
 
@@ -420,6 +424,7 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
     {
         uint64_t cycle_count;
         uint64_t hits;
+        uint64_t average_cycle_count;
     };
     
     extern timing_info INSTRUMENT_TIMINGS[TIMED_BLOCKS_BLOCKS_MAX];
@@ -479,9 +484,19 @@ bool PointInsideBounds(const bounding_box bounds, const vec2 point);
                     printf("\t%s: %ldcy, %ldhits, %ldcy/hit\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits);
                     #endif
                     #if PLATFORM_WINDOWS
-                    printf("\t%s: %ld microseconds, %ldhits, %ld microseconds/hit\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits);
+                    uint64_t added_cycles = INSTRUMENT_TIMINGS[i].average_cycle_count ? INSTRUMENT_TIMINGS[i].cycle_count : INSTRUMENT_TIMINGS[i].cycle_count * 2;
+                    INSTRUMENT_TIMINGS[i].average_cycle_count = (INSTRUMENT_TIMINGS[i].average_cycle_count * 29) + added_cycles;
+                    
+                    if(INSTRUMENT_TIMINGS[i].average_cycle_count)
+                    {
+                        INSTRUMENT_TIMINGS[i].average_cycle_count = INSTRUMENT_TIMINGS[i].average_cycle_count / 30;
+                    }
+                    
+                    printf("\t%s: %ld microseconds, %ldhits, %ld microseconds/hit, %ld avg microseconds\n", BLOCK_NAMES[i], INSTRUMENT_TIMINGS[i].cycle_count, INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].cycle_count / INSTRUMENT_TIMINGS[i].hits, INSTRUMENT_TIMINGS[i].average_cycle_count);
                     #endif
-                    INSTRUMENT_TIMINGS[i] = {};
+
+                    INSTRUMENT_TIMINGS[i].cycle_count = 0;
+                    INSTRUMENT_TIMINGS[i].hits = 0;
                     
                 }
             }

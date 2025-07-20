@@ -8,7 +8,6 @@ DirectiveType get_directive_from_name(StringView* name);
 void write_token_value(FILE* target, Token* source);
 StringView get_component_name(StringView* name);
 static bool expect_eat(TokenType expected_type);
-void reset_bound_vars();
 
 #define eat() curr_token++
 

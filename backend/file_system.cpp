@@ -55,6 +55,10 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         {
             added_tag.first_child_index = get_index(saved_tree->tags, curr_tag->first_child);
         }
+        else
+        {
+            added_tag.first_child_index = 0;
+        }
         
         fwrite(&added_tag, sizeof(SavedTag), 1, out_file);
         
@@ -341,7 +345,6 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
     printf("\n--== Templates ==--\n");
 #endif
 
-    BodyTemplate* added_template;
     SavedTemplate read_template;
 
     for(int i = 0; i < header.template_count; i++)

@@ -15,8 +15,8 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
     Arena new_arena = Arena(VirtualAlloc(NULL, reserved_size, MEM_RESERVE, PAGE_READWRITE), reserved_size, alloc_size, flags);
     
     // Allocate the first page
-    VirtualAlloc((void*)(new_arena.next_address & ~(WINDOWS_PAGE_MASK)), WINDOWS_PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE);
-    new_arena.furthest_committed = (new_arena.next_address & ~(WINDOWS_PAGE_MASK)) + WINDOWS_PAGE_SIZE;
+    VirtualAlloc((void*)new_arena.next_address, WINDOWS_PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE);
+    new_arena.furthest_committed = new_arena.next_address + WINDOWS_PAGE_SIZE;
     
     return new_arena;
 }
@@ -49,16 +49,13 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     }
     else
     {    
-        // Check if we are allocating over the page boundry of memory weve commited, if we are commit the new pages.
-        //
-        // Note(Leo): + Page size to always round up
+        // Check if we're allocating over the boundry of memory weve commited, if we are commit the new pages.
         uintptr_t new_next_address = arena->next_address + size;
         
         if(new_next_address > arena->furthest_committed)
         {
-            uintptr_t aligned_new_next_address = (new_next_address + WINDOWS_PAGE_SIZE) & ~(WINDOWS_PAGE_MASK);
-            LPVOID result = VirtualAlloc((void*)arena->furthest_committed, aligned_new_next_address - arena->furthest_committed, MEM_COMMIT, PAGE_READWRITE);
-            arena->furthest_committed = aligned_new_next_address;
+            LPVOID result = VirtualAlloc((void*)arena->furthest_committed, size, MEM_COMMIT, PAGE_READWRITE);
+            arena->furthest_committed += size;
         }
         arena->next_address += size;
     }

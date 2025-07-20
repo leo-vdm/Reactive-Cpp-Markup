@@ -12,7 +12,6 @@ void InitDOM(Arena* master_arena, DOM* target)
     target->pointer_arrays = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->elements = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->attributes = (Arena*)Alloc(master_arena, sizeof(Arena));
-    target->changed_que = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->frame_arena = (Arena*)Alloc(master_arena, sizeof(Arena));
     target->events = (Arena*)Alloc(master_arena, sizeof(Arena));
     
@@ -23,7 +22,6 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*1000000, sizeof(Element));
     *(target->attributes) = CreateArena(sizeof(Element)*200000, sizeof(Attribute));
-    *(target->changed_que) = CreateArena(sizeof(int*)*1000, sizeof(int*));
     *(target->frame_arena) = CreateArena(sizeof(char)*10000000, sizeof(char));
     *(target->events) = CreateArena(sizeof(Event)*1000000, sizeof(Event));
     
@@ -92,6 +90,9 @@ void* AllocPage(DOM* dom, int size, int file_id)
 {
     // Note(Leo): Need to use FreeSubtreeObjects to ensure that this malloc'ed memory gets freed
     void* allocated = malloc(size);
+    
+    assert(allocated);
+    
     memset(allocated, 0, size);
     return allocated;
 }
@@ -265,7 +266,7 @@ void* InstancePage(DOM* target_dom, int id)
     // Note(Leo): Get the difference between the old base and target in indexes and apply that to the new base and pointer type
     #define get_pointer(old_base_ptr, new_base_ptr, target_ptr) (target_ptr ? ((new_base_ptr) + (uint64_t)((decltype(old_base_ptr))target_ptr - old_base_ptr)) : 0)
     
-    LoadedFileHandle* page_bin =  GetFileFromId(id);
+    LoadedFileHandle* page_bin = GetFileFromId(id);
     
     if(!page_bin)
     {   
@@ -816,7 +817,7 @@ void RouteEvent(void* master, Event* event)
         return;
     }
     
-    call_comp_event(((ElementMaster*)master)->master_dom, event, ((ElementMaster*)master)->file_id, master);   
+    call_comp_event(((ElementMaster*)master)->master_dom, event, ((ElementMaster*)master)->file_id, master);
 }
 
 // Convenience methods for setting style overrides
@@ -824,6 +825,13 @@ void SetColor(Element* element, StyleColor color)
 {
     element->override_style.color = color;
     element->override_style.color_p = 100;
+    element->do_override_style = true;
+}
+
+void SetTextColor(Element* element, StyleColor color)
+{
+    element->override_style.text_color = color;
+    element->override_style.text_color_p = 100;
     element->do_override_style = true;
 }
 

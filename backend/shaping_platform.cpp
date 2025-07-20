@@ -247,22 +247,24 @@ void sanitize_size_axis(size_axis* parent, size_axis* child)
     }
     
     // Bake values if we can
-    if(parent->desired.type == MeasurementType::PIXELS)
+    if(parent->desired.type == MeasurementType::PIXELS && parent->padding1.type == MeasurementType::PIXELS &&
+        parent->padding2.type == MeasurementType::PIXELS)
     {
+        float p_size = (parent->desired.size - (parent->padding1.size + parent->padding2.size));
         if(child->desired.type == MeasurementType::PERCENT)
         {
             // Note(Leo): Size for a percentage should be normalized
-            child->desired.size = child->desired.size * parent->desired.size;
+            child->desired.size = child->desired.size * p_size;
             child->desired.type = MeasurementType::PIXELS;
         }
         if(child->min.type == MeasurementType::PERCENT)
         {
-            child->min.size = child->min.size * parent->desired.size;
+            child->min.size = child->min.size * p_size;
             child->min.type = MeasurementType::PIXELS; 
         }
         if(child->max.type == MeasurementType::PERCENT)
         {
-            child->max.size = child->max.size * parent->desired.size;
+            child->max.size = child->max.size * p_size;
             child->max.type = MeasurementType::PIXELS;
         }
     }
@@ -589,7 +591,10 @@ void size_child_axis(LayoutElement* parent_element, LayoutElement* child_element
 {
     size_axis* parent = is_vertical ? &parent_element->sizing.height : &parent_element->sizing.width;
     size_axis* child = is_vertical ? &child_element->sizing.height : &child_element->sizing.width;
-    float p_size = parent->desired.size;
+    
+    // Note(Leo): Account for padding taking some of the parent's useable space.
+    assert(parent->padding1.type == MeasurementType::PIXELS && parent->padding2.type == MeasurementType::PIXELS);
+    float p_size = parent->desired.size - (parent->padding1.size + parent->padding2.size);
     float p_accumulated = 0.0f;
     
     // Elements with % sized measures need to calculated

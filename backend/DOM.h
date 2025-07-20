@@ -66,7 +66,6 @@ struct DOM
     Arena* elements;
     Arena* attributes;
 
-    Arena* bound_vars;
     Arena* events;
     
     PlatformControlState* controls;
@@ -74,8 +73,6 @@ struct DOM
     uint32_t event_count;
     uint32_t max_events;
     uint32_t last_event; // Used to keep track of where the last event was popped from
-
-    Arena* changed_que;
     
     Arena* frame_arena; // Composted every frame
     
@@ -665,10 +662,11 @@ void FreeSubtreeObjects(Element* start, DOM* dom = NULL); // If DOM is given the
 
 // Convenience methods for setting style overrides
 void SetColor(Element* element, StyleColor color);
+void SetTextColor(Element* element, StyleColor color);
 void SetMarginL(Element* element, Measurement sizing);
 void SetMarginR(Element* element, Measurement sizing);
 void SetMarginT(Element* element, Measurement sizing);
 void SetMarginB(Element* element, Measurement sizing);
 void SetMargin(Element* element, Margin margin);
 void SetFont(Element* element, FontHandle font);
-void SetFontSize(Element* element, Measurement sizing);
+void SetFontSize(Element* element, uint16_t size);

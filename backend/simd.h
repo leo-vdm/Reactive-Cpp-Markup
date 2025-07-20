@@ -17,6 +17,7 @@ static unsigned int SIMD_WIDTH;
 
 #if defined(__ARM_NEON)
     #define CPU_ID(registers, function_id, sub_function) (void)0
+    #define ARCH_NEON 1
 #elif defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
     #include <intrin.h>
     #define CPU_ID(registers, function_id, sub_function) __cpuidex(registers, function_id, sub_function) 
@@ -34,7 +35,7 @@ void SimdDetectSupport()
 {
     SIMD_WIDTH = 0;
     SUPPORTED_SIMD = SimdLevel::NONE;
-    #if defined(__ARM_NEON)
+    #if defined(ARCH_NEON)
         // Note(Leo): NEON is 128 bits wide 
         SUPPORTED_SIMD = SimdLevel::NEON;
         SIMD_WIDTH = 4;

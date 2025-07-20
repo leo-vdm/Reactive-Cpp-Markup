@@ -467,7 +467,7 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     //hb_buffer_pre_allocate(font_platform.shaping_buffer, Megabytes(1));
 
     // Todo(Leo): Tune these values
-    font_platform.text_cache = create_text_cache_table(0x1000, 400, 5000);
+    font_platform.text_cache = create_text_cache_table(0x1000, 1000, 1000000);
     
     return 0;
 }

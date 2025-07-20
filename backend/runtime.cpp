@@ -264,6 +264,8 @@ void SwitchPage(DOM* dom, int id, int flags)
     ResetArena(dom->attributes);
     ResetArena(dom->events);
     dom->focused_element = NULL;
+    dom->event_count = 0;
+    dom->last_event = 0;
     
     InstancePage(dom, id);    
 }
@@ -577,6 +579,7 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
     }
 
     Attribute* curr_attribute = element->first_attribute;
+    
     while(curr_attribute)
     {
         switch(curr_attribute->type)
@@ -1016,6 +1019,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     
     Element* curr_element = root_element;
     
+    PREFETCH_INTRINSIC(curr_element);
     runtime_evaluate_attributes(dom, controls, curr_element);
     sanitize_scrollable(curr_element);
     if(should_capture_scroll(controls, curr_element)) // Root is allowed to capture scroll
@@ -1026,10 +1030,15 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     // Depth first walk
     while(curr_element)
     {
+        PREFETCH_INTRINSIC(curr_element);
+        PREFETCH_INTRINSIC(curr_element->first_child);
+        PREFETCH_INTRINSIC(curr_element->next_sibling);
+        PREFETCH_INTRINSIC(curr_element->parent);
     
         if(curr_element->first_child && curr_element->flags ^ is_hidden())
         {
             curr_element = curr_element->first_child;
+            
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -1043,6 +1052,7 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         if(curr_element->next_sibling)
         {
             curr_element = curr_element->next_sibling;
+            
             runtime_evaluate_attributes(dom, controls, curr_element);
             
             sanitize_scrollable(curr_element);
@@ -1058,9 +1068,12 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
         curr_element = curr_element->parent;
         while(curr_element)
         {
+            PREFETCH_INTRINSIC(curr_element->parent);
+            
             if(curr_element->next_sibling)
             {
                 curr_element = curr_element->next_sibling;
+                
                 runtime_evaluate_attributes(dom, controls, curr_element);
                 
                 sanitize_scrollable(curr_element);
@@ -1095,7 +1108,6 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     {
         FocusElement(dom, old_focused, dom->focused_element);
     }
-
 
     call_page_frame(dom, ((ElementMaster*)root_element->master)->file_id, root_element->master);    
     
