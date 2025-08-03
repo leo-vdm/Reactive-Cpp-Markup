@@ -353,7 +353,7 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
         // Note(Leo): Templates are indexed in the arena by their ID 
         
         // See if we need to allocated more for this template's slot to be valid
-        BodyTemplate* added_template = get_pointer(((BodyTemplate*)templates->mapped_address), read_template.id, BodyTemplate);
+        BodyTemplate* added_template = get_pointer(base_template, read_template.id, BodyTemplate);
         // Note(Leo): <= since if we are on the next_address then the memory for the object is over it
         if((BodyTemplate*)templates->next_address <= added_template)
         {
