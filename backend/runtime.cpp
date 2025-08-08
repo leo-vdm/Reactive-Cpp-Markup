@@ -34,7 +34,7 @@ void InitRuntime(Arena* master_arena, Runtime* target)
     *(target->selectors) = CreateArena(100*sizeof(Selector), sizeof(Selector));
     *(target->styles) = CreateArena(100*sizeof(Style), sizeof(Style));
     *(target->bound_expressions) = CreateArena(1000*sizeof(BoundExpression), sizeof(BoundExpression));
-    *(target->strings) = CreateArena(1000*sizeof(StringBlock), sizeof(StringBlock));
+    *(target->strings) = CreateArena(1000000*sizeof(StringBlock), sizeof(StringBlock));
 }
 
 Runtime runtime;
@@ -463,7 +463,7 @@ void merge_element_class_style(Element* element, Attribute* class_attribute)
         }
         else
         {
-            binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
+            binding_text = binding->arr_stub_string((void*)element->context_master, (void*)element->master, runtime.strings, element->context_index);
         }
         
         // Note(Leo): binding_text gets freed as a part of class_string (dont need to call freestring)
@@ -612,7 +612,7 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 }
                 else
                 {
-                    binding_text = binding->arr_stub_string((void*)element->context_master, runtime.strings, element->context_index);
+                    binding_text = binding->arr_stub_string((void*)element->context_master, (void*)element->master, runtime.strings, element->context_index);
                 }
                 
                 element->Text.temporal_text_length = binding_text->length;
@@ -690,6 +690,25 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                 if(!element->Each.array_ptr || count == 0)
                 {
                     break;
+                }
+                
+                // Remove old array elements
+                if(element->first_child)
+                {
+                    Element* prev_freed = element->first_child;
+                    Element* next_freed = element->first_child->next_sibling;
+                    
+                    while(prev_freed)
+                    {
+                        FreeSubtreeObjects(prev_freed, dom);
+                        prev_freed = next_freed;
+                        if(next_freed)
+                        {
+                            next_freed = next_freed->next_sibling;
+                        }
+                    }
+                    
+                    element->first_child = NULL;
                 }
                 
                 // Note(Leo): adding template elements backwards since they are appended as the first child of 

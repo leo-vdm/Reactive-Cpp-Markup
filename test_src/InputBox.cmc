@@ -7,8 +7,14 @@ struct input_box_args
     ArenaString* content;
     ArenaString* watermark;
     
-    uint32_t cursor_height;
-    uint32_t cursor_width;
+    float cursor_height;
+    float cursor_width;
+    bool allow_newline;
+    
+    StyleColor text_color;
+    StyleColor watermark_text_color;
+    uint16_t text_size;
+    
 };
 
 struct InputBox : Component
@@ -17,15 +23,21 @@ struct InputBox : Component
     ArenaString* watermark;
     bool is_focused;
     bool content_changed; // Content was changed this frame, cursor needs an update
+    bool allow_newline; // Enable the ENTER key inserting newlines
     uint32_t cursor_pos; // The index of the glyph that the cursor is on.
     uint32_t glyph_count; // The number of traversable glyphs
     DOM* dom;
     
     void* cursor;
     void* content_box;
+    void* watermark_box;
 
     float cursor_width;
     float cursor_height;
+    
+    StyleColor text_color;
+    StyleColor watermark_text_color;
+    uint16_t text_size;
 
     void CompMain(DOM* dom, CustomArgs* custom_args)
     {
@@ -52,15 +64,24 @@ struct InputBox : Component
             Append(watermark, " ");
         }
         
+        
         if(args)
         {
             cursor_width = args->cursor_width;
             cursor_height = args->cursor_height;
+            allow_newline = args->allow_newline;
+            text_color = args->text_color;
+            watermark_text_color = args->watermark_text_color;
+            text_size = args->text_size;
         }
         else
         {
             cursor_width = 5;
             cursor_height = 50;
+            allow_newline = true;
+            text_color = {0.0f, 0.0f, 0.0f, 1.0f};
+            watermark_text_color = {0.05f, 0.05f, 0.05f, 1.0f};
+            text_size = 50;
         }
         
         cursor_pos = 0;
@@ -115,6 +136,17 @@ struct InputBox : Component
             }
             case(EventType::TICK):
             {
+                if(content_box)
+                {
+                    SetTextColor((Element*)content_box, text_color);
+                    SetFontSize((Element*)content_box, text_size);
+                }
+                if(watermark_box)
+                {
+                    SetTextColor((Element*)watermark_box, watermark_text_color);
+                    SetFontSize((Element*)watermark_box, text_size);
+                }
+            
                 tick_cursor(content_changed);
             
                 content_changed = false;
@@ -132,9 +164,8 @@ struct InputBox : Component
     {
         Element* content_el = (Element*)content_box;
         
-        bool cursor_on_right = (cursor_pos == glyph_count && glyph_count > 0);
         
-        if(content_el && content_el->first_child)
+        if(content_el && content_el->first_child && cursor)
         {
             Element* text_el = content_el->first_child;
             
@@ -143,8 +174,9 @@ struct InputBox : Component
                 PlatformEvaluateAttributes(dom, text_el);
                 PlatformPreviewText(dom->frame_arena, text_el, {0.0f, MeasurementType::FIT}, {0.0f, MeasurementType::FIT});
             }
-            
             glyph_count = PlatformGetGlyphCount(text_el);
+            
+            bool cursor_on_right = (cursor_pos == glyph_count && glyph_count > 0);
             
             FontPlatformShapedGlyph* cursor_glyph = PlatformGetGlyphAt(text_el, cursor_pos);
             if(cursor_glyph && text_el->Text.temporal_text)
@@ -169,12 +201,23 @@ struct InputBox : Component
                 SetMarginT((Element*)cursor, { cursor_glyph->base_line - cursor_height, MeasurementType::PIXELS });
             }
             
+            SetHeight((Element*)cursor, { cursor_height, MeasurementType::PIXELS });
+            SetWidth((Element*)cursor, { cursor_width, MeasurementType::PIXELS });
+            
             PlatformUpdateStyle((Element*)cursor);
         }
     }
     
     void user_input(Event* in)
-    {   
+    {
+        bool control_down = false;
+        
+        if(GetKeyState(K_CONTROL) == KeyState::DOWN ||
+            GetKeyState(K_CONTROL_L) == KeyState::DOWN ||
+            GetKeyState(K_CONTROL_R) == KeyState::DOWN)
+        {
+            control_down = true;
+        }
     
         switch(in->Key.code)
         {
@@ -203,8 +246,29 @@ struct InputBox : Component
             {
                 return;
             }
+            case(K_V):
+            {
+                if(control_down)
+                {
+                    uint32_t len = 0;
+                    char* clipboard_content = PlatformGetTextClipboard(&len);
+                    
+                    paste_at_cursor({clipboard_content, len});
+                    
+                    DeAllocScratch(clipboard_content);
+                    
+                    return;
+                }
+                
+                break;
+            }
             case(K_ENTER):
             {
+                if(!allow_newline)
+                {
+                    return;
+                }
+            
                 in->Key.key_char = (uint32_t)0;
                 in->Key.key_char = '\n';
                 break;
@@ -251,12 +315,33 @@ struct InputBox : Component
             return;
         }
         
+        // Note(Leo): This is here incase we recived a virtual key with \n when we dont want any newlines
+        if(!allow_newline && in->Key.key_char == static_cast<uint32_t>('\n'))
+        {
+            return;
+        }
+        
         char added_chars[4];
         
         uint32_t len = PlatformUTF32ToUTF8(in->Key.key_char, (char*)&added_chars);
         
         Insert(content, (char*)&added_chars, static_cast<int>(len), cursor_pos);
         cursor_pos++;
+        content_changed = true;
+    }
+    
+    void paste_at_cursor(StringView pasted_content)
+    {
+        if(!pasted_content.len)
+        {
+            return;
+        }
+        
+        // Todo(Leo): This needs to be changed to do a UTF8 measure to determine how many glyphs we actually need to move
+        //            the cursor.
+        Insert(content, pasted_content.value, static_cast<int>(pasted_content.len), cursor_pos);
+        cursor_pos += pasted_content.len;
+        
         content_changed = true;
     }
     
@@ -493,6 +578,12 @@ struct InputBox : Component
             if(clicked_glyph)
             {   
                 cursor_pos = PlatformGetGlyphIndex(text_el, clicked_glyph);
+                
+                bool is_right_side = (controls->cursor_pos.x - (text_el->last_sizing->position.x + clicked_glyph->placement_offsets.x)) > (clicked_glyph->placement_size.x/2);
+                if(is_right_side)
+                {
+                    cursor_pos++;
+                }
             }
         }
         
@@ -501,12 +592,12 @@ struct InputBox : Component
 </code>
 <root>
 <vdiv onclick="{e->clicked()}" focusable ticking>
-	<hdiv class="test" this="{content_box}" condition="{return e->content->length > 0}">
-		{content}
+	<hdiv this="{content_box}" condition="{return e->content->length > 0}">
+		{return MS(e->content)}
 	   <hdiv class="cursor" this="{cursor}" condition="{return e->is_focused}"></hdiv>
 	</hdiv>
-	<hdiv condition="{return e->content->length == 0}">
-        {watermark}
+	<hdiv this="{watermark_box}" condition="{return e->content->length == 0}">
+        {return MS(e->watermark)}
 	</hdiv>
 </vdiv>
 
@@ -514,17 +605,10 @@ struct InputBox : Component
 
 <style>
 root, vdiv, hdiv {
-	margin: grow, grow;
+	margin: 0px, 0px;
 	width: grow;
-	height: fit;
-    font: "resources/fonts/NotoSans.ttf";
-}
-
-hdiv!hover {
-	margin: grow, grow;
-	color: 210, 210, 210;
-	priority: 2;
-    font: "resources/fonts/NotoSans.ttf";
+	height: grow;
+	color: 0, 0, 0, 0;
 }
 
 cursor, cursor!hover {

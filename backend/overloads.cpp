@@ -7,6 +7,8 @@
 /////                     Overloads used by the dom to parse bound expressions to strings                         /////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#define MS(arg) make_string(arg, strings)
+
 // Overload to allow char* to a c-str
 inline ArenaString* make_string(const char* arg, Arena* strings)
 {

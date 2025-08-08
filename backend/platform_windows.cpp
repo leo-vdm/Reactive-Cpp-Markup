@@ -674,13 +674,9 @@ char* PlatformGetTextClipboard(uint32_t* buffer_len)
     }
     
     uint32_t utf16_len = 0;
-    for(uint32_t i = 0; i < 0xFFFF; i++)
+    while(data[utf16_len] != 0)
     {
-        if(data[i] == 0)
-        {
-            utf16_len = i;
-            break;
-        }
+        utf16_len++;
     }
     
     *buffer_len = utf16_len * 2;

@@ -521,7 +521,7 @@ typedef void* (*SubscribedStubGetPointer)(void*); // For getting pointers from t
 typedef int (*SubscribedStubInt)(void*);
 typedef void (*SubscribedStubArgs)(void*, CustomArgs*);
 
-typedef ArenaString* (*ArrSubscribedStubString)(void*, Arena*, int);
+typedef ArenaString* (*ArrSubscribedStubString)(void*, void*, Arena*, int);
 typedef void (*ArrSubscribedStubVoid)(void*, void*, int);
 typedef void (*ArrSubscribedStubVoidBool)(void*, void*, int, bool);
 typedef bool (*ArrSubscribedStubBool)(void*, void*, int);
@@ -668,5 +668,7 @@ void SetMarginR(Element* element, Measurement sizing);
 void SetMarginT(Element* element, Measurement sizing);
 void SetMarginB(Element* element, Measurement sizing);
 void SetMargin(Element* element, Margin margin);
+void SetHeight(Element* element, Measurement sizing);
+void SetWidth(Element* element, Measurement sizing);
 void SetFont(Element* element, FontHandle font);
 void SetFontSize(Element* element, uint16_t size);

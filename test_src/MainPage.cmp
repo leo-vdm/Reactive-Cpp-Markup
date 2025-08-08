@@ -38,6 +38,7 @@ struct MainPage : Page
         inputbox_args->watermark = NULL;
         inputbox_args->cursor_height = 50;
         inputbox_args->cursor_width = 5;
+        inputbox_args->text_size = 30.0f;
     }
     
     void OnFrame(DOM* dom)
@@ -173,20 +174,20 @@ struct MainPage : Page
 </code>
 <root>
 <vdiv class="fill">
-	<hdiv class="title" onfocus="{e->onFocusTitle(arg0)}" id="mine">Image Gallery {userInput}</hdiv>
+	<hdiv class="title" onfocus="{e->onFocusTitle(arg0)}" id="mine">Image Gallery {return MS(e->userInput)}</hdiv>
 	<hdiv class="img_container" condition="{return e->should_show;}">
 		<img this="{my_element}" src="texture.png" focusable></img>
 		<img src="texture.png" onclick="{e->onSwitchPage()}"></img>
 	</hdiv>
 	<InputBox args="{e->inputbox_args}"></InputBox>
-	<each loop="{things;return e->things_len;test_struct}">
+	<each loop="{return e->things;return e->things_len;test_struct}">
         <hdiv condition="{{return a[index].test_number == 0;}}">
-	       This is a loooooped text! {{test_number}}
+	       This is a loooooped text! {{return MS(a[index].test_number)}}
     	<InputBox args="{e->inputbox_args}"></InputBox>
         </hdiv> 
 	</each>
 	<vdiv class="footer" onclick="{e->countChanged()}">
-		Count: {count}
+		Count: {return MS(e->count)}
 	</vdiv>
 </vdiv>
 </root>

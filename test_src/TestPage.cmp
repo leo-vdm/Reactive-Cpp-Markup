@@ -1,91 +1,40 @@
 <code>
-#usecomp "test_component.cmc"
 
-class TestPage : Page
-{    
-public:
+struct TestPage : Page
+{
     int count;
-    void PageMain(DOM* dom){
-        printf("Hello from the test page!\n");
-        count = 0;
-	printf("Special id is %d\n", EID(special, TestPage));
-        
-    }
 
+    void PageMain(DOM* dom)
+    {
+        count = 0;
+    }
+    
+    void on_click_count()
+    {
+        count++;
+    }
+    
+    // This is called every frame, we wont bother processing events for this example.
     void OnFrame(DOM* dom)
     {
     
-    }
- 
-    void OnClickButton()
-    { 
-        count += 1;
-	   printf("Test Page Count is now %d\n", count);
     }
 };
 
 </code>
 <root>
-<vdiv class="fill">
-	<vdiv class="img_container">
-		<img src="thumbs_up.jpg"></img>
-		<img src="thumbs_up.jpg"></img>
-	</vdiv>
-	<test_component></test_component>
-	<vdiv id="special" class="footer" onclick="{e->OnClickButton()}">
-	   <hdiv class="title">This is the second page</hdiv>
-		Test Count: {count}
-	</vdiv>
+<vdiv>
+    Hello world! 
+    <hdiv onclick="{e->on_click_count()}" class="button"> Count is {return MS(e->count)} </hdiv>
 </vdiv>
-<vdiv class="overlay">Pranked!</vdiv>
 </root>
 
 <style>
-
-overlay {
+button {
+    margin: grow, grow;
     width: fit;
     height: fit;
     color: 120, 120, 120;
-    display: manual;
-    margin: grow, grow, grow, grow;
-}
-
-fill {
-	height: 150%;
-	width: 100%;
-	vertical_clipping: scroll;
-}
-
-footer {
-	height: fit;
-	width: fit;
-	margin: grow, grow;
-	color: 120, 120, 120;
-}
-
-title {
-	margin: 50px, 50px, 50px, 50px;
-	display: relative;
-	font_size: 70px;
-	width: fit;
-	height: fit;
-	color: 120, 0, 0;
-}
-
-img_container {
-	margin: grow, grow, 0px, grow;
-	width: fit;
-	height: fit;
-}
-
-img {
-	width: 200px;
-	height: 200px;
-}
-
-img!hover {
-	priority: 2;
-	width: 400px;
-	height: 400px;
+    corners: 20px, 20px, 20px, 20px;
 }
 </style>

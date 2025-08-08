@@ -95,17 +95,39 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 break;
             }
             case('>'):
+            {
                 new_token = push_token();
                 new_token->type = TokenType::CLOSE_TAG;
                 break;
+            }
             case('{'):
+            {
                 new_token = push_token();
                 new_token->type = TokenType::OPEN_BRACKET;
+                
+                next_char = fgetc(src);
+                if(next_char == '{') // This is a local binding
+                {
+                    ungetc(next_char, src);
+                    break;
+                }
+                
+                ungetc(next_char, src);
+                
+                // Note(Leo): Need to go till hitting the closing bracket otherwise we may detect < or > which
+                //             are used in C++ bindings as tokens which we dont wanna bother with
+                new_token = push_token();
+                new_token->type = TokenType::TEXT;
+                aggregate_text(src, token_values_arena, new_token, "}", "\n\t\r");
+                
                 break;
+            }
             case('}'):
+            {
                 new_token = push_token();
                 new_token->type = TokenType::CLOSE_BRACKET;
                 break;
+            }
             case('\n'): // Ignore line ends
                 break;
             case('\0'):
@@ -115,6 +137,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
             case('\t'): // Ignore tab
                 break;
             default: // Loose text
+            {
                 new_token = push_token();
                 new_token->type = TokenType::TEXT;
                 
@@ -122,6 +145,7 @@ void Tokenize(FILE* src, Arena* tokens_arena, Arena* token_values_arena){
                 aggregate_text(src, token_values_arena, new_token, "<>{}", "\n\t\r");
                 
                 break;
+            } 
         }
     }
 

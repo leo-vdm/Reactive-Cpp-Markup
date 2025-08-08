@@ -869,6 +869,20 @@ void SetMargin(Element* element, Margin margin)
     element->do_override_style = true;
 }
 
+void SetHeight(Element* element, Measurement sizing)
+{
+    element->override_style.height = sizing;
+    element->override_style.height_p = 100;
+    element->do_override_style = true;
+}
+
+void SetWidth(Element* element, Measurement sizing)
+{
+    element->override_style.width = sizing;
+    element->override_style.width_p = 100;
+    element->do_override_style = true;
+}
+
 void SetFont(Element* element, FontHandle font)
 {
     element->override_style.font_id = font;

@@ -494,13 +494,9 @@ char* PlatformGetTextClipboard(uint32_t* buffer_len)
     if(converted_text)
     {
         uint32_t len = 0;
-        for(uint32_t i = 0; i < 0xFFFF; i++)
+        while(converted_text[len] != 0)
         {
-            if(converted_text[i] == 0)
-            {
-                len = i;
-                break;
-            }
+            len++;
         }
         
         clipboard_content = (char*)AllocScratch(len*sizeof(char));
