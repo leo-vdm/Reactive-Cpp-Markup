@@ -414,7 +414,7 @@ struct LayoutElement
             StyleColor text_color;
             FontHandle font_id;
             uint16_t font_size;     
-            uint16_t text_length;
+            uint32_t text_length;
             char* text_content;
         } TEXT;
         struct
@@ -475,7 +475,7 @@ struct Element
         struct {
             // Note(Leo): temporal since its on the frame arena
             char* temporal_text;
-            int temporal_text_length;
+            uint32_t temporal_text_length;
         } Text;
         struct 
         {
@@ -672,3 +672,4 @@ void SetHeight(Element* element, Measurement sizing);
 void SetWidth(Element* element, Measurement sizing);
 void SetFont(Element* element, FontHandle font);
 void SetFontSize(Element* element, uint16_t size);
+void InvalidateEach(Element* element); // Flags an each element to make it regenerate its children

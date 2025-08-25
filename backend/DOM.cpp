@@ -21,7 +21,7 @@ void InitDOM(Arena* master_arena, DOM* target)
     *(target->strings) = CreateArena(sizeof(StringBlock)*1000000, sizeof(StringBlock));
     *(target->pointer_arrays) = CreateArena(sizeof(LinkedPointer)*10000, sizeof(LinkedPointer));
     *(target->elements) = CreateArena(sizeof(Element)*1000000, sizeof(Element));
-    *(target->attributes) = CreateArena(sizeof(Element)*200000, sizeof(Attribute));
+    *(target->attributes) = CreateArena(sizeof(Attribute)*200000, sizeof(Attribute));
     *(target->frame_arena) = CreateArena(sizeof(char)*10000000, sizeof(char));
     *(target->events) = CreateArena(sizeof(Event)*1000000, sizeof(Event));
     
@@ -205,6 +205,11 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
             added->Loop.template_id = converted_attribute->Loop.template_id;
             break;
         }
+        case(AttributeType::THIS_ELEMENT):
+        {
+            added->This.binding_id = converted_attribute->This.binding_id;
+            break;
+        }
         case(AttributeType::FOCUSABLE):
         {
             break;
@@ -219,6 +224,32 @@ Attribute* convert_saved_attribute(DOM* dom, Compiler::Attribute* converted_attr
     }
     
     return added;
+}
+
+bool CheckElementValid(Element* el)
+{
+    if(!el)
+    {
+        return false;
+    }
+    
+    if(el == el->parent || el == el->next_sibling || el == el->first_child)
+    {
+        return false;
+    }
+    
+    Attribute* curr = el->first_attribute;
+    
+    while(curr)
+    {
+        if(curr == curr->next_attribute)
+        {
+            return false;
+        }
+        curr = curr->next_attribute;
+    }
+    
+    return true;
 }
 
 Element* tag_to_element(DOM* dom, Arena* element_arena, Compiler::Tag* converted_tag, Element* target_element = NULL)
@@ -257,6 +288,8 @@ Element* tag_to_element(DOM* dom, Arena* element_arena, Compiler::Tag* converted
         prev_added_attribute = curr_added_attribute;
         
     }
+    
+    assert(CheckElementValid(added));
     
     return added;
 }
@@ -622,6 +655,8 @@ void InstanceTemplate(DOM* target_dom, Element* parent, void* array_ptr, int tem
             
         }
         
+        assert(CheckElementValid(added));
+        
         curr++;
     }
     
@@ -741,16 +776,12 @@ void FreeSubtreeObjects(Element* start, DOM* dom)
     if(dom)
     {
         Attribute* curr_attribute = start->first_attribute;
-        Attribute* last_attribute = curr_attribute;
+        Attribute* last_attribute = NULL;
         while(curr_attribute)
         {
+            assert(curr_attribute != curr_attribute->next_attribute);
             last_attribute = curr_attribute; 
             curr_attribute = curr_attribute->next_attribute;
-            DeAlloc(dom->attributes, last_attribute);
-        }
-        
-        if(last_attribute)
-        {
             DeAlloc(dom->attributes, last_attribute);
         }
         
@@ -901,4 +932,14 @@ void ClearOverrideStyle(Element* element)
 {
     DefaultStyle(&element->override_style);
     element->do_override_style = false;
+}
+
+void InvalidateEach(Element* element)
+{
+    if(element->type != ElementType::EACH)
+    {
+        return;
+    }
+    
+    element->Each.last_count = 0;
 }

@@ -277,10 +277,8 @@ LoadedFileHandle LoadPage(FILE* file, Arena* tags, Arena* templates, Arena* attr
     }
     
     uintptr_t base_tag = tags->next_address;
-    uintptr_t base_template = templates->next_address;
+    uintptr_t base_template = templates->mapped_address;
     uintptr_t base_attribute = attributes->next_address;
-    uintptr_t base_style = styles->next_address;
-    uintptr_t base_selector = selectors->next_address;
     uintptr_t base_value = values->next_address;
     
     PageFileHeader header = PageFileHeader();

@@ -31,7 +31,7 @@ struct cached_shaped_glyph
         struct
         {
             uint32_t next_glyph; 
-            uint16_t buffer_index; // Index of this glyph run into the original buffer
+            uint32_t buffer_index; // Index of this glyph run into the original buffer
             uint16_t run_length; // Length of this run (Several codepoints may be combined by harfbuzz)
         }; // For normal glyphs
         struct
@@ -90,8 +90,8 @@ struct cached_shaped_text_handle
     
     // Stuff for verifying this is our intended text and not a hash colision.
     FontHandle font;
-    uint16_t buffer_length; // Length of the original buffer
     uint16_t font_size;
+    uint32_t buffer_length; // Length of the original buffer
 };
 
 struct text_handle_table
@@ -220,7 +220,7 @@ cached_shaped_text_handle* get_cached_text_handle(text_handle_table* table, char
     
     cached_shaped_text_handle* found = &table->cached_text_handles[lookup_index];
     // Search until we find a match or run out of candidates
-    while(found->font != font || found->buffer_length != static_cast<uint16_t>(buffer_len) || found->font_size != font_size)
+    while(found->font != font || found->buffer_length != buffer_len || found->font_size != font_size)
     {
         // No more candidates
         if(!found->next_with_same_hash)
@@ -375,7 +375,7 @@ cached_shaped_text_handle* insert_cached_text_handle(text_handle_table* table, c
 
     created->hash = text_hash;
     created->font = font;
-    created->buffer_length = static_cast<uint16_t>(buffer_len);
+    created->buffer_length = buffer_len;
     created->font_size = font_size;
     
     return created;
@@ -588,8 +588,6 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     
     FT_Bitmap glyph_bitmap = slot->bitmap;
     
-    
-    // Todo(Leo): Actually implement the least recently used cache eviction rather than just running out of space!
     // Check if weve run out of space
     //assert(font_platform.cached_glyphs->next_address + sizeof(FontPlatformGlyph) < font_platform.cached_glyphs->mapped_address + font_platform.cached_glyphs->size);
     FontPlatformGlyph* added_glyph = NULL;
@@ -820,7 +818,7 @@ void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, 
             added_glyph->glyph_code = glyph_info[j].codepoint;
             
             // Dont add any sizing for newlines.
-            if(utf8_buffer[added_glyph->buffer_index] == '\n')
+            if(utf8_buffer[added_glyph->buffer_index] == '\n' || utf8_buffer[added_glyph->buffer_index] == '\r' || utf8_buffer[added_glyph->buffer_index] == '\t')
             {
                 continue;
             }

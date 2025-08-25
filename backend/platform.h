@@ -363,10 +363,10 @@ struct FontPlatformGlyph
     uint32_t codepoint;
 
     // Real values
-    int bearing_x;
-    int bearing_y;
-    int width;
-    int height;
+    float bearing_x;
+    float bearing_y;
+    float width;
+    float height;
     FontHandle font;
 };
 

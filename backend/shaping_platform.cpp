@@ -1078,7 +1078,7 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
 
     // Note(Leo): Due to the nature of us adding items to the renderque in a breadth first manner there is an interweave issue
     //            with elements that use relative or manual display. Elements have their subtrees draw calls intermixed
-    //            with the draws of their sibling's subtrees which is fine usually since elements dont overlap, accept they can
+    //            with the draws of their sibling's subtrees which is fine usually since elements dont overlap, except they can
     //            when manual/relative are used. The deffered que fixes this by allowing all the manual element's siblings to have
     //            fully drawn their subtrees before drawing its own which fixes the weaving issue. 
     void* relative_pass_memory = Alloc(context.shape_arena, (context.relative_element_count + 1)*sizeof(LayoutElement*));

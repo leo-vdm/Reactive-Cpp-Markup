@@ -582,6 +582,7 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
     
     while(curr_attribute)
     {
+        assert(curr_attribute != curr_attribute->next_attribute);
         switch(curr_attribute->type)
         {
             case(AttributeType::TEXT):
@@ -687,11 +688,6 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                     element->Each.array_ptr = binding->arr_stub_get_ptr((void*)element->context_master, element->context_index);
                 }
                 
-                if(!element->Each.array_ptr || count == 0)
-                {
-                    break;
-                }
-                
                 // Remove old array elements
                 if(element->first_child)
                 {
@@ -709,6 +705,11 @@ void runtime_evaluate_attributes(DOM* dom, PlatformControlState* controls, Eleme
                     }
                     
                     element->first_child = NULL;
+                }
+                
+                if(!element->Each.array_ptr || count == 0)
+                {
+                    break;
                 }
                 
                 // Note(Leo): adding template elements backwards since they are appended as the first child of 
@@ -1323,17 +1324,49 @@ FontPlatformShapedGlyph* PlatformGetGlyphForBufferIndex(Element* text, uint32_t 
     // Todo(Leo): Make this work with text that ISNT just the first text element of a parent
     assert(text->last_sizing->type == LayoutElementType::TEXT_COMBINED);
     
-    FontPlatformShapedGlyph* curr = text->last_sizing->TEXT_COMBINED.first_glyph;
+    FontPlatformShapedGlyph* glyphs = text->last_sizing->TEXT_COMBINED.first_glyph;
     uint32_t count = text->last_sizing->TEXT_COMBINED.glyph_count;
     
-    for(uint32_t i = 0; i < count; i++)
+    // Note(Leo): Simple binary search
+    uint32_t left = 0;
+    uint32_t right = count - 1;
+    
+    // Check starting limits
+    if(index >= glyphs->buffer_index && index < (glyphs->buffer_index + glyphs->run_length))
     {
-        if(index >= curr->buffer_index && index < (curr->buffer_index + curr->run_length))
+        return glyphs;
+    }
+    
+    if(index >= (glyphs + right)->buffer_index && index < ((glyphs + right)->buffer_index + (glyphs + right)->run_length))
+    {
+        return glyphs + right;
+    }
+    
+    // Check that out search is not out of bounds
+    if(index >= ((glyphs + right)->buffer_index + (glyphs + right)->run_length))
+    {
+        return NULL;
+    }
+    
+    while(left != right)
+    {
+        uint32_t split = left;
+        split += (right - left) >> 1; // Note(Leo): This shift replaces a div by 2
+        FontPlatformShapedGlyph* curr = glyphs + split;
+        
+        // Need to go right
+        if(index >= (curr->buffer_index + curr->run_length))
+        {
+            left = split;
+        }
+        else if(index < curr->buffer_index) // Need to go left
+        {
+            right = split;
+        }
+        else // Found it
         {
             return curr;
         }
-    
-        curr++;
     }
     
     return NULL;
