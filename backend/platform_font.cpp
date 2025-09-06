@@ -464,6 +464,7 @@ int InitializeFontPlatform(Arena* master_arena, int standard_glyph_size)
     font_platform.loaded_font_map = new std::map<std::string, loaded_font_handle*>;
     
     font_platform.shaping_buffer = hb_buffer_create();
+    hb_buffer_set_cluster_level(font_platform.shaping_buffer, HB_BUFFER_CLUSTER_LEVEL_CHARACTERS);
     //hb_buffer_pre_allocate(font_platform.shaping_buffer, Megabytes(1));
 
     // Todo(Leo): Tune these values
@@ -710,8 +711,12 @@ inline FontPlatformGlyph* plaform_get_glyph_or_raster(FontHandle font_handle, ui
     return found;
 }
 
-const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UINT_MAX }, { HB_TAG('l', 'i', 'g', 'a'), 1, 0, UINT_MAX }, { HB_TAG('c', 'l', 'i', 'g'), 1, 0, UINT_MAX } };
-
+//const hb_feature_t shaping_features[] = { { HB_TAG('k', 'e', 'r', 'n'), 1, 0, UINT_MAX }, { HB_TAG('l', 'i', 'g', 'a'), 1, 0, UINT_MAX }, { HB_TAG('c', 'l', 'i', 'g'), 1, 0, UINT_MAX } };
+const hb_feature_t shaping_features[] = {
+    { HB_TAG('k', 'e', 'r', 'n'), 1, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+    { HB_TAG('c', 'l', 'i', 'g'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+    { HB_TAG('l', 'i', 'g', 'a'), 0, HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END },
+};
 
 // Note(Leo): Area height and width are expected in pixels
 void FontPlatformShapeMixed(Arena* glyph_arena, FontPlatformShapedText* result, StringView* utf8_strings, FontHandle* font_handles, uint16_t* font_sizes, StyleColor* colors, int text_block_count, uint32_t wrapping_point)

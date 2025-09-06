@@ -29,7 +29,7 @@ void InitDOM(Arena* master_arena, DOM* target)
 }
 
 #define bound_expr(expr_context, fn_type, expr_type, union_name)                                                  \
-BoundExpression* register_bound_expr( fn_type fn, int id)                                           \
+BoundExpression* register_bound_expr(fn_type fn, int id)                                            \
 {                                                                                                   \
     BoundExpression* created = (BoundExpression*)runtime.bound_expressions->mapped_address + id;    \
     if(runtime.bound_expressions->next_address <= (uintptr_t)created)                               \
