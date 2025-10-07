@@ -405,7 +405,8 @@ void update_click_state(Element* target, PlatformControlState* controls)
 {
     target->flags &= ~is_clicked();
     
-    if((target->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP)
+    if((target->flags & is_hovered()) == 0 || controls->mouse_left_state == MouseState::UP
+        || (target->flags & is_hidden()))
     {
         target->click_state = ClickState::NONE;
         return;

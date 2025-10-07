@@ -1314,7 +1314,7 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     // Note(Leo): Swapchain image has a unique layout which we have to transfer between to use it.
     VkImageMemoryBarrier image_barrier = {};
     image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    image_barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    image_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
     image_barrier.srcQueueFamilyIndex = rendering_platform.vk_present_queue_family;
     image_barrier.dstQueueFamilyIndex = rendering_platform.vk_compute_queue_family;
@@ -1327,7 +1327,7 @@ bool vk_record_command_buffer(VkCommandBuffer buffer, PlatformWindow* window, Vk
     image_barrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     image_barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
     
-    vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &image_barrier);
+    vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &image_barrier);
     
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_COMPUTE, rendering_platform.vk_combined_pipeline);
     
@@ -1491,7 +1491,7 @@ int InitializeVulkan(Arena* master_arena, const char** required_extension_names,
     app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion = VK_API_VERSION_1_0;
     
-    VkInstanceCreateInfo create_info{};
+    VkInstanceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create_info.pApplicationInfo = &app_info;
     
