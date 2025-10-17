@@ -997,6 +997,10 @@ void* android_main(void* arguments)
     return NULL;
 }
 
+void PlatformSetWindowTitle(DOM* dom, const char* utf8_buffer, uint32_t buffer_len)
+{
+    
+}
 
 void PlatformRegisterDom(void* dom)
 {

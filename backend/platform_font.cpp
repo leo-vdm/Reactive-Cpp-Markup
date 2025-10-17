@@ -637,7 +637,33 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
     // Dont upload glyphs with no size
     if(added_glyph->width && added_glyph->height)
     {
-        RenderplatformUploadGlyph(glyph_bitmap.buffer, glyph_bitmap.width, glyph_bitmap.rows, GlyphSlot(added_glyph));    
+        void* bitmap = glyph_bitmap.buffer;
+        int glyph_width = added_glyph->width;
+        int glyph_height = added_glyph->height;
+        bool is_truncated = false;
+        
+        if(added_glyph->width > FontPlatformGetGlyphSize() || added_glyph->height > FontPlatformGetGlyphSize())
+        {
+            // Truncate our bitmap
+            is_truncated = true;
+            glyph_width = MIN(added_glyph->width, FontPlatformGetGlyphSize());
+            glyph_height = MIN(added_glyph->height, FontPlatformGetGlyphSize());
+            
+            bitmap = AllocScratch(added_glyph->width*added_glyph->height);
+            for(int row = 0; row < glyph_height; row++)
+            {
+                memcpy((void*)(((uintptr_t)bitmap)+(row*glyph_width)), &glyph_bitmap.buffer[glyph_bitmap.width * row], glyph_width);
+            }
+        }
+    
+        RenderplatformUploadGlyph(bitmap, glyph_width, glyph_height, GlyphSlot(added_glyph));    
+    
+        if(is_truncated)
+        {
+            added_glyph->width = glyph_width;
+            added_glyph->height = glyph_height;
+            DeAllocScratch(bitmap);
+        }
     }
     
     #if 0
@@ -646,7 +672,7 @@ FontPlatformGlyph* FontPlatformRasterizeGlyph(FontHandle font_handle, uint32_t g
         for(int ix = 0; ix < glyph_bitmap.width; ix++)
         {
             int c = (int) glyph_bitmap.buffer[iy * glyph_bitmap.width + ix];
-            std::cout << (c == 255 ? '#' : '`');
+            std::cout << (c > 128 ? '#' : '`');
         }
         std::cout << std::endl;
     }

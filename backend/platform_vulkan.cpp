@@ -2219,6 +2219,13 @@ bool vk_create_input_buffer(PlatformWindow* window)
 
 void RenderplatformUploadGlyph(void* glyph_data, int glyph_width, int glyph_height, int glyph_slot)
 {
+    #if 0
+    if(glyph_width > FontPlatformGetGlyphSize() || glyph_height > FontPlatformGetGlyphSize())
+    {
+        printf("Glyph too large, truncation is occuring!\n");
+    }
+    #endif
+
     // Note(Leo): This depends on glyph pixels being 1 byte 
     int glyph_size = glyph_width * glyph_height * sizeof(char);
     assert(glyph_size);

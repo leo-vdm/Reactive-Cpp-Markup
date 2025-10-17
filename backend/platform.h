@@ -167,6 +167,8 @@ void PlatformPreviewText(Arena* shape_arena, Element* first_text, Measurement wi
 void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len);
 char* PlatformGetTextClipboard(uint32_t* buffer_len); // UTF8 on the scratch arena
 
+void PlatformSetWindowTitle(DOM* dom, const char* utf8_buffer, uint32_t buffer_len);
+
 extern float SCROLL_MULTIPLIER;
 #define PREFETCH_INTRINSIC(...)
 

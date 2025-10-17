@@ -564,7 +564,10 @@ int main()
         END_TIMED_BLOCK(TICK_AND_BUILD);
         
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);
-        RenderplatformDrawWindow(curr_window, final_renderque);
+        if(curr_window->width && curr_window->height)
+        {
+            RenderplatformDrawWindow(curr_window, final_renderque);
+        }
         END_TIMED_BLOCK(DRAW_WINDOW);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);
@@ -590,6 +593,25 @@ void PlatformRegisterDom(void* dom)
     platform.first_window = created_window;
 }
 
+void PlatformSetWindowTitle(DOM* dom, const char* utf8_buffer, uint32_t buffer_len)
+{
+    PlatformWindow* curr_window = platform.first_window;
+    while(curr_window)
+    {
+        if(curr_window->window_dom == dom)
+        {
+            char* terminated_name = (char*)AllocScratch(buffer_len + 1, zero());
+            memcpy(terminated_name, utf8_buffer, buffer_len);
+
+            SetWindowTextA(curr_window->window_handle, terminated_name);
+
+            DeAllocScratch(terminated_name);
+            break;
+        }
+        
+        curr_window = curr_window->next_window;
+    }
+}
 
 void PlatformSetTextClipboard(const char* utf8_buffer, uint32_t buffer_len)
 {

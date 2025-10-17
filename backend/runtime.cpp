@@ -201,10 +201,10 @@ bool RuntimeInstanceMainPage()
 
     DOM* main_dom = (DOM*)Alloc(runtime.doms, sizeof(DOM), zero());    
     InitDOM(runtime.master_arena, main_dom);
+    PlatformRegisterDom((void*)main_dom);
     
     SwitchPage(main_dom, main_page->file_id);
     
-    PlatformRegisterDom((void*)main_dom);
     return true;
 }
 

@@ -840,4 +840,24 @@ void PlatformRegisterDom(void* dom)
 }
 
 
+void PlatformSetWindowTitle(DOM* dom, const char* utf8_buffer, uint32_t buffer_len)
+{
+    PlatformWindow* curr_window = platform.first_window;
+    while(curr_window)
+    {
+        if(curr_window->window_dom == dom)
+        {
+            char* terminated_name = (char*)AllocScratch(buffer_len + 1, zero());
+            memcpy(terminated_name, utf8_buffer, buffer_len);
+
+            XStoreName(x_display, curr_window->window_handle, terminated_name);
+
+            DeAllocScratch(terminated_name);
+            break;
+        }
+        
+        curr_window = curr_window->next_window;
+    }
+}
+
 #endif
