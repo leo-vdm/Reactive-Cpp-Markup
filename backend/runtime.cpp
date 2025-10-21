@@ -956,6 +956,19 @@ void sanitize_scrollable(Element* target)
     }
 }
 
+void SetScroll(Element* element, float vertical, float horizontal)
+{
+    if(!element)
+    {
+        return;
+    }
+    
+    element->scroll.y = 0.0f;
+    element->scroll.x = 0.0f;
+    
+    scroll_element({horizontal, vertical}, element);
+}
+
 void FocusElement(DOM* dom, Element* old_focused, Element* new_focused)
 {
     
@@ -1136,7 +1149,8 @@ Arena* RuntimeTickAndBuildRenderque(Arena* renderque, DOM* dom, PlatformControlS
     //            will never underestimate so its ok.
     int element_count = (dom->elements->next_address - dom->elements->mapped_address)/sizeof(Element);
 
-    BEGIN_TIMED_BLOCK(PLATFORM_SHAPE);    
+    BEGIN_TIMED_BLOCK(PLATFORM_SHAPE);
+
     Arena* result = ShapingPlatformShape(root_element, renderque, element_count, window_width, window_height);
     END_TIMED_BLOCK(PLATFORM_SHAPE);
     

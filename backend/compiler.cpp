@@ -3,6 +3,8 @@
 #include <map>
 
 #define STRING_VIEW_IMPLEMENTATION 1
+#define SIMD_IMPLEMENTATION 1
+#include "simd.h"
 #include "compiler.h"
 using namespace Compiler;
 #include "file_system.h"

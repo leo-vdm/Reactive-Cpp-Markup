@@ -85,7 +85,6 @@ void SavePage(AST* saved_tree, LocalStyles* saved_styles, const char* file_name,
         created_template->first_tag_index = tag_index_offset + 1; // Todo(Leo): Is this correct??
     
         curr_tag = (Tag*)curr_template->tags.mapped_address;
-        SavedTag added_tag;
         while(curr_tag->tag_id != 0)
         {
             added_tag = {};

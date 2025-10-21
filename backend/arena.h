@@ -73,6 +73,8 @@ void FreeArena(Arena* arena); // Free the memory region associated with an arena
 
 void InitScratch(int reserved_size, uint64_t flags = 0);
 
+bool CompareArenaContents(Arena* first, Arena* second);
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__) 
 extern uintptr_t WINDOWS_PAGE_SIZE;
 extern uintptr_t WINDOWS_PAGE_MASK;

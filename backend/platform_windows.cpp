@@ -1,6 +1,8 @@
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 #define INSTRUMENT_IMPLEMENTATION 1
+#define SIMD_IMPLEMENTATION 1
+#include "simd.h"
 #include "platform.h"
 #include <windows.h>
 #include <windowsx.h>
@@ -433,6 +435,8 @@ int main()
     platform = {};
     InitScratch(sizeof(char)*1000000);
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
+
+    SimdDetectSupport();
     
     SCROLL_MULTIPLIER = 30; 
     
@@ -448,7 +452,6 @@ int main()
     window_class_atom = RegisterClassW(&window_class);
     
     platform.cursors[0] = LoadCursor(NULL, IDC_ARROW);
-    
     
     InitializeFontPlatform(&(platform.master_arena), 0);
     
@@ -516,7 +519,7 @@ int main()
     renderques[1] = (Arena*)Alloc(runtime.master_arena, sizeof(Arena), zero());
     *renderques[0] = CreateArena(sizeof(Element) * 1000000, sizeof(Element));
     *renderques[1] = CreateArena(sizeof(Element) * 1000000, sizeof(Element));
-    bool used_renderque = false;
+    uint32_t used_renderque = 0;
     
     PlatformWindow* curr_window = platform.first_window;
     while(true)
@@ -525,7 +528,7 @@ int main()
         if(!curr_window)
         {
             curr_window = platform.first_window;
-            used_renderque = !used_renderque;
+            used_renderque = 1 >> used_renderque;
             // Reset the arena we will use
             ResetArena(renderques[used_renderque]);
         }
@@ -566,13 +569,24 @@ int main()
         BEGIN_TIMED_BLOCK(DRAW_WINDOW);
         if(curr_window->width && curr_window->height)
         {
-            RenderplatformDrawWindow(curr_window, final_renderque);
+            // Renderques are the same so skip rendering
+            if(curr_window->last_renderque && CompareArenaContents(curr_window->last_renderque, final_renderque))
+            {
+                // Todo(Leo): Figure out a more dynamic way of deciding how much we wanna wait!
+                Sleep(10);
+            }
+            else
+            {
+                RenderplatformDrawWindow(curr_window, final_renderque);
+            }
         }
         END_TIMED_BLOCK(DRAW_WINDOW);
         
         RuntimeClearTemporal((DOM*)curr_window->window_dom);
         
+        curr_window->last_renderque = final_renderque;
         curr_window = curr_window->next_window;
+        
         END_TIMED_BLOCK(PLATFORM_LOOP);
         
         //DUMP_TIMINGS();

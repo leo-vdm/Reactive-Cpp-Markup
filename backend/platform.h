@@ -87,6 +87,7 @@ struct PlatformControlState
 struct shared_window 
 {
     void* window_dom;
+    Arena* last_renderque;
 
     VkCommandBuffer vk_command_buffer;
     VkSurfaceKHR vk_window_surface;
@@ -242,6 +243,7 @@ void linux_vk_create_window_surface(PlatformWindow* window, Display* x_display);
 
 #include <dlfcn.h>
 //#include <android_native_app_glue.h>
+#include <unistd.h>
 #include <android/native_window_jni.h>
 #include <android/asset_manager_jni.h>
 #include <android/log.h>

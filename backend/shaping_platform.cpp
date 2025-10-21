@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "simd.h"
 
 struct shaping_context 
 {
@@ -1110,11 +1111,14 @@ Arena* ShapingPlatformShape(Element* root_element, Arena* shape_arena, int eleme
     
     // +1 to leave space for alignment
     // Note(Leo): This doesnt take culling into account so it will over-estimate the actual # of renderque objects
-    int renderque_length = (context.element_count + context.glyph_count + context.image_tile_count + 1);
-    void* final_renderque_memory = Alloc(context.shape_arena, renderque_length*sizeof(combined_instance));
+    uint32_t renderque_size = (context.element_count + context.glyph_count + context.image_tile_count + 1)*sizeof(combined_instance);
+    // Note(Leo): Need to leave space for padding when we compare renderques, max we need is the size of 1 simd register.
+    renderque_size += SIMD_WIDTH * sizeof(float);
+    
+    void* final_renderque_memory = Alloc(context.shape_arena, renderque_size);
     
     Arena* final_renderque = (Arena*)align_mem(Alloc(context.shape_arena, 2*sizeof(Arena)), Arena); // +1 for alignment
-    *final_renderque = CreateArenaWith(align_mem(final_renderque_memory, combined_instance), renderque_length*sizeof(combined_instance), sizeof(combined_instance));
+    *final_renderque = CreateArenaWith(align_mem(final_renderque_memory, combined_instance), renderque_size - sizeof(combined_instance), sizeof(combined_instance));
     context.final_renderque = final_renderque;
     
     while(visit_count || deferred_relative_count || deferred_manual_count)
