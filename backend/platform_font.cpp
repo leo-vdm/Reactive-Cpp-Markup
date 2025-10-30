@@ -503,11 +503,22 @@ inline loaded_font_handle* platform_get_font(FontHandle handle)
     return ((loaded_font_handle*)(font_platform.loaded_fonts->mapped_address)) + (handle - 1);
 }
 
+void explore_face_from_mem(void* font_binary, uint64_t binary_length)
+{
+    printf("Exploring Font Face\n");
+    FT_Face temp = {};
+    int error;
+    error = FT_New_Memory_Face(font_platform.freetype, (FT_Byte*)font_binary, binary_length, -1, &temp);
+    
+    printf("Face has %d sub-faces\n", temp->num_faces);
+}
+
 void load_face_from_mem(const char* font_name, void* font_binary, uint64_t binary_length)
 {
     loaded_font_handle* created_font = (loaded_font_handle*)Alloc(font_platform.loaded_fonts, sizeof(loaded_font_handle));
     
     int error;
+    explore_face_from_mem(font_binary, binary_length);
     error = FT_New_Memory_Face(font_platform.freetype, (FT_Byte*)font_binary, binary_length, 0, &(created_font->face));
     
     if(error)

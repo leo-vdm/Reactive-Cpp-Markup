@@ -426,6 +426,8 @@ KeyState GetKeyState(uint8_t key_code)
 
 int main()
 {
+    initialize_arena_debug_system();
+    
     SYSTEM_INFO sys_info = {};
     GetSystemInfo(&sys_info);
 
@@ -434,6 +436,7 @@ int main()
 
     platform = {};
     InitScratch(sizeof(char)*1000000);
+    
     platform.master_arena = CreateArena(1000*sizeof(Arena), sizeof(Arena));
 
     SimdDetectSupport();
@@ -573,7 +576,7 @@ int main()
             if(curr_window->last_renderque && CompareArenaContents(curr_window->last_renderque, final_renderque))
             {
                 // Todo(Leo): Figure out a more dynamic way of deciding how much we wanna wait!
-                Sleep(10);
+                Sleep(6);
             }
             else
             {
@@ -590,6 +593,7 @@ int main()
         END_TIMED_BLOCK(PLATFORM_LOOP);
         
         //DUMP_TIMINGS();
+        print_water_levels();
     }
     
     return 0;

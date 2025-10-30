@@ -372,6 +372,26 @@ void shape_first_pass(shaping_context* context, LayoutElement* parent)
                 wrapping_point = 0;
             }
             
+            Measurement curr_padding = parent->sizing.width.padding1;
+            for(int i = 0; i < 2; i++)
+            {
+                if(wrapping_point && curr_padding.size)
+                {
+                    if(curr_padding.type == MeasurementType::PIXELS)
+                    {
+                        wrapping_point -= (uint32_t)curr_padding.size;
+                    }
+                    else
+                    {
+                        assert(curr_padding.type == MeasurementType::PERCENT);
+                        
+                        wrapping_point -= (uint32_t)(curr_padding.size * (float)wrapping_point);
+                    }
+                }
+                
+                curr_padding = parent->sizing.width.padding2;
+            }
+            
             // Shape text
             FontPlatformShapedText result = {};
             BEGIN_TIMED_BLOCK(TEXT_SHAPE);

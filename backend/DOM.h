@@ -673,4 +673,4 @@ void SetWidth(Element* element, Measurement sizing);
 void SetFont(Element* element, FontHandle font);
 void SetFontSize(Element* element, uint16_t size);
 void SetScroll(Element* element, float vertical, float horizontal);
-void InvalidateEach(Element* element); // Flags an each element to make it regenerate its children
+void InvalidateEach(Element* element, DOM* dom); // Clears children and flags the each to have them re-created

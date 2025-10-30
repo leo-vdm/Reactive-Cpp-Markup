@@ -140,6 +140,8 @@ int main(int argc, char* argv[])
     WINDOWS_PAGE_MASK = WINDOWS_PAGE_SIZE - 1;
     #endif
 
+    initialize_arena_debug_system();
+
     // Initialize scratch arena
     InitScratch(sizeof(char)*100000);
     

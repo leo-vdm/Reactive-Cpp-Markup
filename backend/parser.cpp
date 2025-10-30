@@ -914,7 +914,7 @@ Attribute* parse_attribute_expr(AST* target, Tag* parent_tag, Token* attribute_s
         
         if(curr_token->type != TokenType::QUOTE)
         {
-            printf("Expected decleration of attribute value!");
+            printf("Expected decleration of attribute value!\n");
             return NULL;
         }
         
@@ -1432,7 +1432,8 @@ void parse_style_expr(Style* target, Arena* values_arena)
     }
     if(!expect_eat(TokenType::SEMI_COLON))
     {
-        printf("Expected a ; after style decleration!");
+        printf("Expected a ; after style decleration!\n");
+        printf("Near field %.*s\n", stripped_field.len, stripped_field.value);
     }
     
 }

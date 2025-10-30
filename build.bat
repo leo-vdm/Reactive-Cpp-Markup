@@ -17,7 +17,7 @@ set src_dir=..\backend
 cl -arch:AVX2 /MP12 /Zi /Od /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
 
 :: Release build
-::cl -arch:AVX2 /MP12 /O2t /GL /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
+::cl /DNDEBUG -arch:AVX2 /MP12 /O2t /GL /I. /I%dep_dir%\vulkan\Vulkan-Headers-1.4.317\include /I%dep_dir%\freetype\freetype-2.13.3\include -DFT2_BUILD_LIBRARY /EHsc /c %src_dir%\freetype_module.cpp %src_dir%\compiler.cpp %src_dir%\lexer.cpp %src_dir%\parser.cpp %src_dir%\arena.cpp %src_dir%\arena_string.cpp %src_dir%\prepass.cpp %src_dir%\codegen.cpp %src_dir%\runtime.cpp %src_dir%\DOM.cpp %src_dir%\file_system.cpp %src_dir%\platform_windows.cpp %src_dir%\platform_vulkan.cpp %src_dir%\platform_font.cpp %src_dir%\harfbuzz_module.cpp %src_dir%\shaping_platform.cpp 
 
 IF %ERRORLEVEL% NEQ 0 (
 	echo:
@@ -67,6 +67,7 @@ IF %ERRORLEVEL% NEQ 0 (
 	EXIT /B
 )
 
+::LINK /ENTRY:mainCRTStartup /SUBSYSTEM:windows /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib /OUT:test.exe
 LINK /DEBUG:FULL *.obj *.lib user32.lib Gdi32.lib /OUT:test.exe
 
 IF %ERRORLEVEL% NEQ 0 (

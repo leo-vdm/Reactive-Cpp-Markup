@@ -6,6 +6,93 @@
 #include "arena.h"
 #include "simd.h"
 
+#if ARENA_DEBUG_TOOLS
+Arena water_levels = Arena();
+uint32_t debug_arena_count = 0;
+
+struct debug_arena_record
+{
+    uintptr_t mapped_address;
+    uintptr_t last_furthest_allocated;
+    uintptr_t new_furthest_allocated;
+};
+
+uint32_t register_arena_to_debug_system(uintptr_t mapped_address, uintptr_t furthest_allocated)
+{
+    // Note(Leo): When not allocating off the free list we need to increase how many arenas we whill loop over
+    if(!water_levels.first_free.next_free)
+    {
+        debug_arena_count++;
+    }
+    
+    debug_arena_record* created = (debug_arena_record*)Alloc(&water_levels, sizeof(debug_arena_record), no_water_level());
+    created->mapped_address = mapped_address;
+    created->last_furthest_allocated = furthest_allocated;
+    created->new_furthest_allocated = furthest_allocated;
+    return ((((uintptr_t)created) - ((uintptr_t)water_levels.mapped_address)) / sizeof(debug_arena_record));
+}
+
+void initialize_arena_debug_system()
+{
+    water_levels = CreateArena(1000*sizeof(debug_arena_record), sizeof(debug_arena_record), no_water_level());
+    // Note(Leo): We reserve arena 0 for arenas that get made with CreateArenaWith (so we can ignore them)
+    register_arena_to_debug_system(0, 0);
+}
+
+void remove_arena_from_debug_system(uint32_t index)
+{
+    // Note(Leo): Arena 0 is reserved
+    if(index == 0)
+    {
+        return;
+    }
+
+    debug_arena_record* base = (debug_arena_record*)water_levels.mapped_address;
+    base[index] = {};
+    DeAlloc(&water_levels, base + index);
+}
+
+void arena_debug_system_touch(uint32_t index, Arena* arena)
+{
+    debug_arena_record* base = (debug_arena_record*)water_levels.mapped_address;
+    base[index].new_furthest_allocated = arena->next_address > base[index].new_furthest_allocated ? arena->next_address : base[index].new_furthest_allocated;
+}
+
+void print_water_levels()
+{
+    debug_arena_record* base = (debug_arena_record*)water_levels.mapped_address;
+    bool printed_header = false;
+    for(int i = 0; i < debug_arena_count; i++)
+    {
+        if(!base[i].last_furthest_allocated)
+        {
+            // This arena was removed
+            //printf("Arena %d, DEAD\n", i);
+        }
+        else
+        {
+            
+            int64_t curr_fill = base[i].new_furthest_allocated - base[i].mapped_address;
+            int64_t delta_fill = base[i].new_furthest_allocated - base[i].last_furthest_allocated;
+            base[i].last_furthest_allocated = base[i].new_furthest_allocated;
+            if(delta_fill)
+            {
+                if(!printed_header)
+                {
+                    printf("\n==Arena Levels==\n");
+                    printed_header = true;
+                }
+                printf("Arena %d, Max: %I64d, Delta Max: %I64d\n", i, curr_fill, delta_fill);
+            }
+        }
+    }
+}
+
+#else
+void initialize_arena_debug_system(){}
+void print_water_levels(){}
+#endif
+
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
 uintptr_t WINDOWS_PAGE_MASK;
 uintptr_t WINDOWS_PAGE_SIZE;
@@ -19,6 +106,13 @@ Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags)
     VirtualAlloc((void*)new_arena.next_address, WINDOWS_PAGE_SIZE, MEM_COMMIT, PAGE_READWRITE);
     new_arena.furthest_committed = new_arena.next_address + WINDOWS_PAGE_SIZE;
     
+    #if ARENA_DEBUG_TOOLS
+    if(!(flags & no_water_level()))
+    {
+        new_arena.id = register_arena_to_debug_system(new_arena.next_address, new_arena.furthest_committed);
+    }
+    #endif
+    
     return new_arena;
 }
 
@@ -26,12 +120,17 @@ Arena CreateArenaWith(void* memory_block, int memory_block_size, int alloc_size,
 {
     Arena new_arena = Arena(memory_block, memory_block_size, alloc_size, flags);
 
+    #if ARENA_DEBUG_TOOLS
+    new_arena.id = 0;
+    #endif
+
     new_arena.furthest_committed = new_arena.next_address + memory_block_size;
     return new_arena;
 }
 
 void* Alloc(Arena* arena, int size, uint64_t flags)
 {
+
     #ifndef NDEBUG
     if(size == 0)
     {
@@ -63,6 +162,12 @@ void* Alloc(Arena* arena, int size, uint64_t flags)
     
     // Overflow
     assert(arena->next_address <= arena->mapped_address + arena->size);
+    #if ARENA_DEBUG_TOOLS
+    if(!(flags & no_water_level()))
+    {
+        arena_debug_system_touch(arena->id, arena);
+    }
+    #endif
     
     if(flags & no_zero())
     {
@@ -90,13 +195,14 @@ void ResetArena(Arena* arena)
     
     arena->next_address = arena->mapped_address;
     arena->first_free = {};
-    
 }
 
 void FreeArena(Arena* arena)
 {
     VirtualFree((void*)arena->mapped_address, arena->size, MEM_RELEASE);
-
+    #if ARENA_DEBUG_TOOLS
+    remove_arena_from_debug_system(arena->id);
+    #endif
 }
 
 #elif defined(__linux__) && !defined(_WIN32)
@@ -226,7 +332,6 @@ void InitScratch(int reserved_size, uint64_t flags)
 {
     scratch_arena = CreateArena(reserved_size, 0, flags);
 }
-
 
 // Returns false if they are not equal and true if they are
 bool CompareArenaContents(Arena* first, Arena* second)

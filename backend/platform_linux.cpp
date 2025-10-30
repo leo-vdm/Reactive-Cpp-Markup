@@ -822,8 +822,7 @@ int main()
             if(curr_window->last_renderque && CompareArenaContents(curr_window->last_renderque, final_renderque))
             {
                 // Todo(Leo): Figure out a more dynamic way of deciding how much we wanna wait!
-                usleep(10000); // Note(Leo): 10ms
-                printf("Using last frame\n");
+                usleep(6000); // Note(Leo): 10ms
             }
             else
             {

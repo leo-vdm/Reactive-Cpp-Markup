@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #pragma once
+#define ARENA_DEBUG_TOOLS 0
 
 struct FreeBlock
 {
@@ -18,7 +19,10 @@ struct Arena
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__)
     uintptr_t furthest_committed; // The end of the furthest page we have commited
-#endif 
+#endif
+#if ARENA_DEBUG_TOOLS
+    uint32_t id;
+#endif
         
     // alloc_size must be larger than the size of freeblock! (>=8 bytes)    
     Arena(void* position, int size, int alloc_size, uint64_t flags)
@@ -47,6 +51,8 @@ struct Arena
 
 #define no_zero() (uint64_t)(1 << 1)
 
+#define no_water_level() (uint64_t)(1 << 2)
+
 extern Arena scratch_arena;
 
 Arena CreateArena(int reserved_size, int alloc_size, uint64_t flags = 0);
@@ -74,6 +80,9 @@ void FreeArena(Arena* arena); // Free the memory region associated with an arena
 void InitScratch(int reserved_size, uint64_t flags = 0);
 
 bool CompareArenaContents(Arena* first, Arena* second);
+
+void initialize_arena_debug_system();
+void print_water_levels();
 
 #if defined(_WIN32) || defined(WIN32) || defined(WIN64) || defined(__CYGWIN__) 
 extern uintptr_t WINDOWS_PAGE_SIZE;

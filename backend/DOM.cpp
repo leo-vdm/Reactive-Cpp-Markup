@@ -934,7 +934,7 @@ void ClearOverrideStyle(Element* element)
     element->do_override_style = false;
 }
 
-void InvalidateEach(Element* element)
+void InvalidateEach(Element* element, DOM* dom)
 {
     if(element->type != ElementType::EACH)
     {
@@ -942,4 +942,23 @@ void InvalidateEach(Element* element)
     }
     
     element->Each.last_count = 0;
+    
+    // Remove old array elements
+    if(element->first_child)
+    {
+        Element* prev_freed = element->first_child;
+        Element* next_freed = element->first_child->next_sibling;
+        
+        while(prev_freed)
+        {
+            FreeSubtreeObjects(prev_freed, dom);
+            prev_freed = next_freed;
+            if(next_freed)
+            {
+                next_freed = next_freed->next_sibling;
+            }
+        }
+        
+        element->first_child = NULL;
+    }
 }
