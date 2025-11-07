@@ -1,0 +1,139 @@
+... Some CPP file
+
+int count;
+Style blah;
+
+main()
+{
+    // CAPTURE_PLATFORM_EVENT_LOOP tells the platform to handle the win32/x11/android event queue rather than us doing it
+    // CREATE_EVENT_THREAD is for win32 and causes the platform to spin up a thread where it blocks on GetMessage()
+    // the platform will also create windows on this thread so that their messages go to it. (this is all so that when
+    // the window is resized the main thread doesnt get blocked which is what windows likes to do)
+    
+    // If CAPTURE_PLATFORM_EVENT_LOOP is specified the user uses GetPlatformEvent() to get events from the last frame, otherwise
+    // they must use the normal platform specific way of getting events and they must use PassPlatformEvent() for events they want
+    // the platform layer to see
+    
+    InitializeGuiPlatform(CAPTURE_PLATFORM_EVENT_LOOP | CREATE_EVENT_THREAD);
+    InitializeVulkanRenderer(); // Maybe this could optinally accept arguments like a device context to piggyback off of
+                                // if the user wants to initialize and manage vulkan themselves
+
+    // platform code
+    PlatormWindow* window = CreatePlatformWindow(RENDERER_VULKAN, w=1920, h=1080);
+
+    GuiContext* context = CreateGuiContext(win32_process_handle?, buffer_size, backing_buffer or NULL);
+    #PushContext(context)
+    
+    // No specific "root" element, just a normal div that the user creates and gives a fixed size. This means that they are responsible for keeping track of it!
+    Style root_size = {w={1920, PX}, h={1080, PX}}
+    ElementH root = #m {
+        vdiv(s=&root_size)
+    }
+
+    // Main loop
+    while(true)
+    {
+        // Note(Leo): Events should be handled before creating UI
+        //            Optionally if we pass a window we only get its events
+        Event* e = GetPlatformEvent(window);
+        while(e)
+        {
+            ... user handles the events that they want to ...
+            
+            Event* e = GetPlatformEvent(window);
+        }
+        
+        // Now do our normal code with the mixed in UI code!
+        ContextNextFrame(context); // Indicate a new frame
+        
+        do_my_thing(...., context, root);
+        
+        // Now that our UI is built we just need to render it
+        RenderQueue* renderqueue = PlatformBuildRenderque(context, root); // Note(Leo): Doesnt do any shaping, the user chooses when/what to shape
+        
+        // Window was created with vulkan so it will be automatically used, we can also make a RendererDrawToTarget() function
+        // that can accept different render targets like CPU/Vulkan buffers rather than drawing directly into the window
+        RendererDrawToWindow(context, window, renderqueue); 
+        
+        PlatformWaitForSync(window); // we no longer use a blocking API in vulkan but instead manually wait to control our framerate 
+    }
+}
+
+do_my_thing(others args.., GuiContext* context, ElementH parent)
+{
+    #PushContext(context)
+    
+    ElementH container = #m {
+        vdiv(s=&blah)
+        { <-- brackets are used to contain child elements. 
+            text_s("Press this!") <-- if an element doesnt have any children it doesnt need brackets
+                                      text_s is for static text and doesnt do a copy, unlike text which does a copy each time (to do fomatting)
+        }
+    };
+    
+    for(int i = 0; i < count; i++)
+    {   
+        ElementH button = #m {
+            hdiv(s=&blah)
+            {
+                text("My thing %d", count) <-- Text works like Sprintf with the buffer being auto-allocated
+            }
+        };
+    
+        ID(button, GUID(i, "counter")); <-- ID sets a cross-frame id for an element (required to find clicks). GUID takes variable arguments and generates a hash/id for an element
+        
+        if(Clicked(button))
+        {
+            count++;
+        }
+        
+        Parent(container, button, C_LAST);
+    }
+    
+    
+    Parent(parent, container);   
+}
+
+// Generated
+do_my_thing(others args.., GuiContext context, ElementH parent)
+{
+    // #PushContext(context) // Makes the lib use context for the local scope
+    /*
+    ElementH container = #m {
+        vdiv(s=&blah)
+        {
+            text_s("Press this!")
+        }
+    };
+    */
+    // Note(Leo): The child element gets allocated before its parent thus it cant have a ref to its parent
+    ElementH container = VDIV(co=context, s=&blah, ch=TEXT(v="Press this!", co=context), sb=NULL); // Text here was static so no need to allocate it using FORMAT_TEXT
+    
+    for(int i = 0; i < count; i++)
+    {   
+        /*
+        ElementH button = #m {
+            hdiv(s=&blah)
+            {
+                text("My thing %d", count)
+            }
+        };
+        */
+        ElementH button = HDIV(co=context, s=&blah, ch=TEXT(v=FORMAT_TEXT(context, "My thing %d", count), co=context); // FORMAT_TEXT is the custom sprintf that allocates onto an arena in context
+        
+        // Some kinda macro expansion    
+        ID(button, GUID(i, "counter"));
+        
+        if(Clicked(button))
+        {
+            count++;
+        }
+        
+        Parent(container, button, C_LAST);
+    }
+    
+    
+    Parent(parent, container);
+    
+    // Lib automatically pops the set context when scope ends
+}

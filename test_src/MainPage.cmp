@@ -23,6 +23,9 @@ struct MainPage : Page
     
     void PageMain(DOM* dom)
     {
+        const char* window_name = "Hello There!";
+        PlatformSetWindowTitle(dom, window_name, strlen(window_name));
+        
         printf("Hello from page main!\n");
         count = 0;
         
